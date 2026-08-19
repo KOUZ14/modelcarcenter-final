@@ -1,0 +1,3 @@
+import type { Metadata } from "next"; import { SiteHeader } from "@/components/site-header"; import { SiteFooter } from "@/components/site-footer"; import { config } from "@/lib/config";
+export const metadata: Metadata = { title: "Contact" };
+export default function Page(){return <main><SiteHeader/><div className="inner-page shell contact-page"><p className="eyebrow">Support</p><h1>How can we help?</h1><p>For order support, include your Model Car Center order number. For a Model Hunt, include its reference code.</p><a className="button dark" href={`mailto:${config.supportEmail}`}>Email {config.supportEmail}</a></div><SiteFooter/></main>}
