@@ -8,6 +8,13 @@
       "when": 1787115765392,
       "tag": "0000_rapid_madame_masque",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1787148925058,
+      "tag": "0001_spicy_prism",
+      "breakpoints": true
     }
   ]
 }

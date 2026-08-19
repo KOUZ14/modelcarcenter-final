@@ -106,6 +106,7 @@ async function finalizePaidCheckout(event: StripeEvent, session: StripeCheckoutS
       shippingCents: checkoutReservations.shippingCents,
       platformFeeCents: checkoutReservations.platformFeeCents,
       currency: checkoutReservations.currency,
+      buyerUserId: checkoutReservations.buyerUserId,
       sellerName: sellers.storeName,
       sellerEmail: sellers.contactEmail,
     })
@@ -155,11 +156,11 @@ async function finalizePaidCheckout(event: StripeEvent, session: StripeCheckoutS
     d1.prepare(`UPDATE checkout_reservations SET status = 'completed', updated_at = CURRENT_TIMESTAMP
       WHERE id = ? AND status = 'pending'`).bind(reservationId),
     d1.prepare(`INSERT INTO orders
-      (id, order_number, seller_id, stripe_checkout_session_id, stripe_payment_intent_id, stripe_charge_id,
+      (id, order_number, seller_id, buyer_user_id, stripe_checkout_session_id, stripe_payment_intent_id, stripe_charge_id,
        buyer_email, currency, subtotal_cents, shipping_cents, platform_fee_cents, tax_cents, total_cents,
        payment_status, fulfillment_status, buyer_name, shipping_address, paid_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'paid', 'unfulfilled', ?, ?, CURRENT_TIMESTAMP)`)
-      .bind(orderId, orderNumber, reservation.sellerId, session.id, intent, charge, buyerEmail,
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'paid', 'unfulfilled', ?, ?, CURRENT_TIMESTAMP)`)
+      .bind(orderId, orderNumber, reservation.sellerId, reservation.buyerUserId, session.id, intent, charge, buyerEmail,
         session.currency ?? reservation.currency, reservation.subtotalCents, reservation.shippingCents,
         reservation.platformFeeCents, taxCents, totalCents, shipping.name ?? "", JSON.stringify(shipping)),
   );

@@ -116,6 +116,40 @@ export function makeReferenceCode(now = new Date(), random = crypto.randomUUID()
   return `HUNT-${date}-${random.replaceAll("-", "").slice(0, 6).toUpperCase()}`;
 }
 
+export const collectorListingConditions = [
+  "new_sealed",
+  "new_opened",
+  "displayed",
+  "used_excellent",
+  "used_good",
+  "used_fair",
+] as const;
+
+export function parseCollectorListing(payload: Record<string, unknown>) {
+  const condition = cleanText(payload.condition, 40);
+  if (!collectorListingConditions.includes(condition as (typeof collectorListingConditions)[number])) {
+    throw new ValidationError("Choose a supported listing condition.");
+  }
+  return {
+    title: requiredString(payload.title, "title", 200),
+    description: requiredString(payload.description, "description", 4_000),
+    vehicleMake: requiredString(payload.vehicleMake, "vehicleMake", 100),
+    vehicleModel: requiredString(payload.vehicleModel, "vehicleModel", 120),
+    vehicleYear: cleanText(payload.vehicleYear, 20) || null,
+    scale: requiredString(payload.scale, "scale", 30),
+    modelManufacturer: requiredString(payload.modelManufacturer, "modelManufacturer", 100),
+    color: cleanText(payload.color, 80) || null,
+    condition: condition as (typeof collectorListingConditions)[number],
+    priceCents: moneyToCents(payload.price, "price"),
+    inventoryQuantity: integer(payload.quantity, "quantity", 1, 100),
+    shippingCents: moneyToCents(payload.shippingPrice ?? "0", "shipping price"),
+    sellerDisplayName: requiredString(payload.sellerDisplayName, "sellerDisplayName", 120),
+    sellerDescription: cleanText(payload.sellerDescription, 1_000),
+    shippingOriginCountry: requiredString(payload.shippingOriginCountry || "US", "shippingOriginCountry", 2).toUpperCase(),
+    shippingOriginRegion: cleanText(payload.shippingOriginRegion, 80) || null,
+  };
+}
+
 export type CsvRow = Record<string, string>;
 
 export function parseCsv(text: string): CsvRow[] {

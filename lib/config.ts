@@ -12,6 +12,7 @@ export const config = {
   supportEmail: textEnv("SUPPORT_EMAIL", "help@modelcarcenter.com"),
   emailFrom: textEnv("EMAIL_FROM", "Model Car Center <orders@modelcarcenter.com>"),
   resendApiKey: textEnv("RESEND_API_KEY"),
+  betterAuthSecret: textEnv("BETTER_AUTH_SECRET"),
   stripeSecretKey: textEnv("STRIPE_SECRET_KEY"),
   stripeWebhookSecret: textEnv("STRIPE_WEBHOOK_SECRET"),
   stripeApiVersion: textEnv("STRIPE_API_VERSION", "2026-02-25.clover"),

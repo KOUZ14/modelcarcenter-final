@@ -3,6 +3,7 @@ export type ProductSummary = {
   sellerId: string;
   sellerSlug: string;
   sellerName: string;
+  sellerType: "professional" | "collector";
   slug: string;
   sellerSku: string;
   title: string;

@@ -7,11 +7,49 @@ import {
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
+import { user as authUser } from "./auth-schema.generated";
+
+export {
+  account,
+  accountRelations,
+  session,
+  sessionRelations,
+  user,
+  userRelations,
+  verification,
+} from "./auth-schema.generated";
 
 const timestamps = {
-  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  createdAt: text("created_at")
+    .notNull()
+    .default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at")
+    .notNull()
+    .default(sql`CURRENT_TIMESTAMP`),
 };
+
+export const collectorProfiles = sqliteTable(
+  "collector_profiles",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => authUser.id, { onDelete: "cascade" }),
+    displayName: text("display_name").notNull(),
+    handle: text("handle"),
+    avatarUrl: text("avatar_url"),
+    bio: text("bio").notNull().default(""),
+    onboardingCompleted: integer("onboarding_completed", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    deletedAt: text("deleted_at"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("collector_profiles_user_unique").on(table.userId),
+    uniqueIndex("collector_profiles_handle_unique").on(table.handle),
+  ],
+);
 
 export const sellers = sqliteTable(
   "sellers",
@@ -24,6 +62,12 @@ export const sellers = sqliteTable(
     websiteUrl: text("website_url"),
     logoUrl: text("logo_url"),
     description: text("description").notNull().default(""),
+    sellerType: text("seller_type", { enum: ["professional", "collector"] })
+      .notNull()
+      .default("professional"),
+    ownerUserId: text("owner_user_id").references(() => authUser.id, {
+      onDelete: "set null",
+    }),
     status: text("status", {
       enum: ["applicant", "approved", "onboarding", "active", "suspended"],
     })
@@ -36,16 +80,28 @@ export const sellers = sqliteTable(
     stripePayoutsEnabled: integer("stripe_payouts_enabled", { mode: "boolean" })
       .notNull()
       .default(false),
-    defaultShippingCents: integer("default_shipping_cents").notNull().default(0),
-    shippingPolicySummary: text("shipping_policy_summary").notNull().default(""),
+    defaultShippingCents: integer("default_shipping_cents")
+      .notNull()
+      .default(0),
+    shippingOriginCountry: text("shipping_origin_country")
+      .notNull()
+      .default("US"),
+    shippingOriginRegion: text("shipping_origin_region"),
+    shippingPolicySummary: text("shipping_policy_summary")
+      .notNull()
+      .default(""),
     returnPolicySummary: text("return_policy_summary").notNull().default(""),
     ...timestamps,
   },
   (table) => [
     uniqueIndex("sellers_slug_unique").on(table.slug),
     uniqueIndex("sellers_stripe_account_unique").on(table.stripeAccountId),
+    uniqueIndex("sellers_owner_user_unique").on(table.ownerUserId),
     index("sellers_status_idx").on(table.status),
-    check("sellers_shipping_nonnegative", sql`${table.defaultShippingCents} >= 0`),
+    check(
+      "sellers_shipping_nonnegative",
+      sql`${table.defaultShippingCents} >= 0`,
+    ),
   ],
 );
 
@@ -85,28 +141,62 @@ export const products = sqliteTable(
     vehicleModel: text("vehicle_model").notNull(),
     vehicleYear: text("vehicle_year"),
     color: text("color"),
-    condition: text("condition", { enum: ["new", "used", "preowned", "other"] })
+    condition: text("condition", {
+      enum: [
+        "new",
+        "used",
+        "preowned",
+        "other",
+        "new_sealed",
+        "new_opened",
+        "displayed",
+        "used_excellent",
+        "used_good",
+        "used_fair",
+      ],
+    })
       .notNull()
       .default("new"),
     priceCents: integer("price_cents").notNull(),
     currency: text("currency").notNull().default("usd"),
     inventoryQuantity: integer("inventory_quantity").notNull().default(0),
     reservedQuantity: integer("reserved_quantity").notNull().default(0),
-    status: text("status", { enum: ["draft", "active", "sold_out", "inactive"] })
+    status: text("status", {
+      enum: [
+        "draft",
+        "pending_review",
+        "active",
+        "sold_out",
+        "inactive",
+        "rejected",
+      ],
+    })
       .notNull()
       .default("draft"),
     primaryImageUrl: text("primary_image_url"),
+    rejectionReason: text("rejection_reason"),
+    reviewedAt: text("reviewed_at"),
     keywords: text("keywords").notNull().default(""),
     ...timestamps,
   },
   (table) => [
     uniqueIndex("products_slug_unique").on(table.slug),
-    uniqueIndex("products_seller_sku_unique").on(table.sellerId, table.sellerSku),
-    index("products_catalog_idx").on(table.status, table.sellerId, table.createdAt),
+    uniqueIndex("products_seller_sku_unique").on(
+      table.sellerId,
+      table.sellerSku,
+    ),
+    index("products_catalog_idx").on(
+      table.status,
+      table.sellerId,
+      table.createdAt,
+    ),
     index("products_scale_idx").on(table.scale),
     index("products_manufacturer_idx").on(table.modelManufacturer),
     check("products_price_nonnegative", sql`${table.priceCents} >= 0`),
-    check("products_inventory_nonnegative", sql`${table.inventoryQuantity} >= 0`),
+    check(
+      "products_inventory_nonnegative",
+      sql`${table.inventoryQuantity} >= 0`,
+    ),
     check("products_reserved_nonnegative", sql`${table.reservedQuantity} >= 0`),
     check(
       "products_reserved_within_inventory",
@@ -123,10 +213,87 @@ export const productImages = sqliteTable(
       .notNull()
       .references(() => products.id, { onDelete: "cascade" }),
     url: text("url").notNull(),
+    source: text("source", { enum: ["external", "r2"] })
+      .notNull()
+      .default("external"),
+    storageKey: text("storage_key"),
+    uploadedByUserId: text("uploaded_by_user_id").references(
+      () => authUser.id,
+      {
+        onDelete: "set null",
+      },
+    ),
     alt: text("alt").notNull().default(""),
     sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: text("created_at"),
   },
-  (table) => [index("product_images_product_idx").on(table.productId, table.sortOrder)],
+  (table) => [
+    index("product_images_product_idx").on(table.productId, table.sortOrder),
+  ],
+);
+
+export const wishlistItems = sqliteTable(
+  "wishlist_items",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => authUser.id, { onDelete: "cascade" }),
+    productId: text("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("wishlist_user_product_unique").on(
+      table.userId,
+      table.productId,
+    ),
+    index("wishlist_user_idx").on(table.userId, table.createdAt),
+  ],
+);
+
+export const carts = sqliteTable(
+  "carts",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => authUser.id, { onDelete: "cascade" }),
+    sellerId: text("seller_id").references(() => sellers.id, {
+      onDelete: "set null",
+    }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("carts_user_unique").on(table.userId),
+    index("carts_seller_idx").on(table.sellerId),
+  ],
+);
+
+export const cartItems = sqliteTable(
+  "cart_items",
+  {
+    id: text("id").primaryKey(),
+    cartId: text("cart_id")
+      .notNull()
+      .references(() => carts.id, { onDelete: "cascade" }),
+    productId: text("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    quantity: integer("quantity").notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("cart_items_cart_product_unique").on(
+      table.cartId,
+      table.productId,
+    ),
+    index("cart_items_cart_idx").on(table.cartId),
+    check("cart_items_quantity_positive", sql`${table.quantity} > 0`),
+  ],
 );
 
 export const wantedRequests = sqliteTable(
@@ -143,19 +310,27 @@ export const wantedRequests = sqliteTable(
     maxBudgetCents: integer("max_budget_cents"),
     notes: text("notes").notNull().default(""),
     collectorEmail: text("collector_email").notNull(),
-    status: text("status", { enum: ["open", "possible_match", "matched", "closed"] })
+    userId: text("user_id").references(() => authUser.id, {
+      onDelete: "set null",
+    }),
+    status: text("status", {
+      enum: ["open", "possible_match", "matched", "closed"],
+    })
       .notNull()
       .default("open"),
     matchedProductId: text("matched_product_id").references(() => products.id, {
       onDelete: "set null",
     }),
-    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
     matchedAt: text("matched_at"),
     notifiedAt: text("notified_at"),
   },
   (table) => [
     uniqueIndex("wanted_requests_reference_unique").on(table.referenceCode),
     index("wanted_requests_status_idx").on(table.status, table.createdAt),
+    index("wanted_requests_user_idx").on(table.userId, table.createdAt),
     index("wanted_requests_match_idx").on(
       table.vehicleMake,
       table.vehicleModel,
@@ -174,9 +349,13 @@ export const communitySubscribers = sqliteTable(
     id: text("id").primaryKey(),
     email: text("email").notNull(),
     consentTimestamp: text("consent_timestamp").notNull(),
-    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
   },
-  (table) => [uniqueIndex("community_subscribers_email_unique").on(table.email)],
+  (table) => [
+    uniqueIndex("community_subscribers_email_unique").on(table.email),
+  ],
 );
 
 export const orders = sqliteTable(
@@ -187,6 +366,9 @@ export const orders = sqliteTable(
     sellerId: text("seller_id")
       .notNull()
       .references(() => sellers.id),
+    buyerUserId: text("buyer_user_id").references(() => authUser.id, {
+      onDelete: "set null",
+    }),
     stripeCheckoutSessionId: text("stripe_checkout_session_id").notNull(),
     stripePaymentIntentId: text("stripe_payment_intent_id"),
     stripeChargeId: text("stripe_charge_id"),
@@ -212,19 +394,29 @@ export const orders = sqliteTable(
     shippingAddress: text("shipping_address").notNull().default("{}"),
     carrier: text("carrier"),
     trackingNumber: text("tracking_number"),
-    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
     paidAt: text("paid_at"),
     shippedAt: text("shipped_at"),
-    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => [
     uniqueIndex("orders_number_unique").on(table.orderNumber),
-    uniqueIndex("orders_checkout_session_unique").on(table.stripeCheckoutSessionId),
+    uniqueIndex("orders_checkout_session_unique").on(
+      table.stripeCheckoutSessionId,
+    ),
     index("orders_status_idx").on(table.paymentStatus, table.fulfillmentStatus),
-    check("orders_money_nonnegative", sql`
+    index("orders_buyer_user_idx").on(table.buyerUserId, table.createdAt),
+    check(
+      "orders_money_nonnegative",
+      sql`
       ${table.subtotalCents} >= 0 AND ${table.shippingCents} >= 0 AND
       ${table.platformFeeCents} >= 0 AND ${table.taxCents} >= 0 AND ${table.totalCents} >= 0
-    `),
+    `,
+    ),
   ],
 );
 
@@ -235,7 +427,9 @@ export const orderItems = sqliteTable(
     orderId: text("order_id")
       .notNull()
       .references(() => orders.id, { onDelete: "cascade" }),
-    productId: text("product_id").references(() => products.id, { onDelete: "set null" }),
+    productId: text("product_id").references(() => products.id, {
+      onDelete: "set null",
+    }),
     productTitleSnapshot: text("product_title_snapshot").notNull(),
     sellerSkuSnapshot: text("seller_sku_snapshot").notNull(),
     scaleSnapshot: text("scale_snapshot").notNull(),
@@ -256,9 +450,13 @@ export const stripeEvents = sqliteTable(
   {
     id: text("id").primaryKey(),
     type: text("type").notNull(),
-    processedAt: text("processed_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    processedAt: text("processed_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
   },
-  (table) => [index("stripe_events_type_idx").on(table.type, table.processedAt)],
+  (table) => [
+    index("stripe_events_type_idx").on(table.type, table.processedAt),
+  ],
 );
 
 export const checkoutReservations = sqliteTable(
@@ -268,6 +466,9 @@ export const checkoutReservations = sqliteTable(
     sellerId: text("seller_id")
       .notNull()
       .references(() => sellers.id),
+    buyerUserId: text("buyer_user_id").references(() => authUser.id, {
+      onDelete: "set null",
+    }),
     stripeCheckoutSessionId: text("stripe_checkout_session_id"),
     status: text("status", { enum: ["pending", "completed", "released"] })
       .notNull()
@@ -277,12 +478,19 @@ export const checkoutReservations = sqliteTable(
     platformFeeCents: integer("platform_fee_cents").notNull(),
     currency: text("currency").notNull(),
     expiresAt: text("expires_at").notNull(),
-    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => [
-    uniqueIndex("checkout_reservations_session_unique").on(table.stripeCheckoutSessionId),
+    uniqueIndex("checkout_reservations_session_unique").on(
+      table.stripeCheckoutSessionId,
+    ),
     index("checkout_reservations_status_idx").on(table.status, table.expiresAt),
+    index("checkout_reservations_buyer_idx").on(table.buyerUserId),
   ],
 );
 

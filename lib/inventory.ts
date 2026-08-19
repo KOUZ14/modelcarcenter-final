@@ -60,15 +60,18 @@ export async function loadAuthoritativeCart(items: RequestedCartItem[]) {
   return { items: authoritativeItems, seller, totals, currency: rows[0].currency };
 }
 
-export async function reserveCart(input: Awaited<ReturnType<typeof loadAuthoritativeCart>>) {
+export async function reserveCart(
+  input: Awaited<ReturnType<typeof loadAuthoritativeCart>>,
+  buyerUserId: string | null = null,
+) {
   const d1 = getD1();
   const reservationId = crypto.randomUUID();
   const expiresAt = new Date(Date.now() + config.checkoutExpirationMinutes * 60_000);
   const statements = [
     d1.prepare(`INSERT INTO checkout_reservations
-      (id, seller_id, status, subtotal_cents, shipping_cents, platform_fee_cents, currency, expires_at)
-      VALUES (?, ?, 'pending', ?, ?, ?, ?, ?)`)
-      .bind(reservationId, input.seller.sellerId, input.totals.subtotalCents, input.totals.shippingCents, input.totals.platformFeeCents, input.currency, expiresAt.toISOString()),
+      (id, seller_id, buyer_user_id, status, subtotal_cents, shipping_cents, platform_fee_cents, currency, expires_at)
+      VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?)`)
+      .bind(reservationId, input.seller.sellerId, buyerUserId, input.totals.subtotalCents, input.totals.shippingCents, input.totals.platformFeeCents, input.currency, expiresAt.toISOString()),
     d1.prepare(`UPDATE sellers SET
       default_shipping_cents = CASE WHEN status = 'active' THEN default_shipping_cents ELSE -1 END
       WHERE id = ?`).bind(input.seller.sellerId),

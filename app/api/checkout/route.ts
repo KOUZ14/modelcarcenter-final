@@ -1,6 +1,7 @@
 import { attachStripeSession, loadAuthoritativeCart, releaseReservation, releaseStaleReservations, reserveCart } from "@/lib/inventory";
 import { readJsonObject } from "@/lib/http";
 import { createCheckoutSession } from "@/lib/stripe";
+import { getCurrentCollector } from "@/lib/collector-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -8,6 +9,7 @@ export async function POST(request: Request) {
   let reservationId: string | null = null;
   try {
     const payload = await readJsonObject(request);
+    const collector = await getCurrentCollector(request.headers).catch(() => null);
     const rawItems = Array.isArray(payload.items) ? payload.items : [];
     const requested = rawItems.map((item) => {
       const value = item && typeof item === "object" ? item as Record<string, unknown> : {};
@@ -15,7 +17,7 @@ export async function POST(request: Request) {
     });
     await releaseStaleReservations();
     const cart = await loadAuthoritativeCart(requested);
-    const reservation = await reserveCart(cart);
+    const reservation = await reserveCart(cart, collector?.user.id ?? null);
     reservationId = reservation.reservationId;
     const session = await createCheckoutSession({
       reservationId,
@@ -32,6 +34,8 @@ export async function POST(request: Request) {
       shippingCents: cart.totals.shippingCents,
       platformFeeCents: cart.totals.platformFeeCents,
       expiresAt: reservation.expiresAt,
+      buyerUserId: collector?.user.id ?? null,
+      buyerEmail: collector?.user.email ?? null,
     });
     if (!session.url) throw new Error("Stripe did not return a checkout URL.");
     await attachStripeSession(reservationId, session.id);

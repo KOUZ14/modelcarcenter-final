@@ -1,0 +1,723 @@
+"use client";
+
+import Image from "next/image";
+import Link from "next/link";
+import { FormEvent, useState } from "react";
+import { formatMoney } from "@/lib/format";
+
+type GarageData = {
+  wishlist: string[];
+  orders: Array<
+    Record<string, unknown> & { items: Array<Record<string, unknown>> }
+  >;
+  hunts: Array<Record<string, unknown>>;
+  seller: (Record<string, unknown> & { id: string }) | null;
+  listings: Array<Record<string, unknown>>;
+  sales: Array<
+    Record<string, unknown> & { items: Array<Record<string, unknown>> }
+  >;
+};
+type Profile = {
+  displayName: string;
+  handle: string | null;
+  avatarUrl: string | null;
+  bio: string;
+  onboardingCompleted: boolean;
+};
+
+const tabs = [
+  "overview",
+  "wishlist",
+  "hunts",
+  "orders",
+  "listings",
+  "sales",
+  "profile",
+] as const;
+
+export function AccountDashboard({
+  initialView,
+  data,
+  profile,
+  email,
+  isNew,
+}: {
+  initialView: string;
+  data: GarageData;
+  profile: Profile;
+  email: string;
+  isNew: boolean;
+}) {
+  const [view, setView] = useState<(typeof tabs)[number]>(
+    tabs.includes(initialView as never)
+      ? (initialView as (typeof tabs)[number])
+      : "overview",
+  );
+  const [message, setMessage] = useState(
+    isNew && !profile.onboardingCompleted
+      ? "Welcome to My Garage. Add the display name collectors will see."
+      : "",
+  );
+  const [error, setError] = useState("");
+  async function action(payload: Record<string, unknown>) {
+    setMessage("");
+    setError("");
+    const response = await fetch("/api/account", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const body = (await response.json()) as {
+      error?: string;
+      deleted?: boolean;
+    };
+    if (!response.ok) {
+      setError(body.error || "The change could not be saved.");
+      throw new Error(body.error);
+    }
+    if (body.deleted) {
+      window.location.assign("/");
+      return body;
+    }
+    setMessage("Saved.");
+    return body;
+  }
+  return (
+    <div className="garage-layout">
+      <aside className="garage-nav">
+        <p className="eyebrow">Collector account</p>
+        <h1>My Garage</h1>
+        <p>
+          {profile.displayName}
+          <br />
+          <span>{email}</span>
+        </p>
+        <nav aria-label="My Garage sections">
+          {tabs.map((tab) => (
+            <button
+              key={tab}
+              className={view === tab ? "active" : ""}
+              onClick={() => {
+                setView(tab);
+                history.replaceState(null, "", `/account?view=${tab}`);
+              }}
+            >
+              {tab === "hunts"
+                ? "Model Hunts"
+                : tab === "listings"
+                  ? "My Listings"
+                  : tab === "sales"
+                    ? "My Sales"
+                    : tab[0].toUpperCase() + tab.slice(1)}
+            </button>
+          ))}
+        </nav>
+        <Link className="button dark small" href="/sell/model">
+          Sell a Model
+        </Link>
+      </aside>
+      <section className="garage-content">
+        {message && (
+          <p className="admin-message" role="status">
+            {message}
+          </p>
+        )}
+        {error && (
+          <p className="form-error" role="alert">
+            {error}
+          </p>
+        )}
+        <GarageView view={view} data={data} profile={profile} action={action} />
+      </section>
+    </div>
+  );
+}
+
+function GarageView({
+  view,
+  data,
+  profile,
+  action,
+}: {
+  view: string;
+  data: GarageData;
+  profile: Profile;
+  action(payload: Record<string, unknown>): Promise<unknown>;
+}) {
+  if (view === "overview") return <Overview data={data} />;
+  if (view === "wishlist")
+    return (
+      <EmptyOrCount
+        count={data.wishlist.length}
+        title="Wishlist"
+        empty="No saved models yet."
+        cta="Browse Models"
+        href="/#inventory"
+        detail={`${data.wishlist.length} model${data.wishlist.length === 1 ? "" : "s"} saved across your devices.`}
+      />
+    );
+  if (view === "hunts") return <Hunts rows={data.hunts} />;
+  if (view === "orders") return <Orders rows={data.orders} />;
+  if (view === "listings")
+    return (
+      <Listings rows={data.listings} seller={data.seller} action={action} />
+    );
+  if (view === "sales") return <Sales rows={data.sales} action={action} />;
+  return <ProfileForm profile={profile} action={action} />;
+}
+
+function Overview({ data }: { data: GarageData }) {
+  const activeHunts = data.hunts.filter(
+    (hunt) => !["closed"].includes(String(hunt.status)),
+  ).length;
+  const activeListings = data.listings.filter((listing) =>
+    ["active", "pending_review"].includes(String(listing.status)),
+  ).length;
+  return (
+    <>
+      <div className="garage-heading">
+        <p className="eyebrow">Buy · Save · Hunt · Sell</p>
+        <h2>Your collector activity</h2>
+      </div>
+      <div className="metric-grid garage-metrics">
+        <article>
+          <span>Wishlist</span>
+          <b>{data.wishlist.length}</b>
+        </article>
+        <article>
+          <span>Active Model Hunts</span>
+          <b>{activeHunts}</b>
+        </article>
+        <article>
+          <span>Orders</span>
+          <b>{data.orders.length}</b>
+        </article>
+        <article>
+          <span>Active listings</span>
+          <b>{activeListings}</b>
+        </article>
+        <article>
+          <span>Sales</span>
+          <b>{data.sales.length}</b>
+        </article>
+      </div>
+      <div className="garage-quick">
+        <Link href="/#inventory">Find a Model</Link>
+        <Link href="/#model-hunt">Start a Model Hunt</Link>
+        <Link href="/sell/model">Sell a Model</Link>
+      </div>
+    </>
+  );
+}
+
+function EmptyOrCount({
+  count,
+  title,
+  empty,
+  cta,
+  href,
+  detail,
+}: {
+  count: number;
+  title: string;
+  empty: string;
+  cta: string;
+  href: string;
+  detail: string;
+}) {
+  return (
+    <div className="garage-section">
+      <p className="eyebrow">{title}</p>
+      <h2>{count ? title : empty}</h2>
+      <p>
+        {count
+          ? detail
+          : "Your collector account keeps this information available on every device."}
+      </p>
+      <Link
+        className="button dark small"
+        href={count && title === "Wishlist" ? "/wishlist" : href}
+      >
+        {count && title === "Wishlist" ? "View saved models" : cta}
+      </Link>
+    </div>
+  );
+}
+
+function Hunts({ rows }: { rows: GarageData["hunts"] }) {
+  if (!rows.length)
+    return (
+      <EmptyOrCount
+        count={0}
+        title="Model Hunts"
+        empty="You're not hunting for anything yet."
+        cta="Start a Model Hunt"
+        href="/#model-hunt"
+        detail=""
+      />
+    );
+  return (
+    <div className="garage-section">
+      <p className="eyebrow">Model Hunts</p>
+      <h2>Models we’re tracking for you</h2>
+      <div className="garage-list">
+        {rows.map((hunt) => (
+          <article key={String(hunt.id)}>
+            <div>
+              <span className={`status ${String(hunt.status)}`}>
+                {huntStatus(String(hunt.status))}
+              </span>
+              <b>{String(hunt.referenceCode)}</b>
+            </div>
+            <h3>
+              {String(hunt.preferredScale)} {String(hunt.vehicleMake)}{" "}
+              {String(hunt.vehicleModel)}
+            </h3>
+            <p>
+              {hunt.modelManufacturer
+                ? String(hunt.modelManufacturer)
+                : "Any manufacturer"}
+              {hunt.color ? ` · ${String(hunt.color)}` : ""}
+              {hunt.maxBudgetCents
+                ? ` · up to ${formatMoney(Number(hunt.maxBudgetCents))}`
+                : ""}
+            </p>
+            <p>{huntMessage(String(hunt.status))}</p>
+            {Boolean(hunt.matchedProductSlug) && (
+              <Link
+                className="text-link"
+                href={`/products/${String(hunt.matchedProductSlug)}`}
+              >
+                {String(hunt.matchedProductTitle)} ·{" "}
+                {String(hunt.matchedSellerName)} ·{" "}
+                {formatMoney(
+                  Number(hunt.matchedProductPriceCents),
+                  String(hunt.matchedProductCurrency),
+                )}
+              </Link>
+            )}
+            <small>Started {date(String(hunt.createdAt))}</small>
+          </article>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Orders({ rows }: { rows: GarageData["orders"] }) {
+  if (!rows.length)
+    return (
+      <EmptyOrCount
+        count={0}
+        title="Orders"
+        empty="No orders yet."
+        cta="Find a Model"
+        href="/#inventory"
+        detail=""
+      />
+    );
+  return (
+    <div className="garage-section">
+      <p className="eyebrow">Orders</p>
+      <h2>Purchase history</h2>
+      <div className="garage-list">
+        {rows.map((order) => (
+          <article key={String(order.id)}>
+            <div>
+              <b>{String(order.orderNumber)}</b>
+              <span>{date(String(order.createdAt))}</span>
+            </div>
+            <h3>{String(order.sellerName)}</h3>
+            {order.items.map((item) => (
+              <div className="order-line" key={String(item.id)}>
+                {Boolean(item.imageUrlSnapshot) ? (
+                  <Image
+                    src={String(item.imageUrlSnapshot)}
+                    alt=""
+                    width={64}
+                    height={64}
+                    unoptimized
+                  />
+                ) : (
+                  <span />
+                )}
+                <p>
+                  {String(item.productTitleSnapshot)} × {String(item.quantity)}
+                </p>
+              </div>
+            ))}
+            <p>
+              <span className={`status ${String(order.paymentStatus)}`}>
+                {String(order.paymentStatus)}
+              </span>{" "}
+              <span className={`status ${String(order.fulfillmentStatus)}`}>
+                {String(order.fulfillmentStatus)}
+              </span>{" "}
+              · {formatMoney(Number(order.totalCents), String(order.currency))}
+            </p>
+            {Boolean(order.trackingNumber) && (
+              <p>
+                Tracking: {String(order.carrier)} ·{" "}
+                {String(order.trackingNumber)}
+              </p>
+            )}
+          </article>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Listings({
+  rows,
+  seller,
+  action,
+}: {
+  rows: GarageData["listings"];
+  seller: GarageData["seller"];
+  action(payload: Record<string, unknown>): Promise<unknown>;
+}) {
+  const [busy, setBusy] = useState(false);
+  async function onboarding() {
+    setBusy(true);
+    try {
+      const response = await fetch("/api/listings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "stripe_onboarding" }),
+      });
+      const body = (await response.json()) as {
+        onboardingUrl?: string;
+        error?: string;
+      };
+      if (!response.ok || !body.onboardingUrl) throw new Error(body.error);
+      window.location.assign(body.onboardingUrl);
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="garage-section">
+      <div className="panel-heading">
+        <div>
+          <p className="eyebrow">Selling</p>
+          <h2>My Listings</h2>
+        </div>
+        <Link className="button dark small" href="/sell/model">
+          Sell a Model
+        </Link>
+      </div>
+      {seller &&
+        (!seller.stripeChargesEnabled || !seller.stripePayoutsEnabled) && (
+          <div className="account-callout">
+            <b>Complete payout setup before submitting a listing.</b>
+            <p>
+              Stripe securely collects identity and bank information on its
+              hosted site.
+            </p>
+            <button
+              className="button outline small"
+              disabled={busy}
+              onClick={() => void onboarding()}
+            >
+              {busy ? "Opening Stripe…" : "Complete Stripe onboarding"}
+            </button>
+          </div>
+        )}
+      {rows.length ? (
+        <div className="garage-list">
+          {rows.map((listing) => (
+            <article key={String(listing.id)}>
+              {Boolean(listing.primaryImageUrl) && (
+                <Image
+                  className="listing-thumb"
+                  src={String(listing.primaryImageUrl)}
+                  alt=""
+                  width={112}
+                  height={84}
+                  unoptimized
+                />
+              )}
+              <div>
+                <span className={`status ${String(listing.status)}`}>
+                  {listingStatusLabel(String(listing.status))}
+                </span>
+                <b>
+                  {formatMoney(
+                    Number(listing.priceCents),
+                    String(listing.currency),
+                  )}
+                </b>
+              </div>
+              <h3>{String(listing.title)}</h3>
+              <p>
+                {String(listing.inventoryQuantity)} in inventory ·{" "}
+                {String(listing.reservedQuantity)} reserved
+              </p>
+              {Boolean(listing.rejectionReason) && (
+                <p className="form-error">
+                  Review note: {String(listing.rejectionReason)}
+                </p>
+              )}
+              <div className="row-actions">
+                <Link href={`/sell/model?id=${String(listing.id)}`}>Edit</Link>
+                {String(listing.status) !== "inactive" && (
+                  <button
+                    onClick={() =>
+                      void action({
+                        action: "deactivate_listing",
+                        productId: listing.id,
+                      }).then(() => location.reload())
+                    }
+                  >
+                    Deactivate
+                  </button>
+                )}
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <EmptyOrCount
+          count={0}
+          title="Listings"
+          empty="Nothing for sale yet."
+          cta="Sell a Model"
+          href="/sell/model"
+          detail=""
+        />
+      )}
+    </div>
+  );
+}
+
+function Sales({
+  rows,
+  action,
+}: {
+  rows: GarageData["sales"];
+  action(payload: Record<string, unknown>): Promise<unknown>;
+}) {
+  if (!rows.length)
+    return (
+      <div className="garage-section">
+        <p className="eyebrow">My Sales</p>
+        <h2>No sales yet.</h2>
+        <p>Paid orders for your collector listings will appear here.</p>
+      </div>
+    );
+  return (
+    <div className="garage-section">
+      <p className="eyebrow">My Sales</p>
+      <h2>Orders to fulfill</h2>
+      <div className="garage-list">
+        {rows.map((sale) => (
+          <article key={String(sale.id)}>
+            <div>
+              <b>{String(sale.orderNumber)}</b>
+              <span>{date(String(sale.createdAt))}</span>
+            </div>
+            {sale.items.map((item) => (
+              <p key={String(item.id)}>
+                {String(item.productTitleSnapshot)} × {String(item.quantity)}
+              </p>
+            ))}
+            <p>
+              {String(sale.buyerName)}
+              <br />
+              {formatAddress(sale.shippingAddress)}
+            </p>
+            <p>
+              Item total{" "}
+              {formatMoney(Number(sale.subtotalCents), String(sale.currency))} ·
+              marketplace fee{" "}
+              {formatMoney(
+                Number(sale.platformFeeCents),
+                String(sale.currency),
+              )}{" "}
+              · seller proceeds{" "}
+              {formatMoney(
+                Number(sale.subtotalCents) - Number(sale.platformFeeCents),
+                String(sale.currency),
+              )}
+            </p>
+            <p>
+              <span className={`status ${String(sale.fulfillmentStatus)}`}>
+                {String(sale.fulfillmentStatus)}
+              </span>
+            </p>
+            {String(sale.fulfillmentStatus) !== "shipped" && (
+              <ShipmentForm orderId={String(sale.id)} action={action} />
+            )}
+          </article>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ShipmentForm({
+  orderId,
+  action,
+}: {
+  orderId: string;
+  action(payload: Record<string, unknown>): Promise<unknown>;
+}) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const data = Object.fromEntries(new FormData(event.currentTarget));
+    await action({ action: "ship_sale", orderId, ...data });
+    location.reload();
+  }
+  return (
+    <form className="fulfillment-controls" onSubmit={submit}>
+      <label>
+        Carrier
+        <input name="carrier" required maxLength={100} />
+      </label>
+      <label>
+        Tracking number
+        <input name="trackingNumber" required maxLength={200} />
+      </label>
+      <button className="button dark small">Mark Shipped</button>
+    </form>
+  );
+}
+
+function ProfileForm({
+  profile,
+  action,
+}: {
+  profile: Profile;
+  action(payload: Record<string, unknown>): Promise<unknown>;
+}) {
+  const [confirm, setConfirm] = useState("");
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await action({
+      action: "profile",
+      ...Object.fromEntries(new FormData(event.currentTarget)),
+    });
+  }
+  return (
+    <div className="garage-section">
+      <p className="eyebrow">Profile</p>
+      <h2>Your collector identity</h2>
+      <form className="admin-form" onSubmit={submit}>
+        <label>
+          Display name
+          <input
+            name="displayName"
+            required
+            maxLength={100}
+            defaultValue={profile.displayName}
+          />
+        </label>
+        <label>
+          Handle <span>(optional)</span>
+          <input
+            name="handle"
+            pattern="[A-Za-z0-9][A-Za-z0-9_-]{2,39}"
+            defaultValue={profile.handle ?? ""}
+          />
+        </label>
+        <label>
+          Avatar URL <span>(optional)</span>
+          <input
+            name="avatarUrl"
+            type="url"
+            defaultValue={profile.avatarUrl ?? ""}
+          />
+        </label>
+        <label>
+          Short bio <span>(optional)</span>
+          <textarea name="bio" maxLength={280} defaultValue={profile.bio} />
+        </label>
+        <button className="button dark small">Save profile</button>
+      </form>
+      <details className="delete-account">
+        <summary>Delete account</summary>
+        <p>
+          This revokes sessions, removes your profile, and deactivates listings.
+          Paid order records are retained for transaction and legal
+          requirements.
+        </p>
+        <label>
+          Type DELETE to confirm
+          <input
+            value={confirm}
+            onChange={(event) => setConfirm(event.target.value)}
+          />
+        </label>
+        <button
+          className="danger-button"
+          disabled={confirm !== "DELETE"}
+          onClick={() => void action({ action: "delete_account", confirm })}
+        >
+          Delete my account
+        </button>
+      </details>
+    </div>
+  );
+}
+
+function huntStatus(status: string) {
+  return (
+    (
+      {
+        open: "Searching",
+        possible_match: "Possible Match",
+        matched: "Match Found",
+        closed: "Closed",
+      } as Record<string, string>
+    )[status] ?? status
+  );
+}
+function listingStatusLabel(status: string) {
+  return (
+    (
+      {
+        draft: "Draft",
+        pending_review: "Awaiting Review",
+        active: "Live",
+        sold_out: "Sold",
+        rejected: "Rejected",
+        inactive: "Inactive",
+      } as Record<string, string>
+    )[status] ?? status
+  );
+}
+function huntMessage(status: string) {
+  return (
+    (
+      {
+        open: "We haven't found a match yet.",
+        possible_match: "A possible model has been identified.",
+        matched: "A confirmed match is ready to view.",
+        closed: "This request is no longer active.",
+      } as Record<string, string>
+    )[status] ?? ""
+  );
+}
+function date(value: string) {
+  return new Intl.DateTimeFormat("en-US", { dateStyle: "medium" }).format(
+    new Date(value),
+  );
+}
+
+function formatAddress(value: unknown) {
+  if (!value || typeof value !== "object")
+    return "Shipping address unavailable";
+  const address = value as Record<string, unknown>;
+  return [
+    address.line1,
+    address.line2,
+    [address.city, address.state, address.postal_code]
+      .filter(Boolean)
+      .join(" "),
+    address.country,
+  ]
+    .filter(Boolean)
+    .map(String)
+    .join(", ");
+}

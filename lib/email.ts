@@ -63,6 +63,39 @@ export async function sendEmail(input: SendEmailInput) {
   return { sent: true as const, id: data.id };
 }
 
+export async function sendAuthMagicLinkEmail(input: { email: string; url: string }) {
+  return sendEmail({
+    to: input.email,
+    subject: "Sign in to Model Car Center",
+    html: `<h1>Sign in to Model Car Center</h1><p>Use this secure, single-use link to enter My Garage.</p><p><a href="${escapeHtml(input.url)}">Sign in to Model Car Center</a></p><p>This link expires in 10 minutes. If you did not request it, you can ignore this email.</p>`,
+    text: `Sign in to Model Car Center: ${input.url}\n\nThis single-use link expires in 10 minutes. If you did not request it, ignore this email.`,
+  });
+}
+
+export async function sendListingReviewEmail(input: {
+  email: string;
+  title: string;
+  productSlug: string;
+  approved: boolean;
+  reason?: string | null;
+  productId: string;
+}) {
+  const url = input.approved
+    ? `${config.siteUrl}/products/${encodeURIComponent(input.productSlug)}`
+    : `${config.siteUrl}/sell/model?id=${encodeURIComponent(input.productId)}`;
+  const subject = input.approved ? `Listing approved: ${input.title}` : `Listing needs changes: ${input.title}`;
+  const detail = input.approved
+    ? "Your listing is now live in the marketplace."
+    : `Your listing was not approved${input.reason ? `: ${input.reason}` : ". You can edit it and submit it again."}`;
+  return sendEmail({
+    to: input.email,
+    subject,
+    html: `<h1>${escapeHtml(subject)}</h1><p>${escapeHtml(detail)}</p><p><a href="${escapeHtml(url)}">${input.approved ? "View listing" : "Edit listing"}</a></p>`,
+    text: `${subject}\n\n${detail}\n${url}`,
+    idempotencyKey: `listing-review-${input.productId}-${input.approved ? "approved" : "rejected"}-${Date.now()}`,
+  });
+}
+
 export type EmailOrder = {
   orderNumber: string;
   sellerName: string;

@@ -20,6 +20,7 @@ const productSelection = {
   sellerId: products.sellerId,
   sellerSlug: sellers.slug,
   sellerName: sellers.storeName,
+  sellerType: sellers.sellerType,
   slug: products.slug,
   sellerSku: products.sellerSku,
   title: products.title,
@@ -46,7 +47,10 @@ function activeConditions(query: CatalogQuery): SQL[] {
   const conditions: SQL[] = [
     eq(products.status, "active"),
     eq(sellers.status, "active"),
-    gt(sql<number>`${products.inventoryQuantity} - ${products.reservedQuantity}`, 0),
+    gt(
+      sql<number>`${products.inventoryQuantity} - ${products.reservedQuantity}`,
+      0,
+    ),
   ];
   const search = normalizeSearch(query.q ?? "");
   for (const term of search.split(" ").filter(Boolean)) {
@@ -59,67 +63,83 @@ function activeConditions(query: CatalogQuery): SQL[] {
     ) LIKE ${needle}`);
   }
   if (query.scale) conditions.push(eq(products.scale, query.scale));
-  if (query.manufacturer) conditions.push(eq(products.modelManufacturer, query.manufacturer));
+  if (query.manufacturer)
+    conditions.push(eq(products.modelManufacturer, query.manufacturer));
   if (query.seller) conditions.push(eq(products.sellerId, query.seller));
-  if (query.condition) conditions.push(eq(products.condition, query.condition as "new" | "used" | "preowned" | "other"));
+  if (query.condition)
+    conditions.push(
+      eq(
+        products.condition,
+        query.condition as "new" | "used" | "preowned" | "other",
+      ),
+    );
   return conditions;
 }
 
-export async function searchCatalog(query: CatalogQuery = {}): Promise<CatalogResponse> {
+export async function searchCatalog(
+  query: CatalogQuery = {},
+): Promise<CatalogResponse> {
   const db = getDb();
   const pageSize = Math.min(48, Math.max(1, query.pageSize ?? 12));
   const page = Math.max(1, query.page ?? 1);
   const conditions = activeConditions(query);
-  const order = query.sort === "price_asc"
-    ? [asc(products.priceCents), desc(products.createdAt)]
-    : query.sort === "price_desc"
-      ? [desc(products.priceCents), desc(products.createdAt)]
-      : [desc(products.createdAt), desc(products.id)];
+  const order =
+    query.sort === "price_asc"
+      ? [asc(products.priceCents), desc(products.createdAt)]
+      : query.sort === "price_desc"
+        ? [desc(products.priceCents), desc(products.createdAt)]
+        : [desc(products.createdAt), desc(products.id)];
 
-  const [rows, countRows, scales, manufacturers, sellerRows, conditionsRows] = await Promise.all([
-    db
-      .select(productSelection)
-      .from(products)
-      .innerJoin(sellers, eq(products.sellerId, sellers.id))
-      .where(and(...conditions))
-      .orderBy(...order)
-      .limit(pageSize)
-      .offset((page - 1) * pageSize),
-    db
-      .select({ count: sql<number>`count(*)` })
-      .from(products)
-      .innerJoin(sellers, eq(products.sellerId, sellers.id))
-      .where(and(...conditions)),
-    db
-      .selectDistinct({ value: products.scale })
-      .from(products)
-      .innerJoin(sellers, eq(products.sellerId, sellers.id))
-      .where(and(eq(products.status, "active"), eq(sellers.status, "active")))
-      .orderBy(asc(products.scale)),
-    db
-      .selectDistinct({ value: products.modelManufacturer })
-      .from(products)
-      .innerJoin(sellers, eq(products.sellerId, sellers.id))
-      .where(and(eq(products.status, "active"), eq(sellers.status, "active")))
-      .orderBy(asc(products.modelManufacturer)),
-    db
-      .selectDistinct({ id: sellers.id, name: sellers.storeName })
-      .from(sellers)
-      .innerJoin(products, eq(products.sellerId, sellers.id))
-      .where(and(eq(products.status, "active"), eq(sellers.status, "active")))
-      .orderBy(asc(sellers.storeName)),
-    db
-      .selectDistinct({ value: products.condition })
-      .from(products)
-      .innerJoin(sellers, eq(products.sellerId, sellers.id))
-      .where(and(eq(products.status, "active"), eq(sellers.status, "active")))
-      .orderBy(asc(products.condition)),
-  ]);
+  const [rows, countRows, scales, manufacturers, sellerRows, conditionsRows] =
+    await Promise.all([
+      db
+        .select(productSelection)
+        .from(products)
+        .innerJoin(sellers, eq(products.sellerId, sellers.id))
+        .where(and(...conditions))
+        .orderBy(...order)
+        .limit(pageSize)
+        .offset((page - 1) * pageSize),
+      db
+        .select({ count: sql<number>`count(*)` })
+        .from(products)
+        .innerJoin(sellers, eq(products.sellerId, sellers.id))
+        .where(and(...conditions)),
+      db
+        .selectDistinct({ value: products.scale })
+        .from(products)
+        .innerJoin(sellers, eq(products.sellerId, sellers.id))
+        .where(and(eq(products.status, "active"), eq(sellers.status, "active")))
+        .orderBy(asc(products.scale)),
+      db
+        .selectDistinct({ value: products.modelManufacturer })
+        .from(products)
+        .innerJoin(sellers, eq(products.sellerId, sellers.id))
+        .where(and(eq(products.status, "active"), eq(sellers.status, "active")))
+        .orderBy(asc(products.modelManufacturer)),
+      db
+        .selectDistinct({ id: sellers.id, name: sellers.storeName })
+        .from(sellers)
+        .innerJoin(products, eq(products.sellerId, sellers.id))
+        .where(and(eq(products.status, "active"), eq(sellers.status, "active")))
+        .orderBy(asc(sellers.storeName)),
+      db
+        .selectDistinct({ value: products.condition })
+        .from(products)
+        .innerJoin(sellers, eq(products.sellerId, sellers.id))
+        .where(and(eq(products.status, "active"), eq(sellers.status, "active")))
+        .orderBy(asc(products.condition)),
+    ]);
 
   const total = Number(countRows[0]?.count ?? 0);
   return {
     products: rows as ProductSummary[],
-    pagination: { page, pageSize, total, pages: Math.max(1, Math.ceil(total / pageSize)) },
+    pagination: {
+      page,
+      pageSize,
+      total,
+      pages: Math.max(1, Math.ceil(total / pageSize)),
+    },
     filters: {
       scales: scales.map((item) => item.value),
       manufacturers: manufacturers.map((item) => item.value),
@@ -129,7 +149,9 @@ export async function searchCatalog(query: CatalogQuery = {}): Promise<CatalogRe
   };
 }
 
-export async function getProductBySlug(slug: string): Promise<ProductDetail | null> {
+export async function getProductBySlug(
+  slug: string,
+): Promise<ProductDetail | null> {
   const db = getDb();
   const rows = await db
     .select({
@@ -162,8 +184,12 @@ export async function getProductBySlug(slug: string): Promise<ProductDetail | nu
       id: `${product.id}-primary`,
       productId: product.id,
       url: product.primaryImageUrl,
+      source: "external",
+      storageKey: null,
+      uploadedByUserId: null,
       alt: `${product.modelManufacturer} ${product.title} model car`,
       sortOrder: 0,
+      createdAt: product.createdAt,
     });
   }
   return { ...product, images } as ProductDetail;
@@ -174,7 +200,9 @@ export async function getRelatedProducts(product: ProductSummary, limit = 4) {
     q: `${product.vehicleMake} ${product.scale}`,
     pageSize: limit + 1,
   });
-  return result.products.filter((item) => item.id !== product.id).slice(0, limit);
+  return result.products
+    .filter((item) => item.id !== product.id)
+    .slice(0, limit);
 }
 
 export async function getSellerStorefront(slug: string) {
@@ -190,12 +218,16 @@ export async function getSellerStorefront(slug: string) {
       defaultShippingCents: sellers.defaultShippingCents,
       shippingPolicySummary: sellers.shippingPolicySummary,
       returnPolicySummary: sellers.returnPolicySummary,
+      sellerType: sellers.sellerType,
     })
     .from(sellers)
     .where(and(eq(sellers.slug, slug), eq(sellers.status, "active")))
     .limit(1);
   if (!sellerRows[0]) return null;
-  const catalog = await searchCatalog({ seller: sellerRows[0].id, pageSize: 48 });
+  const catalog = await searchCatalog({
+    seller: sellerRows[0].id,
+    pageSize: 48,
+  });
   return { seller: sellerRows[0], products: catalog.products };
 }
 

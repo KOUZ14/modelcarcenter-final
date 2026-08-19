@@ -3,6 +3,7 @@ import { wantedRequests } from "@/db/schema";
 import { searchCatalog } from "@/lib/catalog";
 import { readJsonObject, routeError } from "@/lib/http";
 import { makeReferenceCode, parseModelHunt } from "@/lib/validation";
+import { getCurrentCollector } from "@/lib/collector-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +24,10 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const payload = parseModelHunt(await readJsonObject(request));
+    const collector = await getCurrentCollector(request.headers).catch(() => null);
+    const input = await readJsonObject(request);
+    if (collector) input.collectorEmail = collector.user.email;
+    const payload = parseModelHunt(input);
     const existing = await searchCatalog({
       q: `${payload.vehicleMake} ${payload.vehicleModel}`,
       scale: payload.preferredScale,
@@ -38,7 +42,12 @@ export async function POST(request: Request) {
     }
     const id = crypto.randomUUID();
     const referenceCode = makeReferenceCode();
-    await getDb().insert(wantedRequests).values({ id, referenceCode, ...payload });
+    await getDb().insert(wantedRequests).values({
+      id,
+      referenceCode,
+      ...payload,
+      userId: collector?.user.id ?? null,
+    });
     return Response.json({
       ok: true,
       referenceCode,

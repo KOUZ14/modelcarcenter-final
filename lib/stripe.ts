@@ -47,6 +47,8 @@ export async function createCheckoutSession(input: {
   shippingCents: number;
   platformFeeCents: number;
   expiresAt: Date;
+  buyerUserId?: string | null;
+  buyerEmail?: string | null;
 }) {
   const body = new URLSearchParams({
     mode: "payment",
@@ -62,6 +64,11 @@ export async function createCheckoutSession(input: {
     "payment_intent_data[metadata][reservation_id]": input.reservationId,
     "automatic_tax[enabled]": config.automaticTax ? "true" : "false",
   });
+  if (input.buyerUserId) {
+    body.set("metadata[buyer_user_id]", input.buyerUserId);
+    body.set("payment_intent_data[metadata][buyer_user_id]", input.buyerUserId);
+  }
+  if (input.buyerEmail) body.set("customer_email", input.buyerEmail);
   config.shippingCountries.forEach((country, index) => {
     body.set(`shipping_address_collection[allowed_countries][${index}]`, country);
   });
@@ -114,11 +121,15 @@ export async function createConnectedAccount(input: { sellerId: string; email: s
   });
 }
 
-export async function createAccountOnboardingLink(accountId: string) {
+export async function createAccountOnboardingLink(
+  accountId: string,
+  returnPath = "/admin?stripe=returned",
+  refreshPath = "/admin?stripe=refresh",
+) {
   const body = new URLSearchParams({
     account: accountId,
-    refresh_url: `${config.siteUrl}/admin?stripe=refresh`,
-    return_url: `${config.siteUrl}/admin?stripe=returned`,
+    refresh_url: `${config.siteUrl}${refreshPath}`,
+    return_url: `${config.siteUrl}${returnPath}`,
     type: "account_onboarding",
     "collection_options[fields]": "eventually_due",
   });
