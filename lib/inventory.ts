@@ -125,7 +125,7 @@ export async function reserveCart(
        selected_shipping_service, selected_shipping_service_token, selected_shipping_estimated_days,
        quoted_shipping_address, marketplace_fee_bps, platform_fee_cents, currency,
        policy_version, policy_accepted_at, expires_at)
-      VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)`)
+      VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)`)
       .bind(
         reservationId,
         input.seller.sellerId,
@@ -172,7 +172,8 @@ export async function reserveCart(
   }
   try {
     await d1.batch(statements);
-  } catch {
+  } catch (error) {
+    console.error("Checkout reservation batch failed.", error);
     throw new Error("Inventory changed while checkout was starting. Review your cart and try again.");
   }
   return { reservationId, expiresAt };

@@ -165,3 +165,19 @@ test("checkout ignores browser-supplied fee values and historical orders copy th
   assert.doesNotMatch(migration, /DROP TABLE/i);
   assert.match(migration, /orders` ADD `marketplace_fee_bps` integer DEFAULT 1000 NOT NULL/);
 });
+
+test("checkout reservation SQL has one placeholder for every bound value", async () => {
+  const inventory = await readFile(
+    new URL("../lib/inventory.ts", import.meta.url),
+    "utf8",
+  );
+  const reservationSql = inventory.match(
+    /INSERT INTO checkout_reservations[\s\S]*?CURRENT_TIMESTAMP, \?\)`/,
+  );
+  assert.ok(reservationSql, "checkout reservation insert should be present");
+  assert.equal(
+    reservationSql[0].match(/\?/g)?.length,
+    18,
+    "reservation insert and bind arguments must stay aligned",
+  );
+});
