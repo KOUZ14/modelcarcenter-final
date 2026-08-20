@@ -65,6 +65,11 @@ export const sellers = sqliteTable(
     sellerType: text("seller_type", { enum: ["professional", "collector"] })
       .notNull()
       .default("professional"),
+    isFoundingSeller: integer("is_founding_seller", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    foundingRateStartsAt: text("founding_rate_starts_at"),
+    foundingRateEndsAt: text("founding_rate_ends_at"),
     ownerUserId: text("owner_user_id").references(() => authUser.id, {
       onDelete: "set null",
     }),
@@ -161,6 +166,73 @@ export const products = sqliteTable(
     })
       .notNull()
       .default("new"),
+    modelCondition: text("model_condition", {
+      enum: [
+        "not_specified",
+        "mint",
+        "near_mint",
+        "excellent",
+        "good",
+        "fair",
+        "poor",
+      ],
+    })
+      .notNull()
+      .default("not_specified"),
+    packagingCondition: text("packaging_condition", {
+      enum: [
+        "not_specified",
+        "sealed",
+        "mint",
+        "excellent",
+        "good",
+        "fair",
+        "poor",
+        "not_included",
+      ],
+    })
+      .notNull()
+      .default("not_specified"),
+    originalBoxStatus: text("original_box_status", {
+      enum: ["not_specified", "included", "not_included", "reproduction"],
+    })
+      .notNull()
+      .default("not_specified"),
+    missingParts: text("missing_parts").notNull().default(""),
+    defects: text("defects").notNull().default(""),
+    restorationCustomization: text("restoration_customization")
+      .notNull()
+      .default(""),
+    material: text("material").notNull().default(""),
+    productNumber: text("product_number"),
+    editionSerial: text("edition_serial"),
+    coaStatus: text("coa_status", {
+      enum: ["not_specified", "included", "not_included", "not_applicable"],
+    })
+      .notNull()
+      .default("not_specified"),
+    accessories: text("accessories").notNull().default(""),
+    provenance: text("provenance").notNull().default(""),
+    photoFrontChecked: integer("photo_front_checked", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    photoRearChecked: integer("photo_rear_checked", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    photoSidesChecked: integer("photo_sides_checked", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    photoBaseChecked: integer("photo_base_checked", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    photoPackagingChecked: integer("photo_packaging_checked", {
+      mode: "boolean",
+    })
+      .notNull()
+      .default(false),
+    photoIssuesChecked: integer("photo_issues_checked", { mode: "boolean" })
+      .notNull()
+      .default(false),
     priceCents: integer("price_cents").notNull(),
     currency: text("currency").notNull().default("usd"),
     inventoryQuantity: integer("inventory_quantity").notNull().default(0),
@@ -196,6 +268,7 @@ export const products = sqliteTable(
     ),
     index("products_scale_idx").on(table.scale),
     index("products_manufacturer_idx").on(table.modelManufacturer),
+    index("products_model_condition_idx").on(table.modelCondition),
     check("products_price_nonnegative", sql`${table.priceCents} >= 0`),
     check(
       "products_inventory_nonnegative",
@@ -381,7 +454,12 @@ export const orders = sqliteTable(
     currency: text("currency").notNull(),
     subtotalCents: integer("subtotal_cents").notNull(),
     shippingCents: integer("shipping_cents").notNull(),
+    marketplaceFeeBps: integer("marketplace_fee_bps")
+      .notNull()
+      .default(1000),
     platformFeeCents: integer("platform_fee_cents").notNull(),
+    paymentProcessingFeeCents: integer("payment_processing_fee_cents"),
+    sellerProceedsCents: integer("seller_proceeds_cents"),
     taxCents: integer("tax_cents").notNull().default(0),
     totalCents: integer("total_cents").notNull(),
     paymentStatus: text("payment_status", {
@@ -479,6 +557,9 @@ export const checkoutReservations = sqliteTable(
       .default("pending"),
     subtotalCents: integer("subtotal_cents").notNull(),
     shippingCents: integer("shipping_cents").notNull(),
+    marketplaceFeeBps: integer("marketplace_fee_bps")
+      .notNull()
+      .default(1000),
     platformFeeCents: integer("platform_fee_cents").notNull(),
     currency: text("currency").notNull(),
     policyVersion: text("policy_version"),

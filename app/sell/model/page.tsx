@@ -5,6 +5,7 @@ import { SiteHeader } from "@/components/site-header";
 import { requireCollector } from "@/lib/collector-auth";
 import { getGarageData, getOwnedProduct } from "@/lib/collector-store";
 import { notFound } from "next/navigation";
+import { config } from "@/lib/config";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Sell a Model", robots: { index: false, follow: false } };
@@ -21,5 +22,5 @@ export default async function SellModelPage({ searchParams }: { searchParams: Pr
     scale: String(query.scale ?? "").slice(0, 30),
     manufacturer: String(query.manufacturer ?? "").slice(0, 100),
   };
-  return <main><SiteHeader/><div className="inner-page shell"><CollectorListingForm initial={initial ? { product: initial.product, images: initial.images } : null} seller={garage.seller} displayName={collector.profile.displayName} prefill={prefill}/></div><SiteFooter/></main>;
+  return <main><SiteHeader/><div className="inner-page shell"><CollectorListingForm initial={initial ? { product: initial.product, images: initial.images } : null} seller={garage.seller} displayName={collector.profile.displayName} prefill={prefill} marketplaceFeeBps={config.collectorMarketplaceFeeBps}/></div><SiteFooter/></main>;
 }

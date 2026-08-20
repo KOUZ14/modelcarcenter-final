@@ -28,7 +28,18 @@ export type StripeCheckoutSession = {
   url: string | null;
   payment_status: string;
   status: string | null;
-  payment_intent: string | { id: string; latest_charge?: string | { id: string } | null } | null;
+  payment_intent: string | {
+    id: string;
+    latest_charge?: string | {
+      id: string;
+      application_fee_amount?: number | null;
+      balance_transaction?: string | {
+        id: string;
+        fee: number;
+        net: number;
+      } | null;
+    } | null;
+  } | null;
   customer_details?: { email?: string | null; name?: string | null; address?: Record<string, string | null> | null } | null;
   shipping_details?: { name?: string | null; address?: Record<string, string | null> | null } | null;
   collected_information?: { shipping_details?: { name?: string | null; address?: Record<string, string | null> | null } | null } | null;
@@ -39,18 +50,21 @@ export type StripeCheckoutSession = {
   metadata?: Record<string, string> | null;
 };
 
-export async function createCheckoutSession(input: {
+export type CheckoutSessionInput = {
   reservationId: string;
   sellerId: string;
   sellerStripeAccountId: string;
   items: Array<{ title: string; description: string; imageUrl: string | null; priceCents: number; currency: string; quantity: number }>;
   shippingCents: number;
+  marketplaceFeeBps: number;
   platformFeeCents: number;
   expiresAt: Date;
   buyerUserId?: string | null;
   buyerEmail?: string | null;
   policyVersion: string;
-}) {
+};
+
+export function buildCheckoutSessionBody(input: CheckoutSessionInput) {
   const body = new URLSearchParams({
     mode: "payment",
     success_url: `${config.siteUrl}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
@@ -60,6 +74,7 @@ export async function createCheckoutSession(input: {
     expires_at: String(Math.floor(input.expiresAt.getTime() / 1000)),
     "metadata[reservation_id]": input.reservationId,
     "metadata[seller_id]": input.sellerId,
+    "metadata[marketplace_fee_bps]": String(input.marketplaceFeeBps),
     "metadata[policy_version]": input.policyVersion,
     "metadata[policy_accepted_at]": new Date().toISOString(),
     "payment_intent_data[application_fee_amount]": String(input.platformFeeCents),
@@ -90,6 +105,11 @@ export async function createCheckoutSession(input: {
     body.set(`line_items[${index}][price_data][product_data][name]`, "Seller shipping");
     body.set(`line_items[${index}][quantity]`, "1");
   }
+  return body;
+}
+
+export async function createCheckoutSession(input: CheckoutSessionInput) {
+  const body = buildCheckoutSessionBody(input);
   return stripeRequest<StripeCheckoutSession>("/v1/checkout/sessions", {
     method: "POST",
     body,
@@ -147,7 +167,9 @@ export async function retrieveStripeAccount(accountId: string) {
 }
 
 export async function retrieveCheckoutSession(sessionId: string) {
-  return stripeRequest<StripeCheckoutSession>(`/v1/checkout/sessions/${encodeURIComponent(sessionId)}?expand[]=payment_intent.latest_charge`);
+  return stripeRequest<StripeCheckoutSession>(
+    `/v1/checkout/sessions/${encodeURIComponent(sessionId)}?expand[]=payment_intent.latest_charge.balance_transaction`,
+  );
 }
 
 export async function createFullRefund(input: { orderId: string; paymentIntentId: string; chargeId?: string | null }) {

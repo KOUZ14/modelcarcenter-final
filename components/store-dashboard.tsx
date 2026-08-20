@@ -8,6 +8,10 @@ import {
   ProductImageFields,
 } from "@/components/product-image-fields";
 import { uploadProductPhotoFiles } from "@/lib/upload-client";
+import {
+  CollectibleListingFields,
+  RequiredPhotoChecklist,
+} from "@/components/collectible-listing-fields";
 
 type Store = {
   id: string;
@@ -40,6 +44,24 @@ type Product = {
   vehicleYear: string | null;
   color: string | null;
   condition: string;
+  modelCondition: string;
+  packagingCondition: string;
+  originalBoxStatus: string;
+  missingParts: string;
+  defects: string;
+  restorationCustomization: string;
+  material: string;
+  productNumber: string | null;
+  editionSerial: string | null;
+  coaStatus: string;
+  accessories: string;
+  provenance: string;
+  photoFrontChecked: boolean;
+  photoRearChecked: boolean;
+  photoSidesChecked: boolean;
+  photoBaseChecked: boolean;
+  photoPackagingChecked: boolean;
+  photoIssuesChecked: boolean;
   priceCents: number;
   currency: string;
   inventoryQuantity: number;
@@ -68,7 +90,11 @@ type StoreOrder = {
   currency: string;
   subtotalCents: number;
   shippingCents: number;
+  taxCents: number;
+  marketplaceFeeBps: number;
   platformFeeCents: number;
+  paymentProcessingFeeCents: number | null;
+  sellerProceedsCents: number | null;
   totalCents: number;
   paymentStatus: string;
   fulfillmentStatus: string;
@@ -104,6 +130,12 @@ type Analytics = {
 
 type StoreData = {
   store: Store;
+  fee: {
+    marketplaceFeeBps: number;
+    standardMarketplaceFeeBps: number;
+    rateKind: "collector" | "professional" | "founding_professional";
+    foundingPromotionActive: boolean;
+  };
   inventory: Product[];
   orders: StoreOrder[];
   analytics: Analytics;
@@ -235,6 +267,7 @@ export function StoreDashboard({
         {view === "settings" && (
           <StoreSettings
             store={data.store}
+            fee={data.fee}
             disabled={suspended}
             action={action}
           />
@@ -586,10 +619,10 @@ function ProductEditor({
             <label>Color<input name="color" maxLength={80} defaultValue={product?.color ?? ""} /></label>
           </div>
           <div className="form-row">
-            <label>Condition<select name="condition" defaultValue={product?.condition ?? "new"}><option value="new">New</option><option value="preowned">Preowned</option><option value="used">Used</option><option value="other">Other</option></select></label>
             <label>Price (USD)<input name="price" inputMode="decimal" required defaultValue={product ? (product.priceCents / 100).toFixed(2) : ""} /></label>
+            <label>Inventory quantity<input name="inventoryQuantity" type="number" min={product?.reservedQuantity ?? 0} max={1000000} required defaultValue={product?.inventoryQuantity ?? 1} /></label>
           </div>
-          <label>Inventory quantity<input name="inventoryQuantity" type="number" min={product?.reservedQuantity ?? 0} max={1000000} required defaultValue={product?.inventoryQuantity ?? 1} /></label>
+          <CollectibleListingFields product={product}/>
           <ProductImageFields
             images={images}
             primaryImageUrl={product?.primaryImageUrl}
@@ -598,6 +631,7 @@ function ProductEditor({
             onFilesChange={setFiles}
             onRemove={productId ? removeImage : undefined}
           />
+          <RequiredPhotoChecklist product={product}/>
           <label>Search keywords<input name="keywords" maxLength={1000} defaultValue={product?.keywords ?? ""} /></label>
           {imageError && <p className="form-error" role="alert">{imageError}</p>}
           {product && product.reservedQuantity > 0 && <p className="form-note">Inventory cannot be reduced below {product.reservedQuantity} reserved units.</p>}
@@ -703,7 +737,7 @@ function Orders({
               <div>
                 <h4>Items</h4>
                 {order.items.map((item) => <p key={item.id}><b>{item.productTitleSnapshot}</b><br /><span>{item.sellerSkuSnapshot} · {item.quantity} × {formatMoney(item.unitPriceCents, order.currency)}</span></p>)}
-                <dl className="store-order-totals"><div><dt>Items</dt><dd>{formatMoney(order.subtotalCents, order.currency)}</dd></div><div><dt>Shipping</dt><dd>{formatMoney(order.shippingCents, order.currency)}</dd></div><div><dt>Marketplace fee</dt><dd>−{formatMoney(order.platformFeeCents, order.currency)}</dd></div><div><dt>Seller proceeds</dt><dd>{formatMoney(order.subtotalCents - order.platformFeeCents, order.currency)}</dd></div></dl>
+                <dl className="store-order-totals"><div><dt>Items</dt><dd>{formatMoney(order.subtotalCents, order.currency)}</dd></div><div><dt>Shipping</dt><dd>{formatMoney(order.shippingCents, order.currency)}</dd></div>{order.taxCents > 0 && <div><dt>Tax</dt><dd>{formatMoney(order.taxCents, order.currency)}</dd></div>}<div><dt>Model Car Center fee ({feePercent(order.marketplaceFeeBps)})</dt><dd>−{formatMoney(order.platformFeeCents, order.currency)}</dd></div><div><dt>Payment processing</dt><dd>{order.paymentProcessingFeeCents == null ? "Recorded by Stripe after settlement" : `${formatMoney(order.paymentProcessingFeeCents, order.currency)} paid separately by Model Car Center`}</dd></div><div><dt>Seller proceeds</dt><dd>{order.sellerProceedsCents == null ? "Not recorded for this order" : formatMoney(order.sellerProceedsCents, order.currency)}</dd></div></dl>
               </div>
               <div>
                 <h4>Ship to</h4><p><b>{order.buyerName || "Customer"}</b><br />{formatAddress(order.shippingAddress)}</p><p><a href={`mailto:${order.buyerEmail}`}>{order.buyerEmail}</a></p>
@@ -769,10 +803,12 @@ function AnalyticsView({ analytics }: { analytics: Analytics }) {
 
 function StoreSettings({
   store,
+  fee,
   disabled,
   action,
 }: {
   store: Store;
+  fee: StoreData["fee"];
   disabled: boolean;
   action(
     payload: Record<string, unknown>,
@@ -803,6 +839,7 @@ function StoreSettings({
         </form>
       </section>
       <section className="store-panel payout-status"><p className="eyebrow">Payout account</p><h3>Stripe Connect</h3><p><span className={`status ${store.stripeChargesEnabled ? "active" : "onboarding"}`}>Charges {store.stripeChargesEnabled ? "enabled" : "pending"}</span> <span className={`status ${store.stripePayoutsEnabled ? "active" : "onboarding"}`}>Payouts {store.stripePayoutsEnabled ? "enabled" : "pending"}</span></p><p>Bank and identity details remain securely hosted by Stripe. Contact Model Car Center if you need a fresh onboarding link.</p></section>
+      <section className="store-panel payout-status"><p className="eyebrow">Selling fees</p><h3>{fee.rateKind === "founding_professional" ? "Founding Seller Rate" : "Professional Store Rate"} — {feePercent(fee.marketplaceFeeBps)} marketplace fee</h3>{fee.foundingPromotionActive && <p>Your promotional rate is active. It automatically becomes the {feePercent(fee.standardMarketplaceFeeBps)} standard professional rate when the six-month period ends.</p>}<p><b>Payment processing is charged separately.</b> Under the current Stripe destination-charge setup, Model Car Center pays Stripe processing fees; recorded order details show those costs separately from your marketplace fee.</p><p>No listing fees. No monthly marketplace subscription for V1.</p></section>
     </div>
   );
 }
@@ -842,4 +879,8 @@ function date(value: string) {
         day: "numeric",
         year: "numeric",
       });
+}
+
+function feePercent(basisPoints: number) {
+  return `${basisPoints / 100}%`;
 }

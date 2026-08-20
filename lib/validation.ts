@@ -129,11 +129,183 @@ export const collectorListingConditions = [
   "used_fair",
 ] as const;
 
-export function parseCollectorListing(payload: Record<string, unknown>) {
-  const condition = cleanText(payload.condition, 40);
-  if (!collectorListingConditions.includes(condition as (typeof collectorListingConditions)[number])) {
-    throw new ValidationError("Choose a supported listing condition.");
+export const modelConditions = [
+  "mint",
+  "near_mint",
+  "excellent",
+  "good",
+  "fair",
+  "poor",
+] as const;
+
+export const packagingConditions = [
+  "sealed",
+  "mint",
+  "excellent",
+  "good",
+  "fair",
+  "poor",
+  "not_included",
+] as const;
+
+export const originalBoxStatuses = [
+  "included",
+  "not_included",
+  "reproduction",
+] as const;
+
+export const coaStatuses = [
+  "included",
+  "not_included",
+  "not_applicable",
+] as const;
+
+export const listingPhotoChecklist = [
+  { key: "photoFrontChecked", label: "Front and front three-quarter view" },
+  { key: "photoRearChecked", label: "Rear and rear three-quarter view" },
+  { key: "photoSidesChecked", label: "Both sides of the model" },
+  { key: "photoBaseChecked", label: "Top and underside/base markings" },
+  {
+    key: "photoPackagingChecked",
+    label: "Box, labels, COA, and accessories when included",
+  },
+  {
+    key: "photoIssuesChecked",
+    label: "Close-ups of every defect, missing part, repair, or customization",
+  },
+] as const;
+
+function checked(value: unknown) {
+  return value === true || value === 1 || value === "1" || value === "true" || value === "on";
+}
+
+function supportedValue<const T extends readonly string[]>(
+  value: unknown,
+  values: T,
+  label: string,
+): T[number] {
+  const candidate = cleanText(value, 40);
+  if (!values.includes(candidate as T[number])) {
+    throw new ValidationError(`Choose a supported ${label}.`);
   }
+  return candidate as T[number];
+}
+
+export function legacyConditionFromCollectibleDetails(input: {
+  modelCondition: (typeof modelConditions)[number];
+  packagingCondition: (typeof packagingConditions)[number];
+}) {
+  if (input.packagingCondition === "sealed" && input.modelCondition === "mint")
+    return "new_sealed" as const;
+  if (["mint", "near_mint"].includes(input.modelCondition))
+    return "new_opened" as const;
+  if (input.modelCondition === "excellent") return "used_excellent" as const;
+  if (input.modelCondition === "good") return "used_good" as const;
+  return "used_fair" as const;
+}
+
+export function parseCollectibleDetails(payload: Record<string, unknown>) {
+  const modelCondition = supportedValue(
+    payload.modelCondition,
+    modelConditions,
+    "model condition",
+  );
+  const packagingCondition = supportedValue(
+    payload.packagingCondition,
+    packagingConditions,
+    "packaging condition",
+  );
+  const originalBoxStatus = supportedValue(
+    payload.originalBoxStatus,
+    originalBoxStatuses,
+    "original-box status",
+  );
+  if (
+    (packagingCondition === "not_included") !==
+    (originalBoxStatus === "not_included")
+  ) {
+    throw new ValidationError(
+      "Packaging condition and original-box status must agree when no box is included.",
+    );
+  }
+  return {
+    modelCondition,
+    packagingCondition,
+    originalBoxStatus,
+    missingParts: requiredString(payload.missingParts, "missingParts", 2_000),
+    defects: requiredString(payload.defects, "defects", 2_000),
+    restorationCustomization: requiredString(
+      payload.restorationCustomization,
+      "restorationCustomization",
+      2_000,
+    ),
+    material: requiredString(payload.material, "material", 120),
+    productNumber: cleanText(payload.productNumber, 150) || null,
+    editionSerial: cleanText(payload.editionSerial, 150) || null,
+    coaStatus: supportedValue(payload.coaStatus, coaStatuses, "COA status"),
+    accessories: requiredString(payload.accessories, "accessories", 2_000),
+    provenance: cleanText(payload.provenance, 2_000),
+    photoFrontChecked: checked(payload.photoFrontChecked),
+    photoRearChecked: checked(payload.photoRearChecked),
+    photoSidesChecked: checked(payload.photoSidesChecked),
+    photoBaseChecked: checked(payload.photoBaseChecked),
+    photoPackagingChecked: checked(payload.photoPackagingChecked),
+    photoIssuesChecked: checked(payload.photoIssuesChecked),
+  };
+}
+
+type ListingReadiness = {
+  modelCondition: string;
+  packagingCondition: string;
+  originalBoxStatus: string;
+  missingParts: string;
+  defects: string;
+  restorationCustomization: string;
+  material: string;
+  coaStatus: string;
+  accessories: string;
+  photoFrontChecked: boolean;
+  photoRearChecked: boolean;
+  photoSidesChecked: boolean;
+  photoBaseChecked: boolean;
+  photoPackagingChecked: boolean;
+  photoIssuesChecked: boolean;
+};
+
+export function assertCollectibleListingReady(
+  listing: ListingReadiness,
+  imageCount: number,
+) {
+  if (
+    listing.modelCondition === "not_specified" ||
+    listing.packagingCondition === "not_specified" ||
+    listing.originalBoxStatus === "not_specified" ||
+    listing.coaStatus === "not_specified" ||
+    !listing.material.trim() ||
+    !listing.missingParts.trim() ||
+    !listing.defects.trim() ||
+    !listing.restorationCustomization.trim() ||
+    !listing.accessories.trim()
+  ) {
+    throw new ValidationError(
+      "Complete every required collectible condition and disclosure field before publishing.",
+    );
+  }
+  if (imageCount < 4) {
+    throw new ValidationError(
+      "Add at least four photos covering the required inspection views before publishing.",
+    );
+  }
+  const incomplete = listingPhotoChecklist.filter(({ key }) => !listing[key]);
+  if (incomplete.length) {
+    throw new ValidationError(
+      `Complete the required photo checklist before publishing: ${incomplete.map((item) => item.label).join(", ")}.`,
+    );
+  }
+}
+
+export function parseCollectorListing(payload: Record<string, unknown>) {
+  const collectible = parseCollectibleDetails(payload);
   return {
     title: requiredString(payload.title, "title", 200),
     description: requiredString(payload.description, "description", 4_000),
@@ -143,7 +315,8 @@ export function parseCollectorListing(payload: Record<string, unknown>) {
     scale: requiredString(payload.scale, "scale", 30),
     modelManufacturer: requiredString(payload.modelManufacturer, "modelManufacturer", 100),
     color: cleanText(payload.color, 80) || null,
-    condition: condition as (typeof collectorListingConditions)[number],
+    condition: legacyConditionFromCollectibleDetails(collectible),
+    ...collectible,
     priceCents: moneyToCents(payload.price, "price"),
     inventoryQuantity: integer(payload.quantity, "quantity", 1, 100),
     shippingCents: moneyToCents(payload.shippingPrice ?? "0", "shipping price"),
@@ -200,7 +373,15 @@ const requiredCsv = [
   "model_manufacturer",
   "vehicle_make",
   "vehicle_model",
-  "condition",
+  "model_condition",
+  "packaging_condition",
+  "original_box",
+  "missing_parts",
+  "defects",
+  "restoration_customization",
+  "material",
+  "coa",
+  "accessories",
   "price",
   "inventory_quantity",
 ] as const;
@@ -216,7 +397,25 @@ export type ValidatedImportRow = {
   vehicleModel: string;
   vehicleYear: string | null;
   color: string | null;
-  condition: "new" | "used" | "preowned" | "other";
+  condition: ReturnType<typeof legacyConditionFromCollectibleDetails>;
+  modelCondition: (typeof modelConditions)[number];
+  packagingCondition: (typeof packagingConditions)[number];
+  originalBoxStatus: (typeof originalBoxStatuses)[number];
+  missingParts: string;
+  defects: string;
+  restorationCustomization: string;
+  material: string;
+  productNumber: string | null;
+  editionSerial: string | null;
+  coaStatus: (typeof coaStatuses)[number];
+  accessories: string;
+  provenance: string;
+  photoFrontChecked: boolean;
+  photoRearChecked: boolean;
+  photoSidesChecked: boolean;
+  photoBaseChecked: boolean;
+  photoPackagingChecked: boolean;
+  photoIssuesChecked: boolean;
   priceCents: number;
   inventoryQuantity: number;
   keywords: string;
@@ -236,13 +435,30 @@ export function validateImportRows(rows: CsvRow[]) {
     let inventoryQuantity = 0;
     try { priceCents = moneyToCents(row.price); } catch (error) { rowErrors.push((error as Error).message); }
     try { inventoryQuantity = integer(row.inventory_quantity, "inventory_quantity", 0, 1_000_000); } catch (error) { rowErrors.push((error as Error).message); }
-    const condition = cleanText(row.condition, 30).toLowerCase();
-    if (!["new", "used", "preowned", "other"].includes(condition)) rowErrors.push("condition must be new, used, preowned, or other");
+    let collectible: ReturnType<typeof parseCollectibleDetails> | null = null;
+    try {
+      collectible = parseCollectibleDetails({
+        modelCondition: row.model_condition,
+        packagingCondition: row.packaging_condition,
+        originalBoxStatus: row.original_box,
+        missingParts: row.missing_parts,
+        defects: row.defects,
+        restorationCustomization: row.restoration_customization,
+        material: row.material,
+        productNumber: row.product_number,
+        editionSerial: row.edition_serial,
+        coaStatus: row.coa,
+        accessories: row.accessories,
+        provenance: row.provenance,
+      });
+    } catch (error) {
+      rowErrors.push((error as Error).message);
+    }
     if (cleanText(row.image_urls, 5_000))
       rowErrors.push(
         "image_urls is no longer supported; upload product photos after importing",
       );
-    if (rowErrors.length) {
+    if (rowErrors.length || !collectible) {
       errors.push({ row: index + 2, errors: rowErrors });
       return;
     }
@@ -257,7 +473,8 @@ export function validateImportRows(rows: CsvRow[]) {
       vehicleModel: cleanText(row.vehicle_model, 120),
       vehicleYear: cleanText(row.vehicle_year, 20) || null,
       color: cleanText(row.color, 80) || null,
-      condition: condition as ValidatedImportRow["condition"],
+      condition: legacyConditionFromCollectibleDetails(collectible),
+      ...collectible,
       priceCents,
       inventoryQuantity,
       keywords: cleanText(row.keywords, 1_000),

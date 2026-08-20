@@ -70,7 +70,10 @@ Copy `.env.example` to `.env.local`. Never commit real values.
 | `STRIPE_SECRET_KEY` | Platform secret key; test key during development |
 | `STRIPE_WEBHOOK_SECRET` | Signing secret for `/api/stripe/webhook` |
 | `STRIPE_API_VERSION` | Pinned Stripe API version; default `2026-02-25.clover` |
-| `MARKETPLACE_FEE_BPS` | Commission on item subtotal in basis points (`1000` = 10%) |
+| `COLLECTOR_MARKETPLACE_FEE_BPS` | Collector marketplace commission on item subtotal in basis points; default `850` (8.5%) |
+| `PROFESSIONAL_MARKETPLACE_FEE_BPS` | Standard professional-store commission on item subtotal; default `700` (7%) |
+| `FOUNDING_SELLER_MARKETPLACE_FEE_BPS` | Active founding professional-store commission; default `500` (5%) |
+| `FOUNDING_SELLER_PROMOTION_MONTHS` | Length of an admin-assigned founding promotion; default `6` months |
 | `CHECKOUT_EXPIRATION_MINUTES` | Reservation/Checkout lifetime, 30–1440 minutes |
 | `SHIPPING_COUNTRIES` | Comma-separated ISO two-letter countries, default `US` |
 | `STRIPE_AUTOMATIC_TAX` | Enables Stripe automatic tax when `true`; no custom tax calculation exists |
@@ -144,7 +147,9 @@ For local development, ensure the `IMAGES` binding is available through the Site
 - **Sell from your collection** opens the authenticated collector listing flow at `/sell/model`.
 - **Apply as a professional seller** keeps the original application and founder-managed inventory workflow.
 
-Collector listings save as drafts. A collector can upload photos and edit the draft, but submission is gated on complete Stripe Connect charges/payout capability and at least one image. Submitted listings enter `pending_review` and are not public. The founder approves or rejects them in `/admin`; rejected listings preserve a review note for the collector. Editing a live collector listing returns it to review. Sellers can fulfill only their own paid orders, and suspension blocks seller actions.
+Collector listings save as drafts. A collector can upload photos and edit the draft, but submission is gated on complete Stripe Connect charges/payout capability, every collectible-grade disclosure, all six photo-checklist confirmations, and at least four original images. Submitted listings enter `pending_review` and are not public. The founder approves or rejects them in `/admin`; rejected listings preserve a review note for the collector. Editing a live collector listing returns it to review. Sellers can fulfill only their own paid orders, and suspension blocks seller actions.
+
+Every new listing records model condition separately from packaging condition, original-box status, missing parts, defects, restoration/customization, material, product number, edition/serial, COA status, accessories, and provenance. Missing-parts, defects, restoration/customization, and accessories fields require an explicit disclosure such as `None known`; provenance and identifiers remain optional when they do not exist. The same standard applies to collector, professional-store, admin, and CSV-created drafts before they can become active.
 
 ## Stripe Connect and Checkout
 
@@ -157,7 +162,11 @@ Collector listings save as drafts. A collector can upload photos and edit the dr
 
 Individual collectors start the same Stripe-hosted onboarding from My Garage. They never enter bank or identity data into Model Car Center. Their draft cannot be submitted, and an admin cannot approve it, until Stripe reports both charges and payouts enabled.
 
-Checkout is server-authoritative. The browser sends only product IDs and quantities. The server reloads active products and the active seller from D1, checks available inventory, calculates shipping and the application fee, reserves inventory transactionally, then creates a finite Stripe Checkout Session. Stripe receives `application_fee_amount` and `transfer_data[destination]` for a destination charge.
+Checkout is server-authoritative. The browser sends only product IDs and quantities. The server reloads active products and the active seller from D1, checks available inventory, determines the seller's current fee program, calculates the commission against item subtotal only, reserves inventory and the exact fee snapshot transactionally, then creates a finite Stripe Checkout Session. Stripe receives that amount as `application_fee_amount` with `transfer_data[destination]` for the existing destination charge. Client-supplied fee values are ignored.
+
+The V1 marketplace rates are 8.5% for collector sellers and 7% for professional stores. An admin can explicitly designate a professional store for the 5% founding rate; the stored six-month start/end window is evaluated on every checkout, then expires automatically back to 7% without deleting the seller's founding history. Orders retain `marketplace_fee_bps` and `platform_fee_cents`, so later pricing changes never rewrite historical fees. There are no listing, monthly, subscription, or account-opening fees for V1.
+
+Marketplace commission and payment processing are separate. With the current destination-charge funds flow Stripe assesses processing fees to the Model Car Center platform, not the connected seller. Completed orders record the actual Stripe processing fee when Stripe returns the expanded balance transaction, along with the seller proceeds generated by the destination charge; seller interfaces do not invent a processing amount when it is unavailable.
 
 ### Webhook setup
 
@@ -225,17 +234,19 @@ The admin provides:
 Download the canonical template from the admin import tab. The columns are:
 
 ```text
-seller_sku,title,description,scale,model_manufacturer,vehicle_make,vehicle_model,vehicle_year,color,condition,price,inventory_quantity,keywords
+seller_sku,title,description,scale,model_manufacturer,vehicle_make,vehicle_model,vehicle_year,color,model_condition,packaging_condition,original_box,missing_parts,defects,restoration_customization,material,product_number,edition_serial,coa,accessories,provenance,price,inventory_quantity,keywords
 ```
 
 - Select the seller before upload.
-- `seller_sku`, title, scale, manufacturer, vehicle make/model, condition, price, and inventory are required.
+- `seller_sku`, title, scale, manufacturer, vehicle make/model, collectible conditions/disclosures, material, price, and inventory are required.
 - `price` is decimal currency and is normalized to integer cents.
-- `condition` is `new`, `used`, `preowned`, or `other`.
+- `model_condition` is `mint`, `near_mint`, `excellent`, `good`, `fair`, or `poor`.
+- `packaging_condition` is `sealed`, `mint`, `excellent`, `good`, `fair`, `poor`, or `not_included`; `original_box` is `included`, `not_included`, or `reproduction`.
+- `coa` is `included`, `not_included`, or `not_applicable`.
 - Add product photos from the product editor after the import. Photos are uploaded directly; sellers do not need to host them elsewhere.
 - The importer reports row-level errors and makes no changes until the preview is clean and committed.
 - The unique key is seller + seller SKU. A later import updates that product while preserving its uploaded photos; it does not silently duplicate the SKU.
-- New imported products start as drafts and must be activated by the founder.
+- New imported products start as drafts. Before activation, add at least four photos and confirm the full photo checklist in the product editor.
 
 ## Quality checks
 

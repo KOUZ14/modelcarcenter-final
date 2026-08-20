@@ -8,6 +8,7 @@ import {
   retrieveStripeAccount,
 } from "./stripe";
 import {
+  assertCollectibleListingReady,
   cleanText,
   makeSlug,
   parseCollectorListing,
@@ -141,6 +142,24 @@ function listingProductValues(
     vehicleYear: values.vehicleYear,
     color: values.color,
     condition: values.condition,
+    modelCondition: values.modelCondition,
+    packagingCondition: values.packagingCondition,
+    originalBoxStatus: values.originalBoxStatus,
+    missingParts: values.missingParts,
+    defects: values.defects,
+    restorationCustomization: values.restorationCustomization,
+    material: values.material,
+    productNumber: values.productNumber,
+    editionSerial: values.editionSerial,
+    coaStatus: values.coaStatus,
+    accessories: values.accessories,
+    provenance: values.provenance,
+    photoFrontChecked: values.photoFrontChecked,
+    photoRearChecked: values.photoRearChecked,
+    photoSidesChecked: values.photoSidesChecked,
+    photoBaseChecked: values.photoBaseChecked,
+    photoPackagingChecked: values.photoPackagingChecked,
+    photoIssuesChecked: values.photoIssuesChecked,
     priceCents: values.priceCents,
     inventoryQuantity: values.inventoryQuantity,
     keywords:
@@ -179,8 +198,10 @@ export async function submitCollectorListing(
     .select({ count: sql<number>`count(*)` })
     .from(productImages)
     .where(eq(productImages.productId, productId));
-  if (Number(imageCount[0]?.count ?? 0) < 1)
-    throw new ValidationError("Add at least one photo before submitting.");
+  assertCollectibleListingReady(
+    owned.product,
+    Number(imageCount[0]?.count ?? 0),
+  );
   await getDb()
     .update(sellers)
     .set({

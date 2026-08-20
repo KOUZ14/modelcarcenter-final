@@ -10,6 +10,10 @@ import {
   ProductImageFields,
 } from "@/components/product-image-fields";
 import { uploadProductPhotoFiles } from "@/lib/upload-client";
+import {
+  CollectibleListingFields,
+  RequiredPhotoChecklist,
+} from "@/components/collectible-listing-fields";
 
 type AdminData = Record<string, unknown> & { section?: string };
 const tabs = [
@@ -223,6 +227,12 @@ type Seller = {
   returnPolicySummary: string;
   sellerType?: string;
   ownerUserId?: string | null;
+  isFoundingSeller: boolean;
+  foundingRateStartsAt?: string | null;
+  foundingRateEndsAt?: string | null;
+  marketplaceFeeBps: number;
+  standardMarketplaceFeeBps: number;
+  foundingPromotionActive: boolean;
 };
 function Sellers({
   data,
@@ -324,6 +334,8 @@ function Sellers({
             <thead>
               <tr>
                 <th>Seller</th>
+                <th>Type / rate</th>
+                <th>Founding program</th>
                 <th>Stripe</th>
                 <th>Shipping</th>
                 <th>Actions</th>
@@ -346,6 +358,48 @@ function Sellers({
                           ? "Store account linked"
                           : "Awaiting store sign-in"}
                       </small>
+                    )}
+                  </td>
+                  <td>
+                    <b>
+                      {seller.sellerType === "collector"
+                        ? "Collector"
+                        : "Professional store"}
+                    </b>
+                    <br />
+                    Standard {feePercent(seller.standardMarketplaceFeeBps)}
+                    <br />
+                    <span className="status active">
+                      Current {feePercent(seller.marketplaceFeeBps)}
+                    </span>
+                  </td>
+                  <td>
+                    {seller.isFoundingSeller ? (
+                      <>
+                        <b>
+                          {seller.foundingPromotionActive
+                            ? "Active"
+                            : "Founding history retained"}
+                        </b>
+                        <br />
+                        <small>
+                          {shortDate(seller.foundingRateStartsAt)} â€“{" "}
+                          {shortDate(seller.foundingRateEndsAt)}
+                        </small>
+                      </>
+                    ) : seller.sellerType === "professional" ? (
+                      <button
+                        onClick={() =>
+                          void action({
+                            action: "assign_founding_seller",
+                            sellerId: seller.id,
+                          })
+                        }
+                      >
+                        Assign 6-month rate
+                      </button>
+                    ) : (
+                      <small>Not eligible</small>
                     )}
                   </td>
                   <td>
@@ -444,6 +498,10 @@ function emptySeller(): Seller {
     returnPolicySummary: "",
     sellerType: "professional",
     ownerUserId: null,
+    isFoundingSeller: false,
+    marketplaceFeeBps: 0,
+    standardMarketplaceFeeBps: 0,
+    foundingPromotionActive: false,
   };
 }
 function SellerEditor({
@@ -569,6 +627,24 @@ type AdminProduct = {
   vehicleYear?: string | null;
   color?: string | null;
   condition?: string;
+  modelCondition: string;
+  packagingCondition: string;
+  originalBoxStatus: string;
+  missingParts: string;
+  defects: string;
+  restorationCustomization: string;
+  material: string;
+  productNumber?: string | null;
+  editionSerial?: string | null;
+  coaStatus: string;
+  accessories: string;
+  provenance: string;
+  photoFrontChecked: boolean;
+  photoRearChecked: boolean;
+  photoSidesChecked: boolean;
+  photoBaseChecked: boolean;
+  photoPackagingChecked: boolean;
+  photoIssuesChecked: boolean;
   keywords?: string;
   priceCents: number;
   inventoryQuantity: number;
@@ -633,7 +709,8 @@ function Products({
                 <div>
                   <span className="status pending_review">Awaiting Review</span>
                   <h3>{product.title}</h3>
-                  <p>{product.scale} · {product.modelManufacturer} · {product.condition}</p>
+                  <p>{product.scale} · {product.modelManufacturer} · model {product.modelCondition.replaceAll("_", " ")} · packaging {product.packagingCondition.replaceAll("_", " ")}</p>
+                  <p><b>Disclosures:</b> Missing parts: {product.missingParts}; defects: {product.defects}; restoration/customization: {product.restorationCustomization}</p>
                   <p>{product.sellerName} · {product.sellerEmail}</p>
                   <p>{money(product.priceCents)} · {product.inventoryQuantity} available</p>
                   <div className="row-actions">
@@ -766,6 +843,22 @@ function emptyProduct(sellerId: string): AdminProduct {
     modelManufacturer: "",
     vehicleMake: "",
     vehicleModel: "",
+    modelCondition: "",
+    packagingCondition: "",
+    originalBoxStatus: "",
+    missingParts: "",
+    defects: "",
+    restorationCustomization: "",
+    material: "",
+    coaStatus: "",
+    accessories: "",
+    provenance: "",
+    photoFrontChecked: false,
+    photoRearChecked: false,
+    photoSidesChecked: false,
+    photoBaseChecked: false,
+    photoPackagingChecked: false,
+    photoIssuesChecked: false,
     priceCents: 0,
     inventoryQuantity: 1,
     reservedQuantity: 0,
@@ -921,16 +1014,8 @@ function ProductEditor({
             <input name="color" defaultValue={product.color ?? ""} />
           </label>
         </div>
+        <CollectibleListingFields product={product} />
         <div className="form-row">
-          <label>
-            Condition
-            <select name="condition" defaultValue={product.condition ?? "new"}>
-              <option>new</option>
-              <option>preowned</option>
-              <option>used</option>
-              <option>other</option>
-            </select>
-          </label>
           <label>
             Price, cents
             <input
@@ -960,6 +1045,7 @@ function ProductEditor({
           onFilesChange={setFiles}
           onRemove={productId ? removeImage : undefined}
         />
+        <RequiredPhotoChecklist product={product} />
         <label>
           Keywords
           <input name="keywords" defaultValue={product.keywords ?? ""} />
@@ -1237,6 +1323,13 @@ type AdminOrder = {
   buyerName: string;
   shippingAddress: string;
   currency: string;
+  subtotalCents: number;
+  shippingCents: number;
+  taxCents: number;
+  marketplaceFeeBps: number;
+  platformFeeCents: number;
+  paymentProcessingFeeCents?: number | null;
+  sellerProceedsCents?: number | null;
   totalCents: number;
   paymentStatus: string;
   fulfillmentStatus: string;
@@ -1307,6 +1400,18 @@ function OrderPanel({
               {money(item.unitPriceCents * item.quantity, order.currency)}
             </p>
           ))}
+          <p>
+            Model Car Center fee ({feePercent(order.marketplaceFeeBps)}):{" "}
+            <b>{money(order.platformFeeCents, order.currency)}</b>
+            <br />
+            Stripe processing: {order.paymentProcessingFeeCents == null
+              ? "not recorded"
+              : money(order.paymentProcessingFeeCents, order.currency)}
+            <br />
+            Seller proceeds: {order.sellerProceedsCents == null
+              ? "not recorded"
+              : money(order.sellerProceedsCents, order.currency)}
+          </p>
         </div>
         <div>
           <h3>Ship to</h3>
@@ -1381,6 +1486,18 @@ function OrderPanel({
       )}
     </article>
   );
+}
+
+function feePercent(basisPoints: number) {
+  return `${basisPoints / 100}%`;
+}
+
+function shortDate(value?: string | null) {
+  if (!value) return "Not set";
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime())
+    ? "Invalid date"
+    : parsed.toLocaleDateString();
 }
 function formatAddress(raw: string) {
   try {

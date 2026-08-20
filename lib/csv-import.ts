@@ -13,7 +13,18 @@ export const inventoryCsvHeaders = [
   "vehicle_model",
   "vehicle_year",
   "color",
-  "condition",
+  "model_condition",
+  "packaging_condition",
+  "original_box",
+  "missing_parts",
+  "defects",
+  "restoration_customization",
+  "material",
+  "product_number",
+  "edition_serial",
+  "coa",
+  "accessories",
+  "provenance",
   "price",
   "inventory_quantity",
   "keywords",
@@ -46,14 +57,23 @@ export async function commitInventoryCsv(sellerId: string, csv: string) {
     statements.push(
       d1.prepare(`INSERT INTO products
         (id, seller_id, slug, seller_sku, title, description, scale, model_manufacturer, vehicle_make,
-         vehicle_model, vehicle_year, color, condition, price_cents, currency, inventory_quantity,
-         reserved_quantity, status, keywords)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'usd', ?, 0, 'draft', ?)
+         vehicle_model, vehicle_year, color, condition, model_condition, packaging_condition,
+         original_box_status, missing_parts, defects, restoration_customization, material,
+         product_number, edition_serial, coa_status, accessories, provenance, price_cents,
+         currency, inventory_quantity, reserved_quantity, status, keywords)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'usd', ?, 0, 'draft', ?)
         ON CONFLICT(seller_id, seller_sku) DO UPDATE SET
           title = excluded.title, description = excluded.description, scale = excluded.scale,
           model_manufacturer = excluded.model_manufacturer, vehicle_make = excluded.vehicle_make,
           vehicle_model = excluded.vehicle_model, vehicle_year = excluded.vehicle_year, color = excluded.color,
-          condition = excluded.condition, price_cents = excluded.price_cents,
+          condition = excluded.condition, model_condition = excluded.model_condition,
+          packaging_condition = excluded.packaging_condition,
+          original_box_status = excluded.original_box_status, missing_parts = excluded.missing_parts,
+          defects = excluded.defects, restoration_customization = excluded.restoration_customization,
+          material = excluded.material, product_number = excluded.product_number,
+          edition_serial = excluded.edition_serial, coa_status = excluded.coa_status,
+          accessories = excluded.accessories, provenance = excluded.provenance,
+          price_cents = excluded.price_cents,
           inventory_quantity = CASE
             WHEN excluded.inventory_quantity >= products.reserved_quantity THEN excluded.inventory_quantity
             ELSE products.reserved_quantity
@@ -62,7 +82,10 @@ export async function commitInventoryCsv(sellerId: string, csv: string) {
           updated_at = CURRENT_TIMESTAMP`)
         .bind(productId, sellerId, slug, row.sellerSku, row.title, row.description, row.scale,
           row.modelManufacturer, row.vehicleMake, row.vehicleModel, row.vehicleYear, row.color,
-          row.condition, row.priceCents, row.inventoryQuantity, row.keywords),
+          row.condition, row.modelCondition, row.packagingCondition, row.originalBoxStatus,
+          row.missingParts, row.defects, row.restorationCustomization, row.material,
+          row.productNumber, row.editionSerial, row.coaStatus, row.accessories, row.provenance,
+          row.priceCents, row.inventoryQuantity, row.keywords),
     );
   }
   await d1.batch(statements);
@@ -70,5 +93,5 @@ export async function commitInventoryCsv(sellerId: string, csv: string) {
 }
 
 export function inventoryCsvTemplate() {
-  return `${inventoryCsvHeaders.join(",")}\nSKU-001,Example model,Short plain-text description,1:18,AUTOart,Porsche,911,1973,Silver,new,249.95,2,"porsche 911 classic"\n`;
+  return `${inventoryCsvHeaders.join(",")}\nSKU-001,Example model,Short plain-text description,1:18,AUTOart,Porsche,911,1973,Silver,mint,excellent,included,None known,None known,None known,Die-cast metal,78123,147 of 500,included,"Display base; booklet",Single-owner collection,249.95,2,"porsche 911 classic"\n`;
 }

@@ -3,6 +3,7 @@ import { getD1, getDb } from "@/db";
 import { checkoutReservationItems, checkoutReservations, products, sellers } from "@/db/schema";
 import { calculateServerTotals } from "./business";
 import { config } from "./config";
+import { determineMarketplaceFee } from "./fees";
 
 export type RequestedCartItem = { productId: string; quantity: number };
 
@@ -34,6 +35,10 @@ export async function loadAuthoritativeCart(items: RequestedCartItem[]) {
       sellerStatus: sellers.status,
       sellerName: sellers.storeName,
       sellerEmail: sellers.contactEmail,
+      sellerType: sellers.sellerType,
+      isFoundingSeller: sellers.isFoundingSeller,
+      foundingRateStartsAt: sellers.foundingRateStartsAt,
+      foundingRateEndsAt: sellers.foundingRateEndsAt,
       sellerStripeAccountId: sellers.stripeAccountId,
       stripeChargesEnabled: sellers.stripeChargesEnabled,
       stripePayoutsEnabled: sellers.stripePayoutsEnabled,
@@ -56,8 +61,19 @@ export async function loadAuthoritativeCart(items: RequestedCartItem[]) {
   }
   if (new Set(rows.map((row) => row.currency)).size !== 1) throw new Error("All products in a checkout must use the same currency.");
   const authoritativeItems = rows.map((row) => ({ ...row, quantity: consolidated.get(row.id)! }));
-  const totals = calculateServerTotals(authoritativeItems, seller.shippingCents, config.marketplaceFeeBps);
-  return { items: authoritativeItems, seller, totals, currency: rows[0].currency };
+  const fee = determineMarketplaceFee(seller);
+  const totals = calculateServerTotals(
+    authoritativeItems,
+    seller.shippingCents,
+    fee.marketplaceFeeBps,
+  );
+  return {
+    items: authoritativeItems,
+    seller,
+    fee,
+    totals,
+    currency: rows[0].currency,
+  };
 }
 
 export async function reserveCart(
@@ -70,9 +86,9 @@ export async function reserveCart(
   const expiresAt = new Date(Date.now() + config.checkoutExpirationMinutes * 60_000);
   const statements = [
     d1.prepare(`INSERT INTO checkout_reservations
-      (id, seller_id, buyer_user_id, status, subtotal_cents, shipping_cents, platform_fee_cents, currency, policy_version, policy_accepted_at, expires_at)
-      VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)`)
-      .bind(reservationId, input.seller.sellerId, buyerUserId, input.totals.subtotalCents, input.totals.shippingCents, input.totals.platformFeeCents, input.currency, policyVersion, expiresAt.toISOString()),
+      (id, seller_id, buyer_user_id, status, subtotal_cents, shipping_cents, marketplace_fee_bps, platform_fee_cents, currency, policy_version, policy_accepted_at, expires_at)
+      VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)`)
+      .bind(reservationId, input.seller.sellerId, buyerUserId, input.totals.subtotalCents, input.totals.shippingCents, input.fee.marketplaceFeeBps, input.totals.platformFeeCents, input.currency, policyVersion, expiresAt.toISOString()),
     d1.prepare(`UPDATE sellers SET
       default_shipping_cents = CASE WHEN status = 'active' THEN default_shipping_cents ELSE -1 END
       WHERE id = ?`).bind(input.seller.sellerId),

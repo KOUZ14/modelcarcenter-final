@@ -537,6 +537,11 @@ footer { padding-top: 70px; color: white; background: var(--ink); }
 .listing-form section > h2, .listing-submit h2 { margin-bottom: 26px; font-size: 30px; }
 .listing-form section > label { margin-bottom: 18px; }
 .listing-form textarea { resize: vertical; }
+.collectible-fields, .photo-checklist { min-width: 0; display: grid; gap: 18px; margin: 0; padding: 0; border: 0; }
+.collectible-fields legend, .photo-checklist legend { width: 100%; margin-bottom: 4px; color: var(--ink); font-size: 20px; font-weight: 700; letter-spacing: -.02em; text-transform: none; }
+.collectible-fields > label { display: grid; gap: 8px; }
+.photo-checklist { gap: 12px; margin-top: 24px; padding: 20px; background: #f6f5f2; border: 1px solid var(--line); }
+.photo-checklist .field-note { margin: 0 0 6px; line-height: 1.5; }
 .listing-images { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-block: 20px; }
 .listing-images > div { position: relative; }
 .listing-images img { width: 100%; aspect-ratio: 1.2; object-fit: cover; }
