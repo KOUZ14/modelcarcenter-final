@@ -23,11 +23,12 @@ export function SignInForm({
       returnTo.startsWith("/") && !returnTo.startsWith("//")
         ? returnTo
         : "/account";
+    const newUserCallbackURL = `${callbackURL}${callbackURL.includes("?") ? "&" : "?"}new=1`;
     const result = await authClient.signIn.magicLink({
       email,
       name: email.split("@")[0] || "Collector",
       callbackURL,
-      newUserCallbackURL: "/account?new=1",
+      newUserCallbackURL,
       errorCallbackURL: "/sign-in?error=invalid-link",
     });
     if (result.error) {
@@ -60,11 +61,13 @@ export function SignInForm({
     );
   return (
     <form className="auth-card" onSubmit={submit} noValidate>
-      <p className="eyebrow">Collector account</p>
+      <p className="eyebrow">
+        {returnTo.startsWith("/store") ? "Store account" : "Your account"}
+      </p>
       <h1>Sign in to Model Car Center</h1>
       <p>
-        Keep your orders, wishlist, Model Hunts, listings, and sales in one My
-        Garage account.
+        Use one secure account for shopping and selling. Approved stores should
+        sign in with the contact email on their seller record.
       </p>
       <label htmlFor="sign-in-email">
         Email address

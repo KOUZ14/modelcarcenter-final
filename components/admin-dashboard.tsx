@@ -216,6 +216,8 @@ type Seller = {
   logoUrl?: string | null;
   shippingPolicySummary: string;
   returnPolicySummary: string;
+  sellerType?: string;
+  ownerUserId?: string | null;
 };
 function Sellers({
   data,
@@ -333,6 +335,13 @@ function Sellers({
                     <span className={`status ${seller.status}`}>
                       {seller.status}
                     </span>
+                    {seller.sellerType !== "collector" && (
+                      <small>
+                        {seller.ownerUserId
+                          ? "Store account linked"
+                          : "Awaiting store sign-in"}
+                      </small>
+                    )}
                   </td>
                   <td>
                     {seller.stripeAccountId || "Not created"}
@@ -428,6 +437,8 @@ function emptySeller(): Seller {
     description: "",
     shippingPolicySummary: "",
     returnPolicySummary: "",
+    sellerType: "professional",
+    ownerUserId: null,
   };
 }
 function SellerEditor({

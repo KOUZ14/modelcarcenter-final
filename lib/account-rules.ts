@@ -94,3 +94,19 @@ export function canClaimGuestRecord(input: {
       input.recordEmail.trim().toLowerCase()
   );
 }
+
+export function canClaimProfessionalStore(input: {
+  authenticatedEmail: string;
+  emailVerified: boolean;
+  storeEmail: string;
+  storeType: string;
+  currentOwnerUserId?: string | null;
+}) {
+  return (
+    input.emailVerified &&
+    input.storeType === "professional" &&
+    !input.currentOwnerUserId &&
+    input.authenticatedEmail.trim().toLowerCase() ===
+      input.storeEmail.trim().toLowerCase()
+  );
+}

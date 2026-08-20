@@ -4,12 +4,13 @@ Model Car Center is a collector-first marketplace for collectible model cars fro
 
 `find → buy → save → hunt → sell → fulfill`
 
-The original professional-seller flow remains intact: seller applications, founder approval, CSV inventory, Stripe Connect, checkout, webhooks, fulfillment, refunds, and Model Hunt administration continue to use the same underlying seller/product/order architecture.
+The professional-seller flow uses the same seller/product/order architecture: seller applications, founder approval, Stripe Connect, checkout, webhooks, refunds, and Model Hunt administration remain intact, while approved stores can self-manage inventory and fulfillment.
 
 ## Capabilities
 
 - Passwordless collector accounts powered by Better Auth email magic links, 10-minute hashed verification tokens, secure cookie sessions, and Resend delivery
 - A protected **My Garage** for cross-device wishlists and carts, Model Hunts, orders, collector listings, sales, profile settings, and account deletion
+- A protected **Store Console** for approved professional sellers with store-scoped inventory CRUD, CSV imports, order fulfillment, storefront settings, and sales analytics
 - Conservative email-based claiming of legacy guest orders and Model Hunts: only a verified matching account can claim an unowned record
 - Conflict-aware guest-to-account migration: wishlists are deduplicated, same-seller carts merge, and different-seller carts require an explicit choice
 - D1-backed accounts, sessions, profiles, carts, wishlists, catalog, sellers, applications, Model Hunts, reservations, orders, snapshots, and Stripe event deduplication
@@ -85,6 +86,20 @@ Collector accounts use Better Auth's D1-compatible Drizzle adapter and magic-lin
 For local sign-in, configure `SITE_URL`, `BETTER_AUTH_SECRET`, `RESEND_API_KEY`, and `EMAIL_FROM`. When Resend is not configured in development, the email layer logs that delivery was skipped, so a real magic-link round trip requires a development Resend key and verified sender.
 
 Authentication and authorization are separate. Collector listing, image, and fulfillment endpoints derive the user from the server session and then constrain database reads/writes to that user's seller or product. Browser-supplied user IDs, emails, seller IDs, prices, and payout destinations are never trusted as authorization.
+
+## Professional store accounts
+
+Approved professional sellers use the same passwordless magic-link authentication at `/sign-in`, then work from `/store`. On the first verified sign-in, the app links the account only when exactly one unowned professional seller record has the same normalized contact email. It never claims collector sellers, already-owned stores, ambiguous duplicate-email records, or records for an unverified account.
+
+The Store Console provides:
+
+- Seller-scoped product creation and editing, stock changes that cannot drop below reserved inventory, publishing/unpublishing, and archival
+- CSV preview and seller-SKU upsert importing using the canonical inventory template; new imports start as drafts and updates preserve the existing product status
+- Paid-order details and shipping-address access for the owning store, plus tracking updates and customer shipment email
+- Lifetime sales, order, fee, unit, inventory-value, low-stock, rolling six-month, and top-product analytics calculated only from that seller's records
+- Storefront profile, shipping, and return-policy settings; contact-email changes, refunds, payout remediation, suspensions, and store closure remain founder/support actions
+
+Professional stores can create and edit drafts before onboarding is complete, but products can become active only while the seller is active and Stripe reports both charges and payouts enabled. Suspended accounts retain read-only access. Store inventory "deletion" is archival so order snapshots and in-flight reservation references remain intact.
 
 ## Database and D1
 

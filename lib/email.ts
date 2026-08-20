@@ -9,7 +9,7 @@ type SendEmailInput = {
   idempotencyKey?: string;
 };
 
-function escapeHtml(value: unknown) {
+export function escapeHtml(value: unknown) {
   return String(value ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")

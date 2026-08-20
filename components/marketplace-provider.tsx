@@ -5,7 +5,13 @@ import type { CartItem, ProductSummary } from "@/lib/types";
 import { cartSellerConflict } from "@/lib/business";
 import { authClient } from "@/lib/auth-client";
 
-type Collector = { id: string; email: string; displayName: string; avatarUrl: string | null };
+type Collector = {
+  id: string;
+  email: string;
+  displayName: string;
+  avatarUrl: string | null;
+  store: { id: string; name: string; status: string } | null;
+};
 type MarketplaceContextValue = {
   cart: CartItem[];
   wishlist: string[];
@@ -53,10 +59,11 @@ export function MarketplaceProvider({ children }: { children: React.ReactNode })
           authenticated?: boolean;
           user?: { id: string; email: string };
           profile?: { displayName: string; avatarUrl: string | null };
+          store?: { id: string; name: string; status: string } | null;
         };
         if (!active) return;
         if (account.authenticated && account.user && account.profile) {
-          setCollector({ id: account.user.id, email: account.user.email, displayName: account.profile.displayName, avatarUrl: account.profile.avatarUrl });
+          setCollector({ id: account.user.id, email: account.user.email, displayName: account.profile.displayName, avatarUrl: account.profile.avatarUrl, store: account.store ?? null });
           const merge = await fetch("/api/account", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "merge", wishlist: guestWishlist, cart: guestCart.map((item) => ({ productId: item.productId, quantity: item.quantity })) }) });
           const merged = await merge.json() as { conflict?: boolean; wishlist?: string[]; cart?: CartItem[]; guestCart?: CartItem[] };
           if (!active) return;

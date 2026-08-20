@@ -16,7 +16,9 @@ import {
   isCollectorListingAwaitingReview,
 } from "@/lib/account-rules";
 import { commitInventoryCsv, previewInventoryCsv } from "@/lib/csv-import";
+import { config } from "@/lib/config";
 import {
+  escapeHtml,
   sendEmail,
   sendListingReviewEmail,
   sendModelHuntMatchEmail,
@@ -317,7 +319,14 @@ async function runAdminAction(
         )
         .bind(applicationId),
     ]);
-    return { sellerId };
+    const email = await sendEmail({
+      to: application[0].email,
+      subject: "Your Model Car Center store is approved",
+      html: `<h1>Your store is approved</h1><p>${escapeHtml(application[0].storeName)} now has access to the Model Car Center Store Console.</p><p><a href="${escapeHtml(config.siteUrl)}/store">Sign in to your Store Console</a> with this email address to manage inventory, orders, and analytics.</p><p>We will guide you through Stripe payout onboarding separately.</p>`,
+      text: `${application[0].storeName} is approved for Model Car Center. Sign in with this email address to manage inventory, orders, and analytics: ${config.siteUrl}/store\nWe will guide you through Stripe payout onboarding separately.`,
+      idempotencyKey: `seller-approved-${sellerId}`,
+    });
+    return { sellerId, emailSent: email.sent };
   }
   if (action === "reject_application") {
     const applicationId = requiredString(
@@ -571,8 +580,8 @@ async function startStripeOnboarding(sellerId: string) {
   const email = await sendEmail({
     to: seller.contactEmail,
     subject: "Complete your Model Car Center payout setup",
-    html: `<h1>Complete your payout setup</h1><p>Use Stripe's secure hosted onboarding to provide the business and payout details required to sell through Model Car Center.</p><p><a href="${link.url}">Complete Stripe onboarding</a></p><p>This single-use link expires soon. Contact support if you need a new one.</p>`,
-    text: `Complete your secure Stripe onboarding for Model Car Center: ${link.url}\nThis single-use link expires soon.`,
+    html: `<h1>Complete your payout setup</h1><p>Use Stripe's secure hosted onboarding to provide the business and payout details required to sell through Model Car Center.</p><p><a href="${escapeHtml(link.url)}">Complete Stripe onboarding</a></p><p>This single-use link expires soon. After onboarding, <a href="${escapeHtml(config.siteUrl)}/store">sign in to your Store Console</a> with this email address.</p>`,
+    text: `Complete your secure Stripe onboarding for Model Car Center: ${link.url}\nThis single-use link expires soon. After onboarding, sign in to your Store Console with this email address: ${config.siteUrl}/store`,
     idempotencyKey: `onboarding-${sellerId}-${link.expires_at}`,
   });
   return { onboardingUrl: link.url, emailSent: email.sent };

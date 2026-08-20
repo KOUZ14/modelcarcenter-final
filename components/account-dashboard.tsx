@@ -48,6 +48,7 @@ export function AccountDashboard({
   email: string;
   isNew: boolean;
 }) {
+  const professionalStore = data.seller?.sellerType === "professional";
   const [view, setView] = useState<(typeof tabs)[number]>(
     tabs.includes(initialView as never)
       ? (initialView as (typeof tabs)[number])
@@ -112,8 +113,8 @@ export function AccountDashboard({
             </button>
           ))}
         </nav>
-        <Link className="button dark small" href="/sell/model">
-          Sell a Model
+        <Link className="button dark small" href={professionalStore ? "/store" : "/sell/model"}>
+          {professionalStore ? "Open Store Console" : "Sell a Model"}
         </Link>
       </aside>
       <section className="garage-content">
@@ -163,10 +164,17 @@ function GarageView({
       <Listings rows={data.listings} seller={data.seller} action={action} />
     );
   if (view === "sales") return <Sales rows={data.sales} action={action} />;
-  return <ProfileForm profile={profile} action={action} />;
+  return (
+    <ProfileForm
+      profile={profile}
+      action={action}
+      canDeleteAccount={data.seller?.sellerType !== "professional"}
+    />
+  );
 }
 
 function Overview({ data }: { data: GarageData }) {
+  const professionalStore = data.seller?.sellerType === "professional";
   const activeHunts = data.hunts.filter(
     (hunt) => !["closed"].includes(String(hunt.status)),
   ).length;
@@ -204,7 +212,9 @@ function Overview({ data }: { data: GarageData }) {
       <div className="garage-quick">
         <Link href="/#inventory">Find a Model</Link>
         <Link href="/#model-hunt">Start a Model Hunt</Link>
-        <Link href="/sell/model">Sell a Model</Link>
+        <Link href={professionalStore ? "/store" : "/sell/model"}>
+          {professionalStore ? "Manage Store" : "Sell a Model"}
+        </Link>
       </div>
     </>
   );
@@ -378,6 +388,20 @@ function Listings({
   action(payload: Record<string, unknown>): Promise<unknown>;
 }) {
   const [busy, setBusy] = useState(false);
+  if (seller?.sellerType === "professional")
+    return (
+      <div className="garage-section">
+        <p className="eyebrow">Professional store</p>
+        <h2>Manage inventory in your Store Console.</h2>
+        <p>
+          Create products, import inventory, publish listings, and monitor stock
+          from the workspace built for your store.
+        </p>
+        <Link className="button dark small" href="/store?view=inventory">
+          Open inventory
+        </Link>
+      </div>
+    );
   async function onboarding() {
     setBusy(true);
     try {
@@ -587,9 +611,11 @@ function ShipmentForm({
 function ProfileForm({
   profile,
   action,
+  canDeleteAccount,
 }: {
   profile: Profile;
   action(payload: Record<string, unknown>): Promise<unknown>;
+  canDeleteAccount: boolean;
 }) {
   const [confirm, setConfirm] = useState("");
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -635,7 +661,7 @@ function ProfileForm({
         </label>
         <button className="button dark small">Save profile</button>
       </form>
-      <details className="delete-account">
+      {canDeleteAccount ? <details className="delete-account">
         <summary>Delete account</summary>
         <p>
           This revokes sessions, removes your profile, and deactivates listings.
@@ -656,7 +682,14 @@ function ProfileForm({
         >
           Delete my account
         </button>
-      </details>
+      </details> : <div className="account-callout">
+        <b>Store account closure is handled by support.</b>
+        <p>
+          Contact Model Car Center to close or transfer the professional store
+          before removing this sign-in account.
+        </p>
+        <Link className="text-link" href="/contact">Contact support</Link>
+      </div>}
     </div>
   );
 }

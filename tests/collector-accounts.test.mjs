@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   canApproveCollectorListing,
   canClaimGuestRecord,
+  canClaimProfessionalStore,
   canFulfillSellerOrder,
   cartMergeDecision,
   isCollectorListingAwaitingReview,
@@ -11,6 +12,7 @@ import {
   safeReturnPath,
   uniqueWishlistIds,
 } from "../lib/account-rules.ts";
+import { buildStoreAnalytics } from "../lib/store-rules.ts";
 import {
   detectListingImageType,
   MAX_LISTING_IMAGE_BYTES,
@@ -149,6 +151,105 @@ test("legacy records are claimable only by a verified matching email and only on
     }),
     false,
   );
+});
+
+test("professional stores are claimed only by a verified matching contact email", () => {
+  const base = {
+    authenticatedEmail: "Owner@Store.example",
+    emailVerified: true,
+    storeEmail: "owner@store.example",
+    storeType: "professional",
+    currentOwnerUserId: null,
+  };
+  assert.equal(canClaimProfessionalStore(base), true);
+  assert.equal(
+    canClaimProfessionalStore({ ...base, emailVerified: false }),
+    false,
+  );
+  assert.equal(
+    canClaimProfessionalStore({ ...base, storeType: "collector" }),
+    false,
+  );
+  assert.equal(
+    canClaimProfessionalStore({
+      ...base,
+      authenticatedEmail: "other@store.example",
+    }),
+    false,
+  );
+  assert.equal(
+    canClaimProfessionalStore({ ...base, currentOwnerUserId: "owner-1" }),
+    false,
+  );
+});
+
+test("store analytics include paid sales and seller-scoped inventory health", () => {
+  const analytics = buildStoreAnalytics(
+    [
+      {
+        id: "paid-1",
+        paymentStatus: "paid",
+        fulfillmentStatus: "unfulfilled",
+        subtotalCents: 30_000,
+        platformFeeCents: 3_000,
+        createdAt: "2026-08-10T12:00:00.000Z",
+      },
+      {
+        id: "refunded-1",
+        paymentStatus: "refunded",
+        fulfillmentStatus: "cancelled",
+        subtotalCents: 90_000,
+        platformFeeCents: 9_000,
+        createdAt: "2026-08-11T12:00:00.000Z",
+      },
+    ],
+    [
+      {
+        orderId: "paid-1",
+        productTitleSnapshot: "Porsche 911",
+        quantity: 2,
+        unitPriceCents: 15_000,
+      },
+      {
+        orderId: "refunded-1",
+        productTitleSnapshot: "Refunded model",
+        quantity: 1,
+        unitPriceCents: 90_000,
+      },
+    ],
+    [
+      {
+        status: "active",
+        inventoryQuantity: 3,
+        reservedQuantity: 1,
+        priceCents: 15_000,
+      },
+      {
+        status: "draft",
+        inventoryQuantity: 10,
+        reservedQuantity: 0,
+        priceCents: 2_000,
+      },
+    ],
+    new Date("2026-08-19T00:00:00.000Z"),
+  );
+  assert.equal(analytics.paidOrders, 1);
+  assert.equal(analytics.unfulfilledOrders, 1);
+  assert.equal(analytics.unitsSold, 2);
+  assert.equal(analytics.grossSalesCents, 30_000);
+  assert.equal(analytics.netSalesCents, 27_000);
+  assert.equal(analytics.activeListings, 1);
+  assert.equal(analytics.lowStock, 1);
+  assert.equal(analytics.inventoryValueCents, 50_000);
+  assert.deepEqual(analytics.topProducts, [
+    { title: "Porsche 911", units: 2, revenueCents: 30_000 },
+  ]);
+  assert.deepEqual(analytics.monthlySales.at(-1), {
+    key: "2026-08",
+    label: "Aug 2026",
+    orders: 1,
+    grossCents: 30_000,
+  });
 });
 
 test("collector moderation only reviews pending submissions and gates approval on payouts", () => {
