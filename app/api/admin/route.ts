@@ -18,6 +18,11 @@ import {
 import { commitInventoryCsv, previewInventoryCsv } from "@/lib/csv-import";
 import { config } from "@/lib/config";
 import {
+  determineMarketplaceFee,
+  foundingSellerRatePeriod,
+  isEligibleForFoundingSellerRate,
+} from "@/lib/fees";
+import {
   escapeHtml,
   sendEmail,
   sendListingReviewEmail,
@@ -26,18 +31,25 @@ import {
 } from "@/lib/email";
 import { readJsonObject, routeError } from "@/lib/http";
 import {
+  decideAdminResolutionCase,
+  getAdminResolutionCases,
+} from "@/lib/resolution";
+import {
   createAccountOnboardingLink,
   createConnectedAccount,
   createFullRefund,
   retrieveStripeAccount,
 } from "@/lib/stripe";
 import {
+  assertCollectibleListingReady,
   cleanText,
   integer,
   isEmail,
+  legacyConditionFromCollectibleDetails,
   makeSlug,
   normalizeEmail,
   optionalHttpUrl,
+  parseCollectibleDetails,
   requiredString,
   ValidationError,
 } from "@/lib/validation";
@@ -161,7 +173,14 @@ async function loadAdminSection(section: string) {
         .from(sellerApplications)
         .orderBy(desc(sellerApplications.createdAt)),
     ]);
-    return { section, sellers: sellerRows, applications };
+    return {
+      section,
+      sellers: sellerRows.map((seller) => ({
+        ...seller,
+        ...determineMarketplaceFee(seller),
+      })),
+      applications,
+    };
   }
   if (section === "products") {
     const productRows = await db
@@ -180,6 +199,24 @@ async function loadAdminSection(section: string) {
         vehicleYear: products.vehicleYear,
         color: products.color,
         condition: products.condition,
+        modelCondition: products.modelCondition,
+        packagingCondition: products.packagingCondition,
+        originalBoxStatus: products.originalBoxStatus,
+        missingParts: products.missingParts,
+        defects: products.defects,
+        restorationCustomization: products.restorationCustomization,
+        material: products.material,
+        productNumber: products.productNumber,
+        editionSerial: products.editionSerial,
+        coaStatus: products.coaStatus,
+        accessories: products.accessories,
+        provenance: products.provenance,
+        photoFrontChecked: products.photoFrontChecked,
+        photoRearChecked: products.photoRearChecked,
+        photoSidesChecked: products.photoSidesChecked,
+        photoBaseChecked: products.photoBaseChecked,
+        photoPackagingChecked: products.photoPackagingChecked,
+        photoIssuesChecked: products.photoIssuesChecked,
         keywords: products.keywords,
         priceCents: products.priceCents,
         inventoryQuantity: products.inventoryQuantity,
@@ -249,6 +286,13 @@ async function loadAdminSection(section: string) {
         buyerName: orders.buyerName,
         shippingAddress: orders.shippingAddress,
         currency: orders.currency,
+        subtotalCents: orders.subtotalCents,
+        shippingCents: orders.shippingCents,
+        taxCents: orders.taxCents,
+        marketplaceFeeBps: orders.marketplaceFeeBps,
+        platformFeeCents: orders.platformFeeCents,
+        paymentProcessingFeeCents: orders.paymentProcessingFeeCents,
+        sellerProceedsCents: orders.sellerProceedsCents,
         totalCents: orders.totalCents,
         paymentStatus: orders.paymentStatus,
         fulfillmentStatus: orders.fulfillmentStatus,
@@ -272,6 +316,12 @@ async function loadAdminSection(section: string) {
         ...order,
         items: items.filter((item) => item.orderId === order.id),
       })),
+    };
+  }
+  if (section === "resolution") {
+    return {
+      section,
+      cases: await getAdminResolutionCases(),
     };
   }
   throw new ValidationError("Unknown admin section.");
@@ -370,6 +420,42 @@ async function runAdminAction(
       .where(eq(sellers.id, sellerId));
     return {};
   }
+  if (action === "assign_founding_seller") {
+    const sellerId = requiredString(payload.sellerId, "sellerId", 100);
+    const seller = await db
+      .select()
+      .from(sellers)
+      .where(eq(sellers.id, sellerId))
+      .limit(1);
+    if (!seller[0]) throw new ValidationError("Seller not found.");
+    if (!isEligibleForFoundingSellerRate(seller[0])) {
+      throw new ValidationError(
+        "Only professional stores can receive the founding seller rate.",
+      );
+    }
+    if (seller[0].isFoundingSeller) {
+      return {
+        foundingRateStartsAt: seller[0].foundingRateStartsAt,
+        foundingRateEndsAt: seller[0].foundingRateEndsAt,
+      };
+    }
+    const requestedStart = cleanText(payload.startsAt, 100);
+    const start = requestedStart ? new Date(requestedStart) : new Date();
+    if (Number.isNaN(start.getTime())) {
+      throw new ValidationError("Choose a valid founding rate start date.");
+    }
+    const period = foundingSellerRatePeriod(start);
+    await db
+      .update(sellers)
+      .set({
+        isFoundingSeller: true,
+        foundingRateStartsAt: period.startsAt,
+        foundingRateEndsAt: period.endsAt,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(sellers.id, sellerId));
+    return period;
+  }
   if (action === "stripe_onboarding")
     return startStripeOnboarding(
       requiredString(payload.sellerId, "sellerId", 100),
@@ -383,6 +469,7 @@ async function runAdminAction(
     const status = requiredString(payload.status, "status", 20);
     if (!["draft", "active", "inactive", "rejected"].includes(status))
       throw new ValidationError("Invalid product status.");
+    if (status === "active") await assertProductPublishReady(id);
     await db
       .update(products)
       .set({
@@ -432,7 +519,24 @@ async function runAdminAction(
     return notifyHunt(requiredString(payload.huntId, "huntId", 100));
   if (action === "ship_order") return shipOrder(payload);
   if (action === "refund_order") return refundOrder(payload);
+  if (action === "admin_case_decision")
+    return decideAdminResolutionCase(payload);
   throw new ValidationError("Unknown admin action.");
+}
+
+async function assertProductPublishReady(productId: string) {
+  const [productRows, imageRows] = await Promise.all([
+    getDb().select().from(products).where(eq(products.id, productId)).limit(1),
+    getDb()
+      .select({ count: sql<number>`count(*)` })
+      .from(productImages)
+      .where(eq(productImages.productId, productId)),
+  ]);
+  if (!productRows[0]) throw new ValidationError("Product not found.");
+  assertCollectibleListingReady(
+    productRows[0],
+    Number(imageRows[0]?.count ?? 0),
+  );
 }
 
 async function reviewCollectorListing(payload: Record<string, unknown>) {
@@ -474,6 +578,7 @@ async function reviewCollectorListing(payload: Record<string, unknown>) {
         "Seller payout onboarding must be complete before approval.",
       );
     }
+    await assertProductPublishReady(productId);
     await getDb()
       .update(products)
       .set({
@@ -639,6 +744,7 @@ async function saveProduct(payload: Record<string, unknown>) {
   if (!seller[0]) throw new ValidationError("Select a valid seller.");
   const title = requiredString(payload.title, "title", 200);
   const sellerSku = requiredString(payload.sellerSku, "sellerSku", 100);
+  const collectible = parseCollectibleDetails(payload);
   const values = {
     id,
     sellerId,
@@ -658,11 +764,8 @@ async function saveProduct(payload: Record<string, unknown>) {
     vehicleModel: requiredString(payload.vehicleModel, "vehicleModel", 120),
     vehicleYear: cleanText(payload.vehicleYear, 20) || null,
     color: cleanText(payload.color, 80) || null,
-    condition: (["new", "used", "preowned", "other"].includes(
-      cleanText(payload.condition, 30),
-    )
-      ? cleanText(payload.condition, 30)
-      : "new") as "new" | "used" | "preowned" | "other",
+    condition: legacyConditionFromCollectibleDetails(collectible),
+    ...collectible,
     priceCents: integer(payload.priceCents, "priceCents", 0, 100_000_000),
     inventoryQuantity: integer(
       payload.inventoryQuantity,
@@ -783,7 +886,11 @@ async function refundOrder(payload: Record<string, unknown>) {
     .where(eq(orders.id, orderId))
     .limit(1);
   const order = rows[0];
-  if (!order || order.paymentStatus !== "paid" || !order.stripePaymentIntentId)
+  if (
+    !order ||
+    !["paid", "partially_refunded"].includes(order.paymentStatus) ||
+    !order.stripePaymentIntentId
+  )
     throw new ValidationError(
       "Only a paid, unrefunded Stripe order can be refunded.",
     );
@@ -798,7 +905,7 @@ async function refundOrder(payload: Record<string, unknown>) {
   const statements = [
     d1
       .prepare(
-        `UPDATE orders SET payment_status = 'refunded', stripe_refund_id = ?, fulfillment_status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND payment_status = 'paid'`,
+        `UPDATE orders SET payment_status = 'refunded', refunded_amount_cents = total_cents, stripe_refund_id = ?, fulfillment_status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND payment_status IN ('paid', 'partially_refunded')`,
       )
       .bind(refund.id, orderId),
   ];

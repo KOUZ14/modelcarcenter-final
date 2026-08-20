@@ -65,6 +65,11 @@ export const sellers = sqliteTable(
     sellerType: text("seller_type", { enum: ["professional", "collector"] })
       .notNull()
       .default("professional"),
+    isFoundingSeller: integer("is_founding_seller", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    foundingRateStartsAt: text("founding_rate_starts_at"),
+    foundingRateEndsAt: text("founding_rate_ends_at"),
     ownerUserId: text("owner_user_id").references(() => authUser.id, {
       onDelete: "set null",
     }),
@@ -161,6 +166,73 @@ export const products = sqliteTable(
     })
       .notNull()
       .default("new"),
+    modelCondition: text("model_condition", {
+      enum: [
+        "not_specified",
+        "mint",
+        "near_mint",
+        "excellent",
+        "good",
+        "fair",
+        "poor",
+      ],
+    })
+      .notNull()
+      .default("not_specified"),
+    packagingCondition: text("packaging_condition", {
+      enum: [
+        "not_specified",
+        "sealed",
+        "mint",
+        "excellent",
+        "good",
+        "fair",
+        "poor",
+        "not_included",
+      ],
+    })
+      .notNull()
+      .default("not_specified"),
+    originalBoxStatus: text("original_box_status", {
+      enum: ["not_specified", "included", "not_included", "reproduction"],
+    })
+      .notNull()
+      .default("not_specified"),
+    missingParts: text("missing_parts").notNull().default(""),
+    defects: text("defects").notNull().default(""),
+    restorationCustomization: text("restoration_customization")
+      .notNull()
+      .default(""),
+    material: text("material").notNull().default(""),
+    productNumber: text("product_number"),
+    editionSerial: text("edition_serial"),
+    coaStatus: text("coa_status", {
+      enum: ["not_specified", "included", "not_included", "not_applicable"],
+    })
+      .notNull()
+      .default("not_specified"),
+    accessories: text("accessories").notNull().default(""),
+    provenance: text("provenance").notNull().default(""),
+    photoFrontChecked: integer("photo_front_checked", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    photoRearChecked: integer("photo_rear_checked", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    photoSidesChecked: integer("photo_sides_checked", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    photoBaseChecked: integer("photo_base_checked", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    photoPackagingChecked: integer("photo_packaging_checked", {
+      mode: "boolean",
+    })
+      .notNull()
+      .default(false),
+    photoIssuesChecked: integer("photo_issues_checked", { mode: "boolean" })
+      .notNull()
+      .default(false),
     priceCents: integer("price_cents").notNull(),
     currency: text("currency").notNull().default("usd"),
     inventoryQuantity: integer("inventory_quantity").notNull().default(0),
@@ -196,6 +268,7 @@ export const products = sqliteTable(
     ),
     index("products_scale_idx").on(table.scale),
     index("products_manufacturer_idx").on(table.modelManufacturer),
+    index("products_model_condition_idx").on(table.modelCondition),
     check("products_price_nonnegative", sql`${table.priceCents} >= 0`),
     check(
       "products_inventory_nonnegative",
@@ -381,11 +454,17 @@ export const orders = sqliteTable(
     currency: text("currency").notNull(),
     subtotalCents: integer("subtotal_cents").notNull(),
     shippingCents: integer("shipping_cents").notNull(),
+    marketplaceFeeBps: integer("marketplace_fee_bps")
+      .notNull()
+      .default(1000),
     platformFeeCents: integer("platform_fee_cents").notNull(),
+    paymentProcessingFeeCents: integer("payment_processing_fee_cents"),
+    sellerProceedsCents: integer("seller_proceeds_cents"),
     taxCents: integer("tax_cents").notNull().default(0),
     totalCents: integer("total_cents").notNull(),
+    refundedAmountCents: integer("refunded_amount_cents").notNull().default(0),
     paymentStatus: text("payment_status", {
-      enum: ["pending", "paid", "failed", "refunded"],
+      enum: ["pending", "paid", "failed", "partially_refunded", "refunded"],
     })
       .notNull()
       .default("pending"),
@@ -418,7 +497,8 @@ export const orders = sqliteTable(
       "orders_money_nonnegative",
       sql`
       ${table.subtotalCents} >= 0 AND ${table.shippingCents} >= 0 AND
-      ${table.platformFeeCents} >= 0 AND ${table.taxCents} >= 0 AND ${table.totalCents} >= 0
+      ${table.platformFeeCents} >= 0 AND ${table.taxCents} >= 0 AND ${table.totalCents} >= 0 AND
+      ${table.refundedAmountCents} >= 0 AND ${table.refundedAmountCents} <= ${table.totalCents}
     `,
     ),
   ],
@@ -446,6 +526,168 @@ export const orderItems = sqliteTable(
     index("order_items_order_idx").on(table.orderId),
     check("order_items_price_nonnegative", sql`${table.unitPriceCents} >= 0`),
     check("order_items_quantity_positive", sql`${table.quantity} > 0`),
+  ],
+);
+
+export const resolutionCases = sqliteTable(
+  "resolution_cases",
+  {
+    id: text("id").primaryKey(),
+    caseNumber: text("case_number").notNull(),
+    orderId: text("order_id")
+      .notNull()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    openedByUserId: text("opened_by_user_id").references(() => authUser.id, {
+      onDelete: "set null",
+    }),
+    reason: text("reason", {
+      enum: [
+        "not_received",
+        "damaged",
+        "not_as_described",
+        "wrong_item",
+        "missing_item",
+        "counterfeit",
+        "other",
+      ],
+    }).notNull(),
+    requestedResolution: text("requested_resolution", {
+      enum: ["full_refund", "partial_refund", "return_refund"],
+    }).notNull(),
+    requestedRefundCents: integer("requested_refund_cents"),
+    details: text("details").notNull(),
+    status: text("status", {
+      enum: [
+        "awaiting_seller",
+        "awaiting_buyer",
+        "return_authorized",
+        "return_in_transit",
+        "under_review",
+        "resolved",
+        "closed",
+        "denied",
+      ],
+    })
+      .notNull()
+      .default("awaiting_seller"),
+    policyVersion: text("policy_version").notNull(),
+    reportDeadline: text("report_deadline").notNull(),
+    sellerRespondBy: text("seller_respond_by").notNull(),
+    buyerEvidenceBy: text("buyer_evidence_by").notNull(),
+    buyerEscalateBy: text("buyer_escalate_by"),
+    buyerShipBy: text("buyer_ship_by"),
+    returnAuthorizationNumber: text("return_authorization_number"),
+    returnCarrier: text("return_carrier"),
+    returnTrackingNumber: text("return_tracking_number"),
+    resolutionSummary: text("resolution_summary"),
+    resolvedAt: text("resolved_at"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("resolution_cases_number_unique").on(table.caseNumber),
+    uniqueIndex("resolution_cases_order_unique").on(table.orderId),
+    index("resolution_cases_status_idx").on(table.status, table.updatedAt),
+    check(
+      "resolution_cases_requested_refund_nonnegative",
+      sql`${table.requestedRefundCents} IS NULL OR ${table.requestedRefundCents} > 0`,
+    ),
+  ],
+);
+
+export const resolutionMessages = sqliteTable(
+  "resolution_messages",
+  {
+    id: text("id").primaryKey(),
+    caseId: text("case_id")
+      .notNull()
+      .references(() => resolutionCases.id, { onDelete: "cascade" }),
+    authorUserId: text("author_user_id").references(() => authUser.id, {
+      onDelete: "set null",
+    }),
+    authorRole: text("author_role", {
+      enum: ["buyer", "seller", "support", "system"],
+    }).notNull(),
+    kind: text("kind", {
+      enum: [
+        "case_opened",
+        "message",
+        "seller_response",
+        "return_authorized",
+        "return_shipped",
+        "refund",
+        "escalation",
+        "case_closed",
+      ],
+    })
+      .notNull()
+      .default("message"),
+    body: text("body").notNull(),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [index("resolution_messages_case_idx").on(table.caseId, table.createdAt)],
+);
+
+export const resolutionFiles = sqliteTable(
+  "resolution_files",
+  {
+    id: text("id").primaryKey(),
+    caseId: text("case_id")
+      .notNull()
+      .references(() => resolutionCases.id, { onDelete: "cascade" }),
+    uploadedByUserId: text("uploaded_by_user_id").references(() => authUser.id, {
+      onDelete: "set null",
+    }),
+    uploaderRole: text("uploader_role", {
+      enum: ["buyer", "seller", "support"],
+    }).notNull(),
+    kind: text("kind", { enum: ["evidence", "return_label"] })
+      .notNull()
+      .default("evidence"),
+    storageKey: text("storage_key").notNull(),
+    originalName: text("original_name").notNull(),
+    mimeType: text("mime_type").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    caption: text("caption").notNull().default(""),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("resolution_files_storage_key_unique").on(table.storageKey),
+    index("resolution_files_case_idx").on(table.caseId, table.createdAt),
+    check("resolution_files_size_positive", sql`${table.sizeBytes} > 0`),
+  ],
+);
+
+export const resolutionRefunds = sqliteTable(
+  "resolution_refunds",
+  {
+    id: text("id").primaryKey(),
+    caseId: text("case_id")
+      .notNull()
+      .references(() => resolutionCases.id, { onDelete: "cascade" }),
+    orderId: text("order_id")
+      .notNull()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    initiatedByUserId: text("initiated_by_user_id").references(() => authUser.id, {
+      onDelete: "set null",
+    }),
+    kind: text("kind", { enum: ["partial", "full"] }).notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    stripeRefundId: text("stripe_refund_id").notNull(),
+    status: text("status", {
+      enum: ["pending", "succeeded", "failed", "cancelled"],
+    }).notNull(),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("resolution_refunds_stripe_unique").on(table.stripeRefundId),
+    index("resolution_refunds_case_idx").on(table.caseId, table.createdAt),
+    check("resolution_refunds_amount_positive", sql`${table.amountCents} > 0`),
   ],
 );
 
@@ -479,6 +721,9 @@ export const checkoutReservations = sqliteTable(
       .default("pending"),
     subtotalCents: integer("subtotal_cents").notNull(),
     shippingCents: integer("shipping_cents").notNull(),
+    marketplaceFeeBps: integer("marketplace_fee_bps")
+      .notNull()
+      .default(1000),
     platformFeeCents: integer("platform_fee_cents").notNull(),
     currency: text("currency").notNull(),
     policyVersion: text("policy_version"),

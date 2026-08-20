@@ -42,7 +42,9 @@ export function buildStoreAnalytics(
   inventory: StoreAnalyticsProduct[],
   now = new Date(),
 ) {
-  const paidOrders = orders.filter((order) => order.paymentStatus === "paid");
+  const paidOrders = orders.filter((order) =>
+    ["paid", "partially_refunded"].includes(order.paymentStatus),
+  );
   const paidIds = new Set(paidOrders.map((order) => order.id));
   const paidItems = items.filter((item) => paidIds.has(item.orderId));
   const grossSalesCents = paidOrders.reduce(

@@ -11,7 +11,7 @@ import {
   normalizeSearch,
   releaseInventoryReservation,
 } from "../lib/business.ts";
-import { parseCsv, parseModelHunt, planImportUpserts, validateImportRows, ValidationError } from "../lib/validation.ts";
+import { assertCollectibleListingReady, parseCollectibleDetails, parseCsv, parseModelHunt, planImportUpserts, validateImportRows, ValidationError } from "../lib/validation.ts";
 import { verifyStripeWebhook } from "../lib/stripe.ts";
 
 test("normalizes collector search and computes availability", () => {
@@ -44,7 +44,7 @@ test("Model Hunt validation normalizes valid input and rejects invalid email", (
 });
 
 test("CSV validation reports row errors and upsert planning reuses seller SKU identity", () => {
-  const rows = parseCsv("seller_sku,title,description,scale,model_manufacturer,vehicle_make,vehicle_model,vehicle_year,color,condition,price,inventory_quantity,keywords\nSKU-1,911,,1:18,AUTOart,Porsche,911,1973,Silver,new,249.95,2,classic\nSKU-2,Bad,,1:18,,Porsche,911,,,invalid,nope,-2,x\n");
+  const rows = parseCsv("seller_sku,title,description,scale,model_manufacturer,vehicle_make,vehicle_model,vehicle_year,color,model_condition,packaging_condition,original_box,missing_parts,defects,restoration_customization,material,product_number,edition_serial,coa,accessories,provenance,price,inventory_quantity,keywords\nSKU-1,911,,1:18,AUTOart,Porsche,911,1973,Silver,mint,excellent,included,None known,None known,None known,Die-cast,78123,147 of 500,included,Display base,Single owner,249.95,2,classic\nSKU-2,Bad,,1:18,,Porsche,911,,,invalid,invalid,included,,,,,,,,,,nope,-2,x\n");
   const validation = validateImportRows(rows);
   assert.equal(validation.valid.length, 1);
   assert.equal(validation.errors.length, 1);
@@ -52,6 +52,31 @@ test("CSV validation reports row errors and upsert planning reuses seller SKU id
   assert.equal(plan[0].operation, "update");
   assert.equal(plan[0].id, "existing-id");
   assert.equal(plan[0].slug, "kept-slug");
+});
+
+test("collectible standard keeps model and packaging condition separate and requires photo coverage", () => {
+  const details = parseCollectibleDetails({
+    modelCondition: "near_mint",
+    packagingCondition: "good",
+    originalBoxStatus: "included",
+    missingParts: "None known",
+    defects: "Light shelf wear on box",
+    restorationCustomization: "None known",
+    material: "Die-cast metal",
+    coaStatus: "not_applicable",
+    accessories: "Display base",
+    photoFrontChecked: "on",
+    photoRearChecked: "on",
+    photoSidesChecked: "on",
+    photoBaseChecked: "on",
+    photoPackagingChecked: "on",
+    photoIssuesChecked: "on",
+  });
+  assert.equal(details.modelCondition, "near_mint");
+  assert.equal(details.packagingCondition, "good");
+  assert.doesNotThrow(() => assertCollectibleListingReady(details, 4));
+  assert.throws(() => assertCollectibleListingReady({ ...details, photoBaseChecked: false }, 4), /photo checklist/i);
+  assert.throws(() => assertCollectibleListingReady(details, 3), /at least four photos/i);
 });
 
 test("Stripe webhook event IDs are idempotent", () => {

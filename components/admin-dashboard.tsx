@@ -10,6 +10,10 @@ import {
   ProductImageFields,
 } from "@/components/product-image-fields";
 import { uploadProductPhotoFiles } from "@/lib/upload-client";
+import {
+  CollectibleListingFields,
+  RequiredPhotoChecklist,
+} from "@/components/collectible-listing-fields";
 
 type AdminData = Record<string, unknown> & { section?: string };
 const tabs = [
@@ -19,6 +23,7 @@ const tabs = [
   "import",
   "hunts",
   "orders",
+  "resolution",
 ] as const;
 
 export function AdminDashboard({ adminEmail }: { adminEmail: string }) {
@@ -162,7 +167,8 @@ function AdminSection({
   if (tab === "products") return <Products data={data} action={action} />;
   if (tab === "import") return <Importer data={data} action={action} />;
   if (tab === "hunts") return <Hunts data={data} action={action} />;
-  return <Orders data={data} action={action} />;
+  if (tab === "orders") return <Orders data={data} action={action} />;
+  return <ResolutionCases data={data} action={action} />;
 }
 
 function Overview({ data }: { data: AdminData }) {
@@ -223,6 +229,12 @@ type Seller = {
   returnPolicySummary: string;
   sellerType?: string;
   ownerUserId?: string | null;
+  isFoundingSeller: boolean;
+  foundingRateStartsAt?: string | null;
+  foundingRateEndsAt?: string | null;
+  marketplaceFeeBps: number;
+  standardMarketplaceFeeBps: number;
+  foundingPromotionActive: boolean;
 };
 function Sellers({
   data,
@@ -324,6 +336,8 @@ function Sellers({
             <thead>
               <tr>
                 <th>Seller</th>
+                <th>Type / rate</th>
+                <th>Founding program</th>
                 <th>Stripe</th>
                 <th>Shipping</th>
                 <th>Actions</th>
@@ -346,6 +360,48 @@ function Sellers({
                           ? "Store account linked"
                           : "Awaiting store sign-in"}
                       </small>
+                    )}
+                  </td>
+                  <td>
+                    <b>
+                      {seller.sellerType === "collector"
+                        ? "Collector"
+                        : "Professional store"}
+                    </b>
+                    <br />
+                    Standard {feePercent(seller.standardMarketplaceFeeBps)}
+                    <br />
+                    <span className="status active">
+                      Current {feePercent(seller.marketplaceFeeBps)}
+                    </span>
+                  </td>
+                  <td>
+                    {seller.isFoundingSeller ? (
+                      <>
+                        <b>
+                          {seller.foundingPromotionActive
+                            ? "Active"
+                            : "Founding history retained"}
+                        </b>
+                        <br />
+                        <small>
+                          {shortDate(seller.foundingRateStartsAt)} â€“{" "}
+                          {shortDate(seller.foundingRateEndsAt)}
+                        </small>
+                      </>
+                    ) : seller.sellerType === "professional" ? (
+                      <button
+                        onClick={() =>
+                          void action({
+                            action: "assign_founding_seller",
+                            sellerId: seller.id,
+                          })
+                        }
+                      >
+                        Assign 6-month rate
+                      </button>
+                    ) : (
+                      <small>Not eligible</small>
                     )}
                   </td>
                   <td>
@@ -444,6 +500,10 @@ function emptySeller(): Seller {
     returnPolicySummary: "",
     sellerType: "professional",
     ownerUserId: null,
+    isFoundingSeller: false,
+    marketplaceFeeBps: 0,
+    standardMarketplaceFeeBps: 0,
+    foundingPromotionActive: false,
   };
 }
 function SellerEditor({
@@ -569,6 +629,24 @@ type AdminProduct = {
   vehicleYear?: string | null;
   color?: string | null;
   condition?: string;
+  modelCondition: string;
+  packagingCondition: string;
+  originalBoxStatus: string;
+  missingParts: string;
+  defects: string;
+  restorationCustomization: string;
+  material: string;
+  productNumber?: string | null;
+  editionSerial?: string | null;
+  coaStatus: string;
+  accessories: string;
+  provenance: string;
+  photoFrontChecked: boolean;
+  photoRearChecked: boolean;
+  photoSidesChecked: boolean;
+  photoBaseChecked: boolean;
+  photoPackagingChecked: boolean;
+  photoIssuesChecked: boolean;
   keywords?: string;
   priceCents: number;
   inventoryQuantity: number;
@@ -633,7 +711,8 @@ function Products({
                 <div>
                   <span className="status pending_review">Awaiting Review</span>
                   <h3>{product.title}</h3>
-                  <p>{product.scale} · {product.modelManufacturer} · {product.condition}</p>
+                  <p>{product.scale} · {product.modelManufacturer} · model {product.modelCondition.replaceAll("_", " ")} · packaging {product.packagingCondition.replaceAll("_", " ")}</p>
+                  <p><b>Disclosures:</b> Missing parts: {product.missingParts}; defects: {product.defects}; restoration/customization: {product.restorationCustomization}</p>
                   <p>{product.sellerName} · {product.sellerEmail}</p>
                   <p>{money(product.priceCents)} · {product.inventoryQuantity} available</p>
                   <div className="row-actions">
@@ -766,6 +845,22 @@ function emptyProduct(sellerId: string): AdminProduct {
     modelManufacturer: "",
     vehicleMake: "",
     vehicleModel: "",
+    modelCondition: "",
+    packagingCondition: "",
+    originalBoxStatus: "",
+    missingParts: "",
+    defects: "",
+    restorationCustomization: "",
+    material: "",
+    coaStatus: "",
+    accessories: "",
+    provenance: "",
+    photoFrontChecked: false,
+    photoRearChecked: false,
+    photoSidesChecked: false,
+    photoBaseChecked: false,
+    photoPackagingChecked: false,
+    photoIssuesChecked: false,
     priceCents: 0,
     inventoryQuantity: 1,
     reservedQuantity: 0,
@@ -921,16 +1016,8 @@ function ProductEditor({
             <input name="color" defaultValue={product.color ?? ""} />
           </label>
         </div>
+        <CollectibleListingFields product={product} />
         <div className="form-row">
-          <label>
-            Condition
-            <select name="condition" defaultValue={product.condition ?? "new"}>
-              <option>new</option>
-              <option>preowned</option>
-              <option>used</option>
-              <option>other</option>
-            </select>
-          </label>
           <label>
             Price, cents
             <input
@@ -960,6 +1047,7 @@ function ProductEditor({
           onFilesChange={setFiles}
           onRemove={productId ? removeImage : undefined}
         />
+        <RequiredPhotoChecklist product={product} />
         <label>
           Keywords
           <input name="keywords" defaultValue={product.keywords ?? ""} />
@@ -1229,6 +1317,122 @@ function Hunts({
   );
 }
 
+type AdminResolutionCase = {
+  id: string;
+  caseNumber: string;
+  reason: string;
+  requestedResolution: string;
+  requestedRefundCents?: number | null;
+  details: string;
+  status: string;
+  sellerRespondBy: string;
+  buyerEvidenceBy: string;
+  buyerShipBy?: string | null;
+  returnAuthorizationNumber?: string | null;
+  resolutionSummary?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  sellerName: string;
+  order: {
+    id: string;
+    orderNumber: string;
+    buyerEmail: string;
+    buyerName: string;
+    currency: string;
+    totalCents: number;
+    refundedAmountCents: number;
+    paymentStatus: string;
+  };
+  messages: Array<{
+    id: string;
+    authorRole: string;
+    body: string;
+    createdAt: string;
+  }>;
+  files: Array<{
+    id: string;
+    kind: string;
+    uploaderRole: string;
+    originalName: string;
+    mimeType: string;
+    sizeBytes: number;
+  }>;
+};
+
+function ResolutionCases({
+  data,
+  action,
+}: {
+  data: AdminData;
+  action(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
+}) {
+  const rows = (data.cases as AdminResolutionCase[]) ?? [];
+  return (
+    <div className="order-admin-list">
+      {rows.length ? rows.map((item) => (
+        <AdminCasePanel item={item} action={action} key={item.id} />
+      )) : <div className="admin-panel">No resolution cases yet.</div>}
+    </div>
+  );
+}
+
+function AdminCasePanel({
+  item,
+  action,
+}: {
+  item: AdminResolutionCase;
+  action(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
+}) {
+  const [decision, setDecision] = useState("resolved");
+  const [summary, setSummary] = useState("");
+  const [amount, setAmount] = useState("");
+  const closed = ["resolved", "closed", "denied"].includes(item.status);
+  const remaining = Math.max(0, item.order.totalCents - item.order.refundedAmountCents);
+  return (
+    <article className="admin-panel order-admin admin-case-panel">
+      <div className="panel-heading">
+        <div>
+          <span className={`status ${item.status}`}>{item.status.replaceAll("_", " ")}</span>
+          <h2>{item.caseNumber}</h2>
+          <p>{item.order.orderNumber} · {item.sellerName} · {item.order.buyerName || item.order.buyerEmail}</p>
+        </div>
+        <div><small>Remaining paid balance</small><br /><b>{money(remaining, item.order.currency)}</b></div>
+      </div>
+      <div className="admin-case-grid">
+        <section>
+          <h3>Claim</h3>
+          <p><b>{item.reason.replaceAll("_", " ")}</b> · requested {item.requestedResolution.replaceAll("_", " ")}</p>
+          <p>{item.details}</p>
+          <small>Opened {shortDate(item.createdAt)} · seller response due {shortDate(item.sellerRespondBy)} · buyer evidence due {shortDate(item.buyerEvidenceBy)}</small>
+          {item.returnAuthorizationNumber && <p><b>{item.returnAuthorizationNumber}</b> · return due {shortDate(item.buyerShipBy)}</p>}
+        </section>
+        <section>
+          <h3>Private files</h3>
+          <div className="admin-case-files">
+            {item.files.map((file) => <a key={file.id} href={`/api/resolution/files/${file.id}`} target="_blank" rel="noreferrer">{file.kind === "return_label" ? "Return label" : "Evidence"}: {file.originalName} <small>({file.uploaderRole})</small></a>)}
+            {!item.files.length && <p>No files.</p>}
+          </div>
+        </section>
+      </div>
+      <details className="admin-case-timeline">
+        <summary>Review shared timeline ({item.messages.length})</summary>
+        {item.messages.map((message) => <p key={message.id}><b>{message.authorRole}</b> · {shortDate(message.createdAt)}<br />{message.body}</p>)}
+      </details>
+      {!closed ? (
+        <form className="admin-case-decision" onSubmit={(event) => {
+          event.preventDefault();
+          void action({ action: "admin_case_decision", caseId: item.id, decision, summary, amount });
+        }}>
+          <label>Outcome<select value={decision} onChange={(event) => setDecision(event.target.value)}><option value="resolved">Resolve without refund</option><option value="full_refund">Full remaining refund</option><option value="partial_refund">Partial refund</option><option value="denied">Deny claim</option></select></label>
+          {decision === "partial_refund" && <label>Refund amount<input value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="25.00" required /></label>}
+          <label>Outcome explanation<textarea value={summary} onChange={(event) => setSummary(event.target.value)} minLength={10} maxLength={2000} rows={4} required /></label>
+          <button className={decision.includes("refund") ? "danger-button" : "button dark small"}>Record final outcome</button>
+        </form>
+      ) : <div className="case-outcome"><p className="eyebrow">Final outcome</p><h3>{item.resolutionSummary || item.status}</h3></div>}
+    </article>
+  );
+}
+
 type AdminOrder = {
   id: string;
   orderNumber: string;
@@ -1237,6 +1441,13 @@ type AdminOrder = {
   buyerName: string;
   shippingAddress: string;
   currency: string;
+  subtotalCents: number;
+  shippingCents: number;
+  taxCents: number;
+  marketplaceFeeBps: number;
+  platformFeeCents: number;
+  paymentProcessingFeeCents?: number | null;
+  sellerProceedsCents?: number | null;
   totalCents: number;
   paymentStatus: string;
   fulfillmentStatus: string;
@@ -1307,6 +1518,18 @@ function OrderPanel({
               {money(item.unitPriceCents * item.quantity, order.currency)}
             </p>
           ))}
+          <p>
+            Model Car Center fee ({feePercent(order.marketplaceFeeBps)}):{" "}
+            <b>{money(order.platformFeeCents, order.currency)}</b>
+            <br />
+            Stripe processing: {order.paymentProcessingFeeCents == null
+              ? "not recorded"
+              : money(order.paymentProcessingFeeCents, order.currency)}
+            <br />
+            Seller proceeds: {order.sellerProceedsCents == null
+              ? "not recorded"
+              : money(order.sellerProceedsCents, order.currency)}
+          </p>
         </div>
         <div>
           <h3>Ship to</h3>
@@ -1381,6 +1604,18 @@ function OrderPanel({
       )}
     </article>
   );
+}
+
+function feePercent(basisPoints: number) {
+  return `${basisPoints / 100}%`;
+}
+
+function shortDate(value?: string | null) {
+  if (!value) return "Not set";
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime())
+    ? "Invalid date"
+    : parsed.toLocaleDateString();
 }
 function formatAddress(raw: string) {
   try {

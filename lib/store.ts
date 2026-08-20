@@ -19,13 +19,17 @@ import {
 import { sendShipmentEmail } from "./email";
 import { canClaimProfessionalStore } from "./account-rules";
 import { buildStoreAnalytics } from "./store-rules";
+import { determineMarketplaceFee } from "./fees";
 import {
+  assertCollectibleListingReady,
   cleanText,
   integer,
+  legacyConditionFromCollectibleDetails,
   makeSlug,
   moneyToCents,
   normalizeEmail,
   optionalHttpUrl,
+  parseCollectibleDetails,
   requiredString,
   ValidationError,
 } from "./validation";
@@ -118,8 +122,13 @@ export async function getStoreDashboardData(userId: string) {
         currency: orders.currency,
         subtotalCents: orders.subtotalCents,
         shippingCents: orders.shippingCents,
+        taxCents: orders.taxCents,
+        marketplaceFeeBps: orders.marketplaceFeeBps,
         platformFeeCents: orders.platformFeeCents,
+        paymentProcessingFeeCents: orders.paymentProcessingFeeCents,
+        sellerProceedsCents: orders.sellerProceedsCents,
         totalCents: orders.totalCents,
+        refundedAmountCents: orders.refundedAmountCents,
         paymentStatus: orders.paymentStatus,
         fulfillmentStatus: orders.fulfillmentStatus,
         carrier: orders.carrier,
@@ -150,6 +159,7 @@ export async function getStoreDashboardData(userId: string) {
   const analytics = buildStoreAnalytics(orderRows, items, inventory);
   return {
     store,
+    fee: determineMarketplaceFee(store),
     inventory: inventory.map((item) => ({
       ...item,
       images: inventoryImages.filter((image) => image.productId === item.id),
@@ -207,12 +217,7 @@ export async function saveStoreProduct(
     existing?.reservedQuantity ?? 0,
     1_000_000,
   );
-  const rawCondition = cleanText(payload.condition, 30).toLowerCase();
-  const condition = ["new", "used", "preowned", "other"].includes(
-    rawCondition,
-  )
-    ? (rawCondition as "new" | "used" | "preowned" | "other")
-    : "new";
+  const collectible = parseCollectibleDetails(payload);
   const values = {
     sellerId: store.id,
     sellerSku,
@@ -231,7 +236,8 @@ export async function saveStoreProduct(
     vehicleModel: requiredString(payload.vehicleModel, "vehicleModel", 120),
     vehicleYear: cleanText(payload.vehicleYear, 20) || null,
     color: cleanText(payload.color, 80) || null,
-    condition,
+    condition: legacyConditionFromCollectibleDetails(collectible),
+    ...collectible,
     priceCents: moneyToCents(payload.price, "price"),
     inventoryQuantity,
     primaryImageUrl: existing?.primaryImageUrl ?? null,
@@ -292,6 +298,13 @@ export async function setStoreProductStatus(
     product.inventoryQuantity - product.reservedQuantity < 1
   )
     throw new ValidationError("Add available inventory before publishing.");
+  if (requestedStatus === "active") {
+    const imageCount = await getDb()
+      .select({ count: sql<number>`count(*)` })
+      .from(productImages)
+      .where(eq(productImages.productId, productId));
+    assertCollectibleListingReady(product, Number(imageCount[0]?.count ?? 0));
+  }
   await getDb()
     .update(products)
     .set({
@@ -383,7 +396,7 @@ export async function shipOwnedStoreOrder(
     )
     .limit(1);
   const row = rows[0];
-  if (!row || row.order.paymentStatus !== "paid")
+  if (!row || !["paid", "partially_refunded"].includes(row.order.paymentStatus))
     throw new ValidationError("Only your paid orders can be marked shipped.");
   if (row.seller.status === "suspended")
     throw new ValidationError(

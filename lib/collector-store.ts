@@ -318,6 +318,7 @@ export async function getGarageData(userId: string) {
         sellerSlug: sellers.slug,
         currency: orders.currency,
         totalCents: orders.totalCents,
+        refundedAmountCents: orders.refundedAmountCents,
         paymentStatus: orders.paymentStatus,
         fulfillmentStatus: orders.fulfillmentStatus,
         carrier: orders.carrier,
@@ -375,7 +376,12 @@ export async function getGarageData(userId: string) {
           shippingAddress: orders.shippingAddress,
           currency: orders.currency,
           subtotalCents: orders.subtotalCents,
+          shippingCents: orders.shippingCents,
+          taxCents: orders.taxCents,
+          marketplaceFeeBps: orders.marketplaceFeeBps,
           platformFeeCents: orders.platformFeeCents,
+          paymentProcessingFeeCents: orders.paymentProcessingFeeCents,
+          sellerProceedsCents: orders.sellerProceedsCents,
           totalCents: orders.totalCents,
           paymentStatus: orders.paymentStatus,
           fulfillmentStatus: orders.fulfillmentStatus,
@@ -385,7 +391,10 @@ export async function getGarageData(userId: string) {
         })
         .from(orders)
         .where(
-          and(eq(orders.sellerId, seller.id), eq(orders.paymentStatus, "paid")),
+          and(
+            eq(orders.sellerId, seller.id),
+            inArray(orders.paymentStatus, ["paid", "partially_refunded"]),
+          ),
         )
         .orderBy(desc(orders.createdAt))
     : [];

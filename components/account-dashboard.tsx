@@ -371,6 +371,9 @@ function Orders({ rows }: { rows: GarageData["orders"] }) {
                 {String(order.trackingNumber)}
               </p>
             )}
+            <Link className="button outline small" href={`/resolution?order=${String(order.id)}`}>
+              Get help with this order
+            </Link>
           </article>
         ))}
       </div>
@@ -552,18 +555,17 @@ function Sales({
               {formatAddress(sale.shippingAddress)}
             </p>
             <p>
-              Item total{" "}
-              {formatMoney(Number(sale.subtotalCents), String(sale.currency))} ·
-              marketplace fee{" "}
-              {formatMoney(
-                Number(sale.platformFeeCents),
-                String(sale.currency),
-              )}{" "}
-              · seller proceeds{" "}
-              {formatMoney(
-                Number(sale.subtotalCents) - Number(sale.platformFeeCents),
-                String(sale.currency),
-              )}
+              Sale price {formatMoney(Number(sale.subtotalCents), String(sale.currency))}
+              {" · "}Model Car Center fee ({Number(sale.marketplaceFeeBps) / 100}%){" "}
+              {formatMoney(Number(sale.platformFeeCents), String(sale.currency))}
+              {" · "}Payment processing{" "}
+              {sale.paymentProcessingFeeCents == null
+                ? "recorded separately after Stripe settlement"
+                : `${formatMoney(Number(sale.paymentProcessingFeeCents), String(sale.currency))} paid separately by Model Car Center`}
+              {" · "}Seller proceeds{" "}
+              {sale.sellerProceedsCents == null
+                ? "not recorded for this order"
+                : formatMoney(Number(sale.sellerProceedsCents), String(sale.currency))}
             </p>
             <p>
               <span className={`status ${String(sale.fulfillmentStatus)}`}>

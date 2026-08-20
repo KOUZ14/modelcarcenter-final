@@ -2,15 +2,13 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { PolicyPage } from "@/components/policy-page";
 import { config } from "@/lib/config";
+import { formatFeePercent } from "@/lib/fees";
 
+export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
   title: "Seller Terms",
   description: "Terms for professional and individual sellers on Model Car Center.",
 };
-
-function feePercent() {
-  return `${config.marketplaceFeeBps / 100}%`;
-}
 
 export default function SellerTermsPage() {
   return <PolicyPage title="Seller Terms" intro="These Seller Terms apply to professional stores and individual collectors who apply, create listings, or sell through Model Car Center.">
@@ -43,7 +41,9 @@ export default function SellerTermsPage() {
     <p>You must maintain a clear return-policy summary and honor the policy disclosed before purchase, our <Link href="/returns">Returns &amp; Refunds Policy</Link>, and non-waivable consumer law. You must respond reasonably promptly to support requests and cooperate in investigating loss, damage, authenticity, wrong-item, and material-description claims. You authorize Model Car Center to issue a full refund through marketplace tools when required by your policy, these Seller Terms, law, or a reasonable resolution of a supported claim, and to reverse the related transfer and platform fee. We will consult you when reasonably practicable, but urgent legal, fraud, safety, or payment-network action may occur first.</p>
 
     <h2>10. Fees and payouts</h2>
-    <p>The standard marketplace fee is <b>{feePercent()} of the item subtotal</b>, excluding separately stated shipping and tax, unless Model Car Center agrees to a different fee in writing. The fee is earned when the order is paid. Stripe controls payout availability and timing. Amounts transferred or paid out may be reduced by the marketplace fee, refunds, reversals, disputes, negative balances, legally required withholding, and other adjustments attributable to your transactions. You are responsible for reviewing transaction records and reporting an error promptly.</p>
+    <p>The Model Car Center marketplace fee is <b>{formatFeePercent(config.collectorMarketplaceFeeBps)} of the item subtotal for collector sellers</b> and <b>{formatFeePercent(config.professionalMarketplaceFeeBps)} of the item subtotal for professional stores</b>, excluding separately stated shipping and tax. An eligible professional store that Model Car Center explicitly designates as a founding seller receives a <b>{formatFeePercent(config.foundingSellerMarketplaceFeeBps)} marketplace fee for its first six months</b>; the standard professional rate applies automatically after the recorded promotional end date. Collector sellers are not eligible for the founding-store rate.</p>
+    <p><b>Payment processing is charged separately and is not part of the marketplace fee percentages above.</b> Under the current Stripe destination-charge setup, Model Car Center pays Stripe processing fees. Completed order records distinguish the marketplace fee, actual Stripe processing cost when available, and seller proceeds. There are no listing fees, monthly seller fees, marketplace subscription fees, or account-opening fees for V1.</p>
+    <p>The marketplace fee is earned when the order is paid. Stripe controls payout availability and timing. Amounts transferred or paid out may be reduced by the marketplace fee, refunds, reversals, disputes, negative balances, legally required withholding, and other adjustments attributable to your transactions. You are responsible for reviewing transaction records and reporting an error promptly.</p>
 
     <h2>11. Taxes and records</h2>
     <p>You are responsible for determining and meeting your tax, registration, invoicing, product, and reporting obligations, except to the extent applicable law expressly assigns an obligation to Model Car Center or a payment provider. You must provide accurate tax information and keep records required for your business and sales. We may collect, remit, withhold, or report amounts when legally required and may issue tax forms through Stripe or another provider. Nothing we provide is tax advice.</p>

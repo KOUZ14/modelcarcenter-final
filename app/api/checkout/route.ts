@@ -36,6 +36,7 @@ export async function POST(request: Request) {
         quantity: item.quantity,
       })),
       shippingCents: cart.totals.shippingCents,
+      marketplaceFeeBps: cart.fee.marketplaceFeeBps,
       platformFeeCents: cart.totals.platformFeeCents,
       expiresAt: reservation.expiresAt,
       buyerUserId: collector?.user.id ?? null,

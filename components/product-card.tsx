@@ -3,7 +3,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import type { ProductSummary } from "@/lib/types";
-import { formatMoney } from "@/lib/format";
+import { formatCondition, formatMoney } from "@/lib/format";
 import { useMarketplace } from "./marketplace-provider";
 import { Icon } from "./icons";
 
@@ -49,6 +49,7 @@ export function ProductCard({ product }: { product: ProductSummary }) {
       <div className="product-meta">
         <span>{product.scale}</span>
         <span>{product.modelManufacturer}</span>
+        <span>{formatCondition(product.modelCondition)}</span>
       </div>
       <h3>
         <Link href={`/products/${product.slug}`}>{product.title}</Link>

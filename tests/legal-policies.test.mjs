@@ -8,7 +8,7 @@ import {
 import { parseSellerApplication, ValidationError } from "../lib/validation.ts";
 
 test("the current policy version has a matching effective date", () => {
-  assert.equal(POLICY_VERSION, "2026-08-19");
+  assert.equal(POLICY_VERSION, "2026-08-19-protection-v1");
   assert.equal(POLICY_EFFECTIVE_DATE, "August 19, 2026");
   assert.equal(isCurrentPolicyVersion(POLICY_VERSION), true);
   assert.equal(isCurrentPolicyVersion("2026-01-01"), false);

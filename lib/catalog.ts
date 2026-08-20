@@ -32,6 +32,24 @@ const productSelection = {
   vehicleYear: products.vehicleYear,
   color: products.color,
   condition: products.condition,
+  modelCondition: products.modelCondition,
+  packagingCondition: products.packagingCondition,
+  originalBoxStatus: products.originalBoxStatus,
+  missingParts: products.missingParts,
+  defects: products.defects,
+  restorationCustomization: products.restorationCustomization,
+  material: products.material,
+  productNumber: products.productNumber,
+  editionSerial: products.editionSerial,
+  coaStatus: products.coaStatus,
+  accessories: products.accessories,
+  provenance: products.provenance,
+  photoFrontChecked: products.photoFrontChecked,
+  photoRearChecked: products.photoRearChecked,
+  photoSidesChecked: products.photoSidesChecked,
+  photoBaseChecked: products.photoBaseChecked,
+  photoPackagingChecked: products.photoPackagingChecked,
+  photoIssuesChecked: products.photoIssuesChecked,
   priceCents: products.priceCents,
   currency: products.currency,
   inventoryQuantity: products.inventoryQuantity,
@@ -59,7 +77,9 @@ function activeConditions(query: CatalogQuery): SQL[] {
       ${products.title} || ' ' || ${products.vehicleMake} || ' ' || ${products.vehicleModel} || ' ' ||
       coalesce(${products.vehicleYear}, '') || ' ' || ${products.scale} || ' ' ||
       ${products.modelManufacturer} || ' ' || ${sellers.storeName} || ' ' ||
-      ${products.keywords} || ' ' || coalesce(${products.color}, '')
+      ${products.keywords} || ' ' || coalesce(${products.color}, '') || ' ' ||
+      ${products.material} || ' ' || coalesce(${products.productNumber}, '') || ' ' ||
+      coalesce(${products.editionSerial}, '')
     ) LIKE ${needle}`);
   }
   if (query.scale) conditions.push(eq(products.scale, query.scale));
@@ -69,8 +89,15 @@ function activeConditions(query: CatalogQuery): SQL[] {
   if (query.condition)
     conditions.push(
       eq(
-        products.condition,
-        query.condition as "new" | "used" | "preowned" | "other",
+        products.modelCondition,
+        query.condition as
+          | "not_specified"
+          | "mint"
+          | "near_mint"
+          | "excellent"
+          | "good"
+          | "fair"
+          | "poor",
       ),
     );
   return conditions;
@@ -124,11 +151,11 @@ export async function searchCatalog(
         .where(and(eq(products.status, "active"), eq(sellers.status, "active")))
         .orderBy(asc(sellers.storeName)),
       db
-        .selectDistinct({ value: products.condition })
+        .selectDistinct({ value: products.modelCondition })
         .from(products)
         .innerJoin(sellers, eq(products.sellerId, sellers.id))
         .where(and(eq(products.status, "active"), eq(sellers.status, "active")))
-        .orderBy(asc(products.condition)),
+        .orderBy(asc(products.modelCondition)),
     ]);
 
   const total = Number(countRows[0]?.count ?? 0);

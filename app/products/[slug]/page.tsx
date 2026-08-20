@@ -45,6 +45,14 @@ export default async function ProductPage({
   const product = await getProductBySlug((await params).slug);
   if (!product) notFound();
   const related = await getRelatedProducts(product);
+  const photoChecklistComplete = [
+    product.photoFrontChecked,
+    product.photoRearChecked,
+    product.photoSidesChecked,
+    product.photoBaseChecked,
+    product.photoPackagingChecked,
+    product.photoIssuesChecked,
+  ].every(Boolean);
   const productJsonLd = {
     "@context": "https://schema.org",
     "@type": "Product",
@@ -100,10 +108,61 @@ export default async function ProductPage({
               {product.availableQuantity === 1
                 ? "Only 1 available"
                 : `${product.availableQuantity} available`}{" "}
-              · {formatCondition(product.condition)}
+              · Model: {formatCondition(product.modelCondition)}
             </p>
             <ProductPurchase product={product} />
             <dl className="product-facts">
+              <div>
+                <dt>Condition</dt>
+                <dd>
+                  Model: {formatCondition(product.modelCondition)}
+                  <br />
+                  Packaging: {formatCondition(product.packagingCondition)}
+                  <br />
+                  Original box: {formatCondition(product.originalBoxStatus)}
+                </dd>
+              </div>
+              <div>
+                <dt>Identity</dt>
+                <dd>
+                  Material: {product.material || "Not specified"}
+                  <br />
+                  Product no.: {product.productNumber || "Not specified"}
+                  <br />
+                  Edition / serial: {product.editionSerial || "Not specified"}
+                  <br />
+                  COA: {formatCondition(product.coaStatus)}
+                </dd>
+              </div>
+              <div>
+                <dt>Included</dt>
+                <dd>{product.accessories || "Not specified"}</dd>
+              </div>
+              <div>
+                <dt>Disclosures</dt>
+                <dd>
+                  <b>Missing parts:</b> {product.missingParts || "Not specified"}
+                  <br />
+                  <b>Defects:</b> {product.defects || "Not specified"}
+                  <br />
+                  <b>Restoration / customization:</b>{" "}
+                  {product.restorationCustomization || "Not specified"}
+                </dd>
+              </div>
+              {product.provenance && (
+                <div>
+                  <dt>Provenance</dt>
+                  <dd>{product.provenance}</dd>
+                </div>
+              )}
+              <div>
+                <dt>Photos</dt>
+                <dd>
+                  {photoChecklistComplete
+                    ? "Required collector inspection views confirmed"
+                    : "Legacy listing; ask for any additional inspection view you need"}
+                </dd>
+              </div>
               <div>
                 <dt>Seller</dt>
                 <dd>

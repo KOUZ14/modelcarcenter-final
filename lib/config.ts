@@ -7,6 +7,23 @@ function integerEnv(name: string, fallback: number, min: number, max: number) {
   return Number.isInteger(parsed) && parsed >= min && parsed <= max ? parsed : fallback;
 }
 
+export function parseFeeBasisPoints(
+  value: string | undefined,
+  fallback: number,
+  name = "marketplace fee",
+) {
+  if (value == null || value.trim() === "") return fallback;
+  const normalized = value.trim();
+  if (!/^\d+$/.test(normalized)) {
+    throw new Error(`${name} must be a whole number of basis points.`);
+  }
+  const parsed = Number(normalized);
+  if (!Number.isSafeInteger(parsed) || parsed < 0 || parsed > 10_000) {
+    throw new Error(`${name} must be between 0 and 10000 basis points.`);
+  }
+  return parsed;
+}
+
 export const config = {
   siteUrl: textEnv("SITE_URL", "http://localhost:5173").replace(/\/$/, ""),
   supportEmail: textEnv("SUPPORT_EMAIL", "help@modelcarcenter.com"),
@@ -16,7 +33,27 @@ export const config = {
   stripeSecretKey: textEnv("STRIPE_SECRET_KEY"),
   stripeWebhookSecret: textEnv("STRIPE_WEBHOOK_SECRET"),
   stripeApiVersion: textEnv("STRIPE_API_VERSION", "2026-02-25.clover"),
-  marketplaceFeeBps: integerEnv("MARKETPLACE_FEE_BPS", 1000, 0, 10_000),
+  collectorMarketplaceFeeBps: parseFeeBasisPoints(
+    process.env.COLLECTOR_MARKETPLACE_FEE_BPS,
+    850,
+    "COLLECTOR_MARKETPLACE_FEE_BPS",
+  ),
+  professionalMarketplaceFeeBps: parseFeeBasisPoints(
+    process.env.PROFESSIONAL_MARKETPLACE_FEE_BPS,
+    700,
+    "PROFESSIONAL_MARKETPLACE_FEE_BPS",
+  ),
+  foundingSellerMarketplaceFeeBps: parseFeeBasisPoints(
+    process.env.FOUNDING_SELLER_MARKETPLACE_FEE_BPS,
+    500,
+    "FOUNDING_SELLER_MARKETPLACE_FEE_BPS",
+  ),
+  foundingSellerPromotionMonths: integerEnv(
+    "FOUNDING_SELLER_PROMOTION_MONTHS",
+    6,
+    1,
+    24,
+  ),
   checkoutExpirationMinutes: integerEnv("CHECKOUT_EXPIRATION_MINUTES", 30, 30, 1_440),
   shippingCountries: textEnv("SHIPPING_COUNTRIES", "US")
     .split(",")

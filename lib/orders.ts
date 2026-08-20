@@ -10,7 +10,10 @@ import {
 } from "@/db/schema";
 import { sendPaidOrderEmails } from "./email";
 import { releaseReservation } from "./inventory";
-import type { StripeCheckoutSession } from "./stripe";
+import {
+  retrieveCheckoutSession,
+  type StripeCheckoutSession,
+} from "./stripe";
 import type { ShippingAddress } from "./types";
 
 type StripeEvent = { id: string; type: string; data: { object: Record<string, unknown> } };
@@ -21,7 +24,10 @@ export async function processStripeEvent(event: StripeEvent) {
   if (duplicate[0]) return { duplicate: true };
 
   if (event.type === "checkout.session.completed" || event.type === "checkout.session.async_payment_succeeded") {
-    const session = event.data.object as StripeCheckoutSession;
+    const receivedSession = event.data.object as StripeCheckoutSession;
+    const session = receivedSession.id
+      ? await retrieveCheckoutSession(receivedSession.id)
+      : receivedSession;
     if (session.payment_status === "paid") return finalizePaidCheckout(event, session);
     await recordEvent(event);
     return { recorded: true, waitingForPayment: true };
@@ -41,12 +47,34 @@ export async function processStripeEvent(event: StripeEvent) {
   }
 
   if (event.type === "charge.refunded") {
-    const charge = event.data.object as { id?: string; payment_intent?: string };
+    const charge = event.data.object as {
+      id?: string;
+      payment_intent?: string;
+      amount?: number;
+      amount_refunded?: number;
+    };
+    const amountRefunded = Math.max(0, charge.amount_refunded ?? charge.amount ?? 0);
     const d1 = getD1();
     await d1.batch([
       d1.prepare("INSERT INTO stripe_events (id, type) VALUES (?, ?)").bind(event.id, event.type),
-      d1.prepare(`UPDATE orders SET payment_status = 'refunded', updated_at = CURRENT_TIMESTAMP
-        WHERE stripe_charge_id = ? OR stripe_payment_intent_id = ?`).bind(charge.id ?? "", charge.payment_intent ?? ""),
+      d1.prepare(`UPDATE orders SET
+        refunded_amount_cents = CASE
+          WHEN ? > 0 THEN MIN(total_cents, ?)
+          ELSE total_cents
+        END,
+        payment_status = CASE
+          WHEN ? > 0 AND ? < total_cents THEN 'partially_refunded'
+          ELSE 'refunded'
+        END,
+        updated_at = CURRENT_TIMESTAMP
+        WHERE stripe_charge_id = ? OR stripe_payment_intent_id = ?`).bind(
+          amountRefunded,
+          amountRefunded,
+          amountRefunded,
+          amountRefunded,
+          charge.id ?? "",
+          charge.payment_intent ?? "",
+        ),
     ]);
     return { recorded: true, refundUpdated: true };
   }
@@ -104,6 +132,7 @@ async function finalizePaidCheckout(event: StripeEvent, session: StripeCheckoutS
       status: checkoutReservations.status,
       subtotalCents: checkoutReservations.subtotalCents,
       shippingCents: checkoutReservations.shippingCents,
+      marketplaceFeeBps: checkoutReservations.marketplaceFeeBps,
       platformFeeCents: checkoutReservations.platformFeeCents,
       currency: checkoutReservations.currency,
       buyerUserId: checkoutReservations.buyerUserId,
@@ -139,6 +168,10 @@ async function finalizePaidCheckout(event: StripeEvent, session: StripeCheckoutS
   const orderNumber = makeOrderNumber();
   const taxCents = session.total_details?.amount_tax ?? 0;
   const totalCents = session.amount_total ?? reservation.subtotalCents + reservation.shippingCents + taxCents;
+  const settlement = stripeSettlementDetails(
+    session,
+    reservation.platformFeeCents,
+  );
   const d1 = getD1();
   const pendingGuard = `EXISTS (SELECT 1 FROM checkout_reservations WHERE id = ? AND status = 'pending')`;
   const statements = [d1.prepare("INSERT INTO stripe_events (id, type) VALUES (?, ?)").bind(event.id, event.type)];
@@ -157,12 +190,15 @@ async function finalizePaidCheckout(event: StripeEvent, session: StripeCheckoutS
       WHERE id = ? AND status = 'pending'`).bind(reservationId),
     d1.prepare(`INSERT INTO orders
       (id, order_number, seller_id, buyer_user_id, stripe_checkout_session_id, stripe_payment_intent_id, stripe_charge_id,
-       buyer_email, currency, subtotal_cents, shipping_cents, platform_fee_cents, tax_cents, total_cents,
+       buyer_email, currency, subtotal_cents, shipping_cents, marketplace_fee_bps, platform_fee_cents,
+       payment_processing_fee_cents, seller_proceeds_cents, tax_cents, total_cents,
        payment_status, fulfillment_status, buyer_name, shipping_address, paid_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'paid', 'unfulfilled', ?, ?, CURRENT_TIMESTAMP)`)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'paid', 'unfulfilled', ?, ?, CURRENT_TIMESTAMP)`)
       .bind(orderId, orderNumber, reservation.sellerId, reservation.buyerUserId, session.id, intent, charge, buyerEmail,
         session.currency ?? reservation.currency, reservation.subtotalCents, reservation.shippingCents,
-        reservation.platformFeeCents, taxCents, totalCents, shipping.name ?? "", JSON.stringify(shipping)),
+        reservation.marketplaceFeeBps, reservation.platformFeeCents,
+        settlement.paymentProcessingFeeCents, settlement.sellerProceedsCents,
+        taxCents, totalCents, shipping.name ?? "", JSON.stringify(shipping)),
   );
   for (const item of items) {
     statements.push(
@@ -186,6 +222,34 @@ async function finalizePaidCheckout(event: StripeEvent, session: StripeCheckoutS
     items: items.map((item) => ({ title: item.productTitleSnapshot, quantity: item.quantity, unitPriceCents: item.unitPriceCents })),
   });
   return { orderId, orderNumber };
+}
+
+export function stripeSettlementDetails(
+  session: StripeCheckoutSession,
+  expectedPlatformFeeCents: number,
+) {
+  const charge =
+    typeof session.payment_intent === "object" && session.payment_intent
+      ? session.payment_intent.latest_charge
+      : null;
+  const expandedCharge =
+    charge && typeof charge === "object" ? charge : null;
+  if (
+    expandedCharge?.application_fee_amount != null &&
+    expandedCharge.application_fee_amount !== expectedPlatformFeeCents
+  ) {
+    throw new Error("Stripe application fee does not match the reserved marketplace fee.");
+  }
+  const balanceTransaction = expandedCharge?.balance_transaction;
+  const paymentProcessingFeeCents =
+    balanceTransaction && typeof balanceTransaction === "object"
+      ? balanceTransaction.fee
+      : null;
+  const sellerProceedsCents =
+    session.amount_total == null
+      ? null
+      : Math.max(0, session.amount_total - expectedPlatformFeeCents);
+  return { paymentProcessingFeeCents, sellerProceedsCents };
 }
 
 function normalizeShipping(session: StripeCheckoutSession): ShippingAddress {

@@ -238,7 +238,7 @@ export function HomeMarketplace() {
                 </select>
               </label>
               <label>
-                Condition
+                Model condition
                 <select
                   value={condition}
                   onChange={(e) => {
@@ -246,9 +246,9 @@ export function HomeMarketplace() {
                     setPage(1);
                   }}
                 >
-                  <option value="">Any condition</option>
+                  <option value="">Any model condition</option>
                   {catalog.filters.conditions.map((item) => (
-                    <option key={item}>{item}</option>
+                    <option key={item} value={item}>{formatCondition(item)}</option>
                   ))}
                 </select>
               </label>
