@@ -71,8 +71,8 @@ export async function requireSellerOwner(sellerId: string, request: Request) {
 export async function requireProductOwner(productId: string, request: Request) {
   const collector = await requireCollectorApi(request);
   if (collector instanceof Response) return collector;
-  const { getOwnedProduct } = await import("./collector-store");
-  const product = await getOwnedProduct(collector.user.id, productId);
+  const { getOwnedProductForImages } = await import("./collector-store");
+  const product = await getOwnedProductForImages(collector.user.id, productId);
   if (!product)
     return Response.json(
       { error: "You do not have access to this listing." },

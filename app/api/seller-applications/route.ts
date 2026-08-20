@@ -3,12 +3,18 @@ import { sellerApplications } from "@/db/schema";
 import { sendEmail } from "@/lib/email";
 import { readJsonObject, routeError } from "@/lib/http";
 import { parseSellerApplication } from "@/lib/validation";
+import { POLICY_VERSION } from "@/lib/legal";
 
 export async function POST(request: Request) {
   try {
     const payload = parseSellerApplication(await readJsonObject(request));
     const id = crypto.randomUUID();
-    await getDb().insert(sellerApplications).values({ id, ...payload });
+    await getDb().insert(sellerApplications).values({
+      id,
+      ...payload,
+      sellerTermsVersion: POLICY_VERSION,
+      sellerTermsAcceptedAt: new Date().toISOString(),
+    });
     await sendEmail({
       to: payload.email,
       subject: "We received your Model Car Center seller application",

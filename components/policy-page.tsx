@@ -1,6 +1,8 @@
 import { SiteHeader } from "./site-header";
 import { SiteFooter } from "./site-footer";
+import Link from "next/link";
+import { POLICY_EFFECTIVE_DATE } from "@/lib/legal";
 
-export function PolicyPage({ eyebrow, title, intro, children }: { eyebrow: string; title: string; intro: string; children: React.ReactNode }) {
-  return <main><SiteHeader/><article className="inner-page shell legal-page"><p className="eyebrow">{eyebrow}</p><h1>{title}</h1><p className="legal-intro">{intro}</p><div className="legal-notice">Launch draft: this operational policy is provided for founder and legal review before public launch. It is not legal advice.</div><div className="legal-content">{children}</div></article><SiteFooter/></main>;
+export function PolicyPage({ title, intro, children }: { title: string; intro: string; children: React.ReactNode }) {
+  return <main><SiteHeader/><article className="inner-page shell legal-page"><p className="eyebrow">Model Car Center policies</p><h1>{title}</h1><p className="legal-intro">{intro}</p><p className="policy-effective"><b>Effective:</b> {POLICY_EFFECTIVE_DATE}</p><nav className="policy-nav" aria-label="Legal policies"><Link href="/terms">Marketplace Terms</Link><Link href="/privacy">Privacy</Link><Link href="/returns">Returns &amp; Refunds</Link><Link href="/shipping">Shipping</Link><Link href="/cookies">Cookies</Link><Link href="/seller-terms">Seller Terms</Link></nav><div className="legal-content">{children}</div></article><SiteFooter/></main>;
 }

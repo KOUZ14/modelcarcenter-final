@@ -133,7 +133,7 @@ Account deletion revokes the collector's sessions, removes the Better Auth user/
 
 ## R2 listing images
 
-The logical Sites R2 binding is `IMAGES`. Collector uploads accept JPEG, PNG, and WebP only, validate both declared MIME type and file signature, allow up to eight images per listing, and cap each image at 10 MB. Objects use unpredictable keys under `listings/<seller>/<product>/...`; D1 stores only metadata and the private bucket key. `/media/*` streams those objects with immutable cache metadata and content-type hardening.
+The logical Sites R2 binding is `IMAGES`. Collector listings, professional Store Console products, and founder-admin products accept direct JPEG, PNG, and WebP uploads instead of image URL fields. Uploads validate both declared MIME type and file signature, allow up to eight images per listing, and cap each image at 10 MB. Objects use unpredictable keys under `listings/<seller>/<product>/...`; D1 stores only metadata and the private bucket key. `/media/*` streams those objects with immutable cache metadata and content-type hardening.
 
 For local development, ensure the `IMAGES` binding is available through the Sites/Vite environment before testing uploads. In production, Sites provisions the bucket declared in `.openai/hosting.json`.
 
@@ -225,16 +225,16 @@ The admin provides:
 Download the canonical template from the admin import tab. The columns are:
 
 ```text
-seller_sku,title,description,scale,model_manufacturer,vehicle_make,vehicle_model,vehicle_year,color,condition,price,inventory_quantity,image_urls,keywords
+seller_sku,title,description,scale,model_manufacturer,vehicle_make,vehicle_model,vehicle_year,color,condition,price,inventory_quantity,keywords
 ```
 
 - Select the seller before upload.
 - `seller_sku`, title, scale, manufacturer, vehicle make/model, condition, price, and inventory are required.
 - `price` is decimal currency and is normalized to integer cents.
 - `condition` is `new`, `used`, `preowned`, or `other`.
-- Multiple image URLs are separated with `|` or `;` and must use HTTP(S).
+- Add product photos from the product editor after the import. Photos are uploaded directly; sellers do not need to host them elsewhere.
 - The importer reports row-level errors and makes no changes until the preview is clean and committed.
-- The unique key is seller + seller SKU. A later import updates that product and replaces its image list; it does not silently duplicate the SKU.
+- The unique key is seller + seller SKU. A later import updates that product while preserving its uploaded photos; it does not silently duplicate the SKU.
 - New imported products start as drafts and must be activated by the founder.
 
 ## Quality checks
@@ -252,7 +252,7 @@ Tests cover search normalization, availability, server totals, fee calculation, 
 
 Before moving from test keys to live operation:
 
-1. Have counsel approve the launch-draft terms, privacy, return, and seller-terms pages.
+1. Confirm the published Marketplace Terms, Privacy Policy, Returns & Refunds Policy, Shipping Policy, Cookie & Local Storage Policy, and Seller Terms with counsel before opening live transactions.
 2. Configure the production Sites `DB` and `IMAGES` bindings and apply all committed migrations; do not seed demo inventory.
 3. Generate and securely configure a production-only `BETTER_AUTH_SECRET`; confirm that `SITE_URL` exactly matches the public HTTPS origin.
 4. Verify magic-link delivery, expiration, replay resistance, sign-out, protected-route redirects, and account deletion using a real production-domain inbox.

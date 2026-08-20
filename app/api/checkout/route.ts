@@ -2,6 +2,7 @@ import { attachStripeSession, loadAuthoritativeCart, releaseReservation, release
 import { readJsonObject } from "@/lib/http";
 import { createCheckoutSession } from "@/lib/stripe";
 import { getCurrentCollector } from "@/lib/collector-auth";
+import { isCurrentPolicyVersion, POLICY_VERSION } from "@/lib/legal";
 
 export const dynamic = "force-dynamic";
 
@@ -9,6 +10,9 @@ export async function POST(request: Request) {
   let reservationId: string | null = null;
   try {
     const payload = await readJsonObject(request);
+    if (!isCurrentPolicyVersion(payload.policyVersion)) {
+      throw new Error("Accept the current marketplace policies before checkout.");
+    }
     const collector = await getCurrentCollector(request.headers).catch(() => null);
     const rawItems = Array.isArray(payload.items) ? payload.items : [];
     const requested = rawItems.map((item) => {
@@ -17,7 +21,7 @@ export async function POST(request: Request) {
     });
     await releaseStaleReservations();
     const cart = await loadAuthoritativeCart(requested);
-    const reservation = await reserveCart(cart, collector?.user.id ?? null);
+    const reservation = await reserveCart(cart, collector?.user.id ?? null, POLICY_VERSION);
     reservationId = reservation.reservationId;
     const session = await createCheckoutSession({
       reservationId,
@@ -36,6 +40,7 @@ export async function POST(request: Request) {
       expiresAt: reservation.expiresAt,
       buyerUserId: collector?.user.id ?? null,
       buyerEmail: collector?.user.email ?? null,
+      policyVersion: POLICY_VERSION,
     });
     if (!session.url) throw new Error("Stripe did not return a checkout URL.");
     await attachStripeSession(reservationId, session.id);

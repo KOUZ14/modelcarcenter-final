@@ -8,6 +8,7 @@ import {
   submitCollectorListing,
 } from "@/lib/listings";
 import { requiredString, ValidationError } from "@/lib/validation";
+import { isCurrentPolicyVersion } from "@/lib/legal";
 
 export const dynamic = "force-dynamic";
 
@@ -26,9 +27,13 @@ export async function POST(request: Request) {
       }) });
     }
     if (action === "submit") {
+      if (!isCurrentPolicyVersion(payload.sellerTermsVersion)) {
+        throw new ValidationError("Accept the current Seller Terms before submitting.");
+      }
       return Response.json({ ok: true, ...await submitCollectorListing(
         collector.user.id,
         requiredString(payload.productId, "productId", 100),
+        requiredString(payload.sellerTermsVersion, "sellerTermsVersion", 40),
       ) });
     }
     if (action === "deactivate") {
@@ -36,7 +41,10 @@ export async function POST(request: Request) {
       return Response.json({ ok: true });
     }
     if (action === "stripe_onboarding") {
-      return Response.json({ ok: true, ...await startCollectorStripeOnboarding(collector.user, collector.profile) });
+      if (!isCurrentPolicyVersion(payload.sellerTermsVersion)) {
+        throw new ValidationError("Accept the current Seller Terms before onboarding.");
+      }
+      return Response.json({ ok: true, ...await startCollectorStripeOnboarding(collector.user, collector.profile, requiredString(payload.sellerTermsVersion, "sellerTermsVersion", 40)) });
     }
     if (action === "refresh_stripe") {
       return Response.json({ ok: true, ...await refreshCollectorStripe(collector.user.id) });

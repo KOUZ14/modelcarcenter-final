@@ -302,8 +302,8 @@ async function runAdminAction(
       d1
         .prepare(
           `INSERT INTO sellers
-        (id, slug, store_name, contact_name, contact_email, website_url, status)
-        VALUES (?, ?, ?, ?, ?, ?, 'approved')`,
+        (id, slug, store_name, contact_name, contact_email, website_url, seller_terms_version, seller_terms_accepted_at, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'approved')`,
         )
         .bind(
           sellerId,
@@ -312,6 +312,8 @@ async function runAdminAction(
           application[0].contactName,
           application[0].email,
           application[0].website,
+          application[0].sellerTermsVersion,
+          application[0].sellerTermsAcceptedAt,
         ),
       d1
         .prepare(
@@ -623,6 +625,11 @@ async function refreshStripe(sellerId: string) {
 
 async function saveProduct(payload: Record<string, unknown>) {
   const id = cleanText(payload.id, 100) || crypto.randomUUID();
+  const existing = await getDb()
+    .select({ primaryImageUrl: products.primaryImageUrl })
+    .from(products)
+    .where(eq(products.id, id))
+    .limit(1);
   const sellerId = requiredString(payload.sellerId, "sellerId", 100);
   const seller = await getDb()
     .select({ id: sellers.id })
@@ -632,12 +639,6 @@ async function saveProduct(payload: Record<string, unknown>) {
   if (!seller[0]) throw new ValidationError("Select a valid seller.");
   const title = requiredString(payload.title, "title", 200);
   const sellerSku = requiredString(payload.sellerSku, "sellerSku", 100);
-  const image = cleanText(payload.primaryImageUrl, 1_500);
-  const primaryImageUrl = image ? optionalHttpUrl(image) : null;
-  if (image && !primaryImageUrl && !image.startsWith("/images/"))
-    throw new ValidationError(
-      "Image must be a local /images path or http(s) URL.",
-    );
   const values = {
     id,
     sellerId,
@@ -669,8 +670,7 @@ async function saveProduct(payload: Record<string, unknown>) {
       0,
       1_000_000,
     ),
-    primaryImageUrl:
-      primaryImageUrl ?? (image.startsWith("/images/") ? image : null),
+    primaryImageUrl: existing[0]?.primaryImageUrl ?? null,
     keywords: cleanText(payload.keywords, 1_000),
   };
   await getDb()

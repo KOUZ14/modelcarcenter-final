@@ -49,6 +49,7 @@ export async function createCheckoutSession(input: {
   expiresAt: Date;
   buyerUserId?: string | null;
   buyerEmail?: string | null;
+  policyVersion: string;
 }) {
   const body = new URLSearchParams({
     mode: "payment",
@@ -59,6 +60,8 @@ export async function createCheckoutSession(input: {
     expires_at: String(Math.floor(input.expiresAt.getTime() / 1000)),
     "metadata[reservation_id]": input.reservationId,
     "metadata[seller_id]": input.sellerId,
+    "metadata[policy_version]": input.policyVersion,
+    "metadata[policy_accepted_at]": new Date().toISOString(),
     "payment_intent_data[application_fee_amount]": String(input.platformFeeCents),
     "payment_intent_data[transfer_data][destination]": input.sellerStripeAccountId,
     "payment_intent_data[metadata][reservation_id]": input.reservationId,

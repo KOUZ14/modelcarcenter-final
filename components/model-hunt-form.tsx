@@ -37,6 +37,7 @@ export function ModelHuntForm({ compact = false }: { compact?: boolean }) {
     <div className="form-row"><label>Color<input name="color" placeholder="Optional"/></label><label>Condition<select name="conditionPreference" defaultValue=""><option value="">Any condition</option><option value="new">New</option><option value="preowned">Pre-owned</option></select></label></div>
     <div className="form-row"><label>Maximum budget<input name="maxBudget" inputMode="decimal" placeholder="Optional, e.g. 300"/></label><label>Email address<input key={collector?.email ?? "guest"} name="collectorEmail" required type="email" autoComplete="email" placeholder="you@example.com" defaultValue={collector?.email ?? ""} readOnly={Boolean(collector)}/>{collector && <span className="field-note">Linked to your verified account.</span>}</label></div>
     <label>Notes<textarea name="notes" rows={3} placeholder="Edition, livery, racing number, or any detail that matters"/></label>
+    <p className="collection-notice">We use these details and your email to search inventory and contact you about this request. See our <Link href="/privacy">Privacy Policy</Link>.</p>
     {state.kind === "error" && <p className="form-error" role="alert">{state.message}</p>}
     <button className="button light" type="submit" disabled={state.kind === "loading"}>{state.kind === "loading" ? "Checking inventory…" : <>Start Model Hunt <Icon name="arrow"/></>}</button>
   </form>;

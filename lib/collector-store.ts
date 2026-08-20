@@ -433,6 +433,24 @@ export async function getOwnedProduct(userId: string, productId: string) {
   return { ...rows[0], images };
 }
 
+export async function getOwnedProductForImages(
+  userId: string,
+  productId: string,
+) {
+  const rows = await getDb()
+    .select({
+      product: products,
+      ownerUserId: sellers.ownerUserId,
+      sellerStatus: sellers.status,
+      sellerType: sellers.sellerType,
+    })
+    .from(products)
+    .innerJoin(sellers, eq(products.sellerId, sellers.id))
+    .where(and(eq(products.id, productId), eq(sellers.ownerUserId, userId)))
+    .limit(1);
+  return rows[0] ?? null;
+}
+
 export async function deleteCollectorAccount(userId: string) {
   const d1 = getD1();
   await d1.batch([

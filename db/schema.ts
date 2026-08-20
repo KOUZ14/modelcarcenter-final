@@ -91,6 +91,8 @@ export const sellers = sqliteTable(
       .notNull()
       .default(""),
     returnPolicySummary: text("return_policy_summary").notNull().default(""),
+    sellerTermsVersion: text("seller_terms_version"),
+    sellerTermsAcceptedAt: text("seller_terms_accepted_at"),
     ...timestamps,
   },
   (table) => [
@@ -116,6 +118,8 @@ export const sellerApplications = sqliteTable(
     currentSellingChannels: text("current_selling_channels").notNull(),
     approximateInventorySize: integer("approximate_inventory_size").notNull(),
     message: text("message").notNull().default(""),
+    sellerTermsVersion: text("seller_terms_version"),
+    sellerTermsAcceptedAt: text("seller_terms_accepted_at"),
     status: text("status", { enum: ["pending", "approved", "rejected"] })
       .notNull()
       .default("pending"),
@@ -477,6 +481,8 @@ export const checkoutReservations = sqliteTable(
     shippingCents: integer("shipping_cents").notNull(),
     platformFeeCents: integer("platform_fee_cents").notNull(),
     currency: text("currency").notNull(),
+    policyVersion: text("policy_version"),
+    policyAcceptedAt: text("policy_accepted_at"),
     expiresAt: text("expires_at").notNull(),
     createdAt: text("created_at")
       .notNull()

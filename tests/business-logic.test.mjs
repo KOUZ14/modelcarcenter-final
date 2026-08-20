@@ -44,7 +44,7 @@ test("Model Hunt validation normalizes valid input and rejects invalid email", (
 });
 
 test("CSV validation reports row errors and upsert planning reuses seller SKU identity", () => {
-  const rows = parseCsv("seller_sku,title,description,scale,model_manufacturer,vehicle_make,vehicle_model,vehicle_year,color,condition,price,inventory_quantity,image_urls,keywords\nSKU-1,911,,1:18,AUTOart,Porsche,911,1973,Silver,new,249.95,2,https://example.com/a.jpg,classic\nSKU-2,Bad,,1:18,,Porsche,911,,,invalid,nope,-2,javascript:bad,x\n");
+  const rows = parseCsv("seller_sku,title,description,scale,model_manufacturer,vehicle_make,vehicle_model,vehicle_year,color,condition,price,inventory_quantity,keywords\nSKU-1,911,,1:18,AUTOart,Porsche,911,1973,Silver,new,249.95,2,classic\nSKU-2,Bad,,1:18,,Porsche,911,,,invalid,nope,-2,x\n");
   const validation = validateImportRows(rows);
   assert.equal(validation.valid.length, 1);
   assert.equal(validation.errors.length, 1);

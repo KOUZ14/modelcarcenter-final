@@ -153,7 +153,7 @@ function GarageView({
         title="Wishlist"
         empty="No saved models yet."
         cta="Browse Models"
-        href="/#inventory"
+        href="/marketplace"
         detail={`${data.wishlist.length} model${data.wishlist.length === 1 ? "" : "s"} saved across your devices.`}
       />
     );
@@ -210,7 +210,7 @@ function Overview({ data }: { data: GarageData }) {
         </article>
       </div>
       <div className="garage-quick">
-        <Link href="/#inventory">Find a Model</Link>
+        <Link href="/marketplace">Find a Model</Link>
         <Link href="/#model-hunt">Start a Model Hunt</Link>
         <Link href={professionalStore ? "/store" : "/sell/model"}>
           {professionalStore ? "Manage Store" : "Sell a Model"}
@@ -322,7 +322,7 @@ function Orders({ rows }: { rows: GarageData["orders"] }) {
         title="Orders"
         empty="No orders yet."
         cta="Find a Model"
-        href="/#inventory"
+        href="/marketplace"
         detail=""
       />
     );

@@ -63,7 +63,7 @@ export function WishlistPage() {
             ? "Models you save will be available on every device."
             : "Save freely now. Sign in whenever you want to keep your wishlist across devices."}
         </p>
-        <Link className="button dark" href="/#inventory">
+        <Link className="button dark" href="/marketplace">
           Browse Models
         </Link>
       </div>

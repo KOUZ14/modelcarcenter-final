@@ -1,4 +1,5 @@
 import { normalizeSearch } from "./business.ts";
+import { isCurrentPolicyVersion } from "./legal.ts";
 
 export class ValidationError extends Error {
   fields: Record<string, string>;
@@ -91,6 +92,9 @@ export function parseModelHunt(payload: Record<string, unknown>) {
 
 export function parseSellerApplication(payload: Record<string, unknown>) {
   rejectHoneypot(payload);
+  if (!isCurrentPolicyVersion(payload.sellerTermsVersion)) {
+    throw new ValidationError("Accept the current Seller Terms to apply.");
+  }
   const email = normalizeEmail(payload.email);
   if (!isEmail(email)) throw new ValidationError("Enter a valid email address.");
   const rawWebsite = cleanText(payload.website, 1_500);
@@ -215,7 +219,6 @@ export type ValidatedImportRow = {
   condition: "new" | "used" | "preowned" | "other";
   priceCents: number;
   inventoryQuantity: number;
-  imageUrls: string[];
   keywords: string;
 };
 
@@ -235,11 +238,10 @@ export function validateImportRows(rows: CsvRow[]) {
     try { inventoryQuantity = integer(row.inventory_quantity, "inventory_quantity", 0, 1_000_000); } catch (error) { rowErrors.push((error as Error).message); }
     const condition = cleanText(row.condition, 30).toLowerCase();
     if (!["new", "used", "preowned", "other"].includes(condition)) rowErrors.push("condition must be new, used, preowned, or other");
-    const imageUrls = cleanText(row.image_urls, 5_000)
-      .split(/[|;]/)
-      .map((url) => url.trim())
-      .filter(Boolean);
-    if (imageUrls.some((url) => !optionalHttpUrl(url))) rowErrors.push("image_urls must contain only http or https URLs separated by | or ;");
+    if (cleanText(row.image_urls, 5_000))
+      rowErrors.push(
+        "image_urls is no longer supported; upload product photos after importing",
+      );
     if (rowErrors.length) {
       errors.push({ row: index + 2, errors: rowErrors });
       return;
@@ -258,7 +260,6 @@ export function validateImportRows(rows: CsvRow[]) {
       condition: condition as ValidatedImportRow["condition"],
       priceCents,
       inventoryQuantity,
-      imageUrls,
       keywords: cleanText(row.keywords, 1_000),
     });
   });

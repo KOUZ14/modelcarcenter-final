@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import Link from "next/link";
 import { authClient } from "@/lib/auth-client";
 
 export function SignInForm({
@@ -96,8 +97,7 @@ export function SignInForm({
         {state === "loading" ? "Sending secure link…" : "Continue"}
       </button>
       <p className="form-note">
-        No password needed. Browsing and guest checkout remain available without
-        an account.
+        No password needed. By continuing, you agree to the <Link href="/terms">Marketplace Terms</Link> and acknowledge the <Link href="/privacy">Privacy Policy</Link>. Browsing and guest checkout remain available without an account.
       </p>
     </form>
   );

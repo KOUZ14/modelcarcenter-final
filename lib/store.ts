@@ -133,6 +133,13 @@ export async function getStoreDashboardData(userId: string) {
       .orderBy(desc(orders.createdAt)),
   ]);
   const orderIds = orderRows.map((order) => order.id);
+  const inventoryImages = inventory.length
+    ? await db
+        .select()
+        .from(productImages)
+        .where(inArray(productImages.productId, inventory.map((item) => item.id)))
+        .orderBy(asc(productImages.sortOrder))
+    : [];
   const items = orderIds.length
     ? await db
         .select()
@@ -143,7 +150,10 @@ export async function getStoreDashboardData(userId: string) {
   const analytics = buildStoreAnalytics(orderRows, items, inventory);
   return {
     store,
-    inventory,
+    inventory: inventory.map((item) => ({
+      ...item,
+      images: inventoryImages.filter((image) => image.productId === item.id),
+    })),
     orders: orderRows.map((order) => ({
       ...order,
       items: items.filter((item) => item.orderId === order.id),
@@ -191,12 +201,6 @@ export async function saveStoreProduct(
     throw new ValidationError("That SKU is already used by another item.");
 
   const title = requiredString(payload.title, "title", 200);
-  const image = cleanText(payload.primaryImageUrl, 1_500);
-  const remoteImage = image ? optionalHttpUrl(image) : null;
-  if (image && !remoteImage && !image.startsWith("/images/"))
-    throw new ValidationError(
-      "Primary image must be an http(s) URL or a local /images path.",
-    );
   const inventoryQuantity = integer(
     payload.inventoryQuantity,
     "inventoryQuantity",
@@ -230,7 +234,7 @@ export async function saveStoreProduct(
     condition,
     priceCents: moneyToCents(payload.price, "price"),
     inventoryQuantity,
-    primaryImageUrl: remoteImage ?? (image || null),
+    primaryImageUrl: existing?.primaryImageUrl ?? null,
     keywords: cleanText(payload.keywords, 1_000),
   };
 
@@ -253,34 +257,6 @@ export async function saveStoreProduct(
       currency: "usd",
       status: "draft",
     });
-  }
-  if (values.primaryImageUrl) {
-    const firstImages = await db
-      .select()
-      .from(productImages)
-      .where(eq(productImages.productId, id))
-      .orderBy(asc(productImages.sortOrder))
-      .limit(1);
-    const firstImage = firstImages[0];
-    if (firstImage?.source === "external") {
-      await db
-        .update(productImages)
-        .set({
-          url: values.primaryImageUrl,
-          alt: `${values.modelManufacturer} ${title} model car`,
-        })
-        .where(eq(productImages.id, firstImage.id));
-    } else if (!firstImage) {
-      await db.insert(productImages).values({
-        id: crypto.randomUUID(),
-        productId: id,
-        url: values.primaryImageUrl,
-        source: "external",
-        alt: `${values.modelManufacturer} ${title} model car`,
-        sortOrder: 0,
-        createdAt: new Date().toISOString(),
-      });
-    }
   }
   return { productId: id };
 }

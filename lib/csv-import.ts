@@ -16,7 +16,6 @@ export const inventoryCsvHeaders = [
   "condition",
   "price",
   "inventory_quantity",
-  "image_urls",
   "keywords",
 ];
 
@@ -48,8 +47,8 @@ export async function commitInventoryCsv(sellerId: string, csv: string) {
       d1.prepare(`INSERT INTO products
         (id, seller_id, slug, seller_sku, title, description, scale, model_manufacturer, vehicle_make,
          vehicle_model, vehicle_year, color, condition, price_cents, currency, inventory_quantity,
-         reserved_quantity, status, primary_image_url, keywords)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'usd', ?, 0, 'draft', ?, ?)
+         reserved_quantity, status, keywords)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'usd', ?, 0, 'draft', ?)
         ON CONFLICT(seller_id, seller_sku) DO UPDATE SET
           title = excluded.title, description = excluded.description, scale = excluded.scale,
           model_manufacturer = excluded.model_manufacturer, vehicle_make = excluded.vehicle_make,
@@ -59,24 +58,17 @@ export async function commitInventoryCsv(sellerId: string, csv: string) {
             WHEN excluded.inventory_quantity >= products.reserved_quantity THEN excluded.inventory_quantity
             ELSE products.reserved_quantity
           END,
-          primary_image_url = excluded.primary_image_url, keywords = excluded.keywords,
+          keywords = excluded.keywords,
           updated_at = CURRENT_TIMESTAMP`)
         .bind(productId, sellerId, slug, row.sellerSku, row.title, row.description, row.scale,
           row.modelManufacturer, row.vehicleMake, row.vehicleModel, row.vehicleYear, row.color,
-          row.condition, row.priceCents, row.inventoryQuantity, row.imageUrls[0] ?? null, row.keywords),
-      d1.prepare("DELETE FROM product_images WHERE product_id = ?").bind(productId),
+          row.condition, row.priceCents, row.inventoryQuantity, row.keywords),
     );
-    row.imageUrls.forEach((url, index) => {
-      statements.push(
-        d1.prepare(`INSERT INTO product_images (id, product_id, url, alt, sort_order) VALUES (?, ?, ?, ?, ?)`)
-          .bind(crypto.randomUUID(), productId, url, `${row.modelManufacturer} ${row.title} model car`, index),
-      );
-    });
   }
   await d1.batch(statements);
   return { imported: planned.length, created: planned.filter((row) => row.operation === "insert").length };
 }
 
 export function inventoryCsvTemplate() {
-  return `${inventoryCsvHeaders.join(",")}\nSKU-001,Example model,Short plain-text description,1:18,AUTOart,Porsche,911,1973,Silver,new,249.95,2,https://example.com/model.jpg,"porsche 911 classic"\n`;
+  return `${inventoryCsvHeaders.join(",")}\nSKU-001,Example model,Short plain-text description,1:18,AUTOart,Porsche,911,1973,Silver,new,249.95,2,"porsche 911 classic"\n`;
 }

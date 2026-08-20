@@ -3,6 +3,11 @@
 import Link from "next/link";
 import { FormEvent, useMemo, useState } from "react";
 import { formatMoney } from "@/lib/format";
+import {
+  EditableProductImage,
+  ProductImageFields,
+} from "@/components/product-image-fields";
+import { uploadProductPhotoFiles } from "@/lib/upload-client";
 
 type Store = {
   id: string;
@@ -41,6 +46,7 @@ type Product = {
   reservedQuantity: number;
   status: string;
   primaryImageUrl: string | null;
+  images: EditableProductImage[];
   keywords: string;
   updatedAt: string;
 };
@@ -188,7 +194,7 @@ export function StoreDashboard({
         <div className="store-sidebar-links">
           <Link href={`/sellers/${data.store.slug}`}>View storefront</Link>
           <Link href="/account">My Garage</Link>
-          <Link href="/">Back to marketplace</Link>
+          <Link href="/marketplace">Back to marketplace</Link>
         </div>
       </aside>
       <main className="store-main">
@@ -489,21 +495,67 @@ function ProductEditor({
   onClose(): void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [productId, setProductId] = useState(product?.id ?? "");
+  const [files, setFiles] = useState<File[]>([]);
+  const [images, setImages] = useState(product?.images ?? []);
+  const [primaryUploadFinished, setPrimaryUploadFinished] = useState(false);
+  const [imageError, setImageError] = useState("");
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
+    setImageError("");
     try {
-      await action(
+      const form = new FormData(event.currentTarget);
+      form.delete("images");
+      const result = await action(
         {
           action: "save_product",
-          id: product?.id,
-          ...Object.fromEntries(new FormData(event.currentTarget)),
+          id: productId || undefined,
+          ...Object.fromEntries(form),
         },
-        { reload: true, message: product ? "Inventory updated." : "Draft product created." },
+        { message: product ? "Inventory updated." : "Draft product created." },
+      );
+      const savedProductId = String(result.productId ?? "");
+      setProductId(savedProductId);
+      if (files.length && savedProductId) {
+        let nextImages = images;
+        await uploadProductPhotoFiles({
+          endpoint: "/api/listings/images",
+          productId: savedProductId,
+          files,
+          makePrimary: !primaryUploadFinished,
+          onUploaded(uploaded, processedCount) {
+            nextImages = [...nextImages, ...uploaded];
+            setImages(nextImages);
+            setFiles(files.slice(processedCount));
+            if (processedCount === 1) setPrimaryUploadFinished(true);
+          },
+        });
+      }
+      window.location.reload();
+    } catch (reason) {
+      setImageError(
+        reason instanceof Error ? reason.message : "The product could not be saved.",
       );
     } finally {
       setBusy(false);
     }
+  }
+  async function removeImage(imageId: string) {
+    if (!productId) return;
+    setImageError("");
+    const response = await fetch("/api/listings/images", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ productId, imageId }),
+    });
+    const body = (await response.json()) as { error?: string };
+    if (!response.ok) {
+      const message = body.error || "The photo could not be removed.";
+      setImageError(message);
+      throw new Error(message);
+    }
+    setImages((current) => current.filter((image) => image.id !== imageId));
   }
   return (
     <div className="store-editor-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
@@ -537,11 +589,17 @@ function ProductEditor({
             <label>Condition<select name="condition" defaultValue={product?.condition ?? "new"}><option value="new">New</option><option value="preowned">Preowned</option><option value="used">Used</option><option value="other">Other</option></select></label>
             <label>Price (USD)<input name="price" inputMode="decimal" required defaultValue={product ? (product.priceCents / 100).toFixed(2) : ""} /></label>
           </div>
-          <div className="form-row">
-            <label>Inventory quantity<input name="inventoryQuantity" type="number" min={product?.reservedQuantity ?? 0} max={1000000} required defaultValue={product?.inventoryQuantity ?? 1} /></label>
-            <label>Primary image URL<input name="primaryImageUrl" type="text" maxLength={1500} defaultValue={product?.primaryImageUrl ?? ""} /></label>
-          </div>
+          <label>Inventory quantity<input name="inventoryQuantity" type="number" min={product?.reservedQuantity ?? 0} max={1000000} required defaultValue={product?.inventoryQuantity ?? 1} /></label>
+          <ProductImageFields
+            images={images}
+            primaryImageUrl={product?.primaryImageUrl}
+            files={files}
+            disabled={busy}
+            onFilesChange={setFiles}
+            onRemove={productId ? removeImage : undefined}
+          />
           <label>Search keywords<input name="keywords" maxLength={1000} defaultValue={product?.keywords ?? ""} /></label>
+          {imageError && <p className="form-error" role="alert">{imageError}</p>}
           {product && product.reservedQuantity > 0 && <p className="form-note">Inventory cannot be reduced below {product.reservedQuantity} reserved units.</p>}
           <div className="row-actions">
             <button className="button dark small" disabled={busy}>{busy ? "Saving…" : product ? "Save changes" : "Create draft"}</button>

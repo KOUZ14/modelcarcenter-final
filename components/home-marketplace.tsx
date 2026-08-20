@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { formatCondition } from "@/lib/format";
 import type { CatalogResponse } from "@/lib/types";
@@ -30,6 +31,7 @@ const emptyCatalog: CatalogResponse = {
 };
 
 export function HomeMarketplace() {
+  const router = useRouter();
   const [query, setQuery] = useState("");
   const [activeQuery, setActiveQuery] = useState("");
   const [scale, setScale] = useState("");
@@ -77,21 +79,11 @@ export function HomeMarketplace() {
   }
   function runSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    beginLoad();
-    setPage(1);
-    setActiveQuery(query);
-    document
-      .getElementById("inventory")
-      ?.scrollIntoView({ behavior: "smooth" });
+    const search = query.trim();
+    router.push(search ? `/marketplace?q=${encodeURIComponent(search)}` : "/marketplace");
   }
   function quickSearch(value: string) {
-    beginLoad();
-    setQuery(value);
-    setActiveQuery(value);
-    setPage(1);
-    document
-      .getElementById("inventory")
-      ?.scrollIntoView({ behavior: "smooth" });
+    router.push(`/marketplace?q=${encodeURIComponent(value)}`);
   }
   function clear() {
     beginLoad();
@@ -169,12 +161,12 @@ export function HomeMarketplace() {
               key={item}
               type="button"
               onClick={() => {
-                beginLoad();
-                setScale(item === "Other scales" ? "" : item);
-                setPage(1);
-                document
-                  .getElementById("inventory")
-                  ?.scrollIntoView({ behavior: "smooth" });
+                const selectedScale = item === "Other scales" ? "" : item;
+                router.push(
+                  selectedScale
+                    ? `/marketplace?scale=${encodeURIComponent(selectedScale)}`
+                    : "/marketplace",
+                );
               }}
             >
               <span>{String(index + 1).padStart(2, "0")}</span>

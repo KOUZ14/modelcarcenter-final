@@ -5,12 +5,14 @@ import Image from "next/image";
 import { useState } from "react";
 import { useMarketplace } from "./marketplace-provider";
 import { formatMoney as money } from "@/lib/format";
+import { POLICY_VERSION } from "@/lib/legal";
 
 export function CartPage() {
   const { cart, removeFromCart, setQuantity, clearCart, collector } =
     useMarketplace();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [acceptedPolicies, setAcceptedPolicies] = useState(false);
   const subtotal = cart.reduce(
     (sum, item) => sum + item.priceCents * item.quantity,
     0,
@@ -24,6 +26,7 @@ export function CartPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          policyVersion: POLICY_VERSION,
           items: cart.map((item) => ({
             productId: item.productId,
             quantity: item.quantity,
@@ -51,7 +54,7 @@ export function CartPage() {
         <p>
           Browse current inventory and add a model when you find the right one.
         </p>
-        <Link className="button dark" href="/#inventory">
+        <Link className="button dark" href="/marketplace">
           Browse model cars
         </Link>
       </div>
@@ -145,6 +148,10 @@ export function CartPage() {
             Tax, when enabled, is calculated by Stripe Checkout. Shipping is a
             flat seller rate for this order.
           </p>
+          <label className="consent-check checkout-consent">
+            <input type="checkbox" checked={acceptedPolicies} onChange={(event) => setAcceptedPolicies(event.target.checked)} />
+            <span>I agree to the <Link href="/terms">Marketplace Terms</Link> and acknowledge the <Link href="/privacy">Privacy Policy</Link>, <Link href="/shipping">Shipping Policy</Link>, and <Link href="/returns">Returns &amp; Refunds Policy</Link>.</span>
+          </label>
           {error && (
             <p className="form-error" role="alert">
               {error}
@@ -153,7 +160,7 @@ export function CartPage() {
           <button
             className="button dark checkout-button"
             type="button"
-            disabled={loading}
+            disabled={loading || !acceptedPolicies}
             onClick={checkout}
           >
             {loading ? "Starting secure checkout…" : "Checkout with Stripe"}

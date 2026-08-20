@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import Image from "next/image";
 import { notFound } from "next/navigation";
 import { getProductBySlug, getRelatedProducts } from "@/lib/catalog";
+import { ProductGallery } from "@/components/product-gallery";
 import { ProductPurchase } from "@/components/product-purchase";
 import { ProductCard } from "@/components/product-card";
 import { formatCondition, formatMoney } from "@/lib/format";
@@ -69,27 +69,15 @@ export default async function ProductPage({
       <SiteHeader />
       <div className="inner-page product-page shell">
         <nav className="breadcrumbs" aria-label="Breadcrumb">
-          <Link href="/">Marketplace</Link>
+          <Link href="/marketplace">Marketplace</Link>
           <span>/</span>
           <span>{product.title}</span>
         </nav>
         <div className="product-detail">
-          <div className="product-gallery">
-            {product.images.map((image) => (
-              <Image
-                key={image.id}
-                src={image.url}
-                alt={
-                  image.alt ||
-                  `${product.modelManufacturer} ${product.title} model car`
-                }
-                width={1200}
-                height={1260}
-                sizes="(max-width: 1000px) 100vw, 55vw"
-                unoptimized
-              />
-            ))}
-          </div>
+          <ProductGallery
+            images={product.images}
+            productName={`${product.modelManufacturer} ${product.title}`}
+          />
           <aside className="product-summary">
             <p className="eyebrow">
               {product.scale} · {product.modelManufacturer}

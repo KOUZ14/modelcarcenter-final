@@ -13,6 +13,7 @@ import {
   parseCollectorListing,
   ValidationError,
 } from "./validation";
+import { isCurrentPolicyVersion } from "./legal";
 
 type CollectorProfile = { displayName: string; bio: string };
 
@@ -150,7 +151,11 @@ function listingProductValues(
 export async function submitCollectorListing(
   userId: string,
   productId: string,
+  sellerTermsVersion: string,
 ) {
+  if (!isCurrentPolicyVersion(sellerTermsVersion)) {
+    throw new ValidationError("Accept the current Seller Terms before submitting.");
+  }
   const owned = await getOwnedProduct(userId, productId);
   if (!owned) throw new ValidationError("Listing not found.");
   if (owned.sellerStatus === "suspended")
@@ -177,6 +182,14 @@ export async function submitCollectorListing(
   if (Number(imageCount[0]?.count ?? 0) < 1)
     throw new ValidationError("Add at least one photo before submitting.");
   await getDb()
+    .update(sellers)
+    .set({
+      sellerTermsVersion,
+      sellerTermsAcceptedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    })
+    .where(eq(sellers.id, owned.product.sellerId));
+  await getDb()
     .update(products)
     .set({
       status: "pending_review",
@@ -195,10 +208,22 @@ export async function submitCollectorListing(
 export async function startCollectorStripeOnboarding(
   user: VerifiedCollectorUser,
   profile: CollectorProfile,
+  sellerTermsVersion: string,
 ) {
+  if (!isCurrentPolicyVersion(sellerTermsVersion)) {
+    throw new ValidationError("Accept the current Seller Terms before onboarding.");
+  }
   const seller = await getOrCreateCollectorSeller(user, profile);
   if (seller.status === "suspended")
     throw new ValidationError("This seller is suspended.");
+  await getDb()
+    .update(sellers)
+    .set({
+      sellerTermsVersion,
+      sellerTermsAcceptedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    })
+    .where(eq(sellers.id, seller.id));
   let accountId = seller.stripeAccountId;
   if (!accountId) {
     const account = await createConnectedAccount({

@@ -5,6 +5,11 @@ import Image from "next/image";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { modelHuntMatches } from "@/lib/business";
 import { formatMoney as money } from "@/lib/format";
+import {
+  EditableProductImage,
+  ProductImageFields,
+} from "@/components/product-image-fields";
+import { uploadProductPhotoFiles } from "@/lib/upload-client";
 
 type AdminData = Record<string, unknown> & { section?: string };
 const tabs = [
@@ -576,7 +581,7 @@ type AdminProduct = {
   sellerStatus?: string;
   stripeChargesEnabled?: boolean;
   stripePayoutsEnabled?: boolean;
-  images?: Array<{ id: string; url: string; alt: string }>;
+  images?: EditableProductImage[];
 };
 function Products({
   data,
@@ -778,14 +783,67 @@ function ProductEditor({
   action(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
   onClose(): void;
 }) {
+  const [busy, setBusy] = useState(false);
+  const [productId, setProductId] = useState(product.id);
+  const [files, setFiles] = useState<File[]>([]);
+  const [images, setImages] = useState(product.images ?? []);
+  const [primaryUploadFinished, setPrimaryUploadFinished] = useState(false);
+  const [imageError, setImageError] = useState("");
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    await action({
-      action: "save_product",
-      ...Object.fromEntries(new FormData(event.currentTarget).entries()),
-      id: product.id,
+    setBusy(true);
+    setImageError("");
+    try {
+      const form = new FormData(event.currentTarget);
+      form.delete("images");
+      const result = await action({
+        action: "save_product",
+        ...Object.fromEntries(form.entries()),
+        id: productId,
+      });
+      const savedProductId = String(result.productId ?? "");
+      setProductId(savedProductId);
+      if (files.length && savedProductId) {
+        let nextImages = images;
+        await uploadProductPhotoFiles({
+          endpoint: "/api/admin/images",
+          productId: savedProductId,
+          files,
+          makePrimary: !primaryUploadFinished,
+          onUploaded(uploaded, processedCount) {
+            nextImages = [...nextImages, ...uploaded];
+            setImages(nextImages);
+            setFiles(files.slice(processedCount));
+            if (processedCount === 1) setPrimaryUploadFinished(true);
+          },
+        });
+        window.location.reload();
+        return;
+      }
+      onClose();
+    } catch (reason) {
+      setImageError(
+        reason instanceof Error ? reason.message : "The product could not be saved.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function removeImage(imageId: string) {
+    if (!productId) return;
+    setImageError("");
+    const response = await fetch("/api/admin/images", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ productId, imageId }),
     });
-    onClose();
+    const body = (await response.json()) as { error?: string };
+    if (!response.ok) {
+      const message = body.error || "The photo could not be removed.";
+      setImageError(message);
+      throw new Error(message);
+    }
+    setImages((current) => current.filter((image) => image.id !== imageId));
   }
   return (
     <section className="admin-panel">
@@ -884,32 +942,34 @@ function ProductEditor({
             />
           </label>
         </div>
-        <div className="form-row">
-          <label>
-            Inventory quantity
-            <input
-              name="inventoryQuantity"
-              type="number"
-              min={product.reservedQuantity}
-              required
-              defaultValue={product.inventoryQuantity}
-            />
-          </label>
-          <label>
-            Primary image URL
-            <input
-              name="primaryImageUrl"
-              defaultValue={product.primaryImageUrl ?? ""}
-            />
-          </label>
-        </div>
+        <label>
+          Inventory quantity
+          <input
+            name="inventoryQuantity"
+            type="number"
+            min={product.reservedQuantity}
+            required
+            defaultValue={product.inventoryQuantity}
+          />
+        </label>
+        <ProductImageFields
+          images={images}
+          primaryImageUrl={product.primaryImageUrl}
+          files={files}
+          disabled={busy}
+          onFilesChange={setFiles}
+          onRemove={productId ? removeImage : undefined}
+        />
         <label>
           Keywords
           <input name="keywords" defaultValue={product.keywords ?? ""} />
         </label>
+        {imageError && <p className="form-error" role="alert">{imageError}</p>}
         <div className="row-actions">
-          <button className="button dark small">
-            Save as {product.status === "active" ? "current status" : "draft"}
+          <button className="button dark small" disabled={busy}>
+            {busy
+              ? "Saving…"
+              : `Save as ${product.status === "active" ? "current status" : "draft"}`}
           </button>
           <button type="button" onClick={onClose}>
             Cancel

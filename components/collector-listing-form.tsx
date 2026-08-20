@@ -4,6 +4,8 @@ import Image from "next/image";
 import Link from "next/link";
 import { FormEvent, useState } from "react";
 import { collectorListingConditions } from "@/lib/validation";
+import { uploadProductPhotoFiles } from "@/lib/upload-client";
+import { POLICY_VERSION } from "@/lib/legal";
 
 type Initial = {
   product: Record<string, unknown>;
@@ -38,12 +40,18 @@ export function CollectorListingForm({
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [acceptedSellerTerms, setAcceptedSellerTerms] = useState(false);
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true); setError(""); setMessage("");
     const submitter = (event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
     const shouldSubmit = submitter?.value === "submit";
+    if (shouldSubmit && !acceptedSellerTerms) {
+      setError("Accept the current Seller Terms before submitting for review.");
+      setBusy(false);
+      return;
+    }
     try {
       const payload = Object.fromEntries(new FormData(event.currentTarget));
       const response = await fetch("/api/listings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "save", productId: productId || undefined, ...payload }) });
@@ -52,19 +60,20 @@ export function CollectorListingForm({
       setProductId(body.productId);
       let nextImages = images;
       if (files.length) {
-        const form = new FormData();
-        form.set("productId", body.productId);
-        files.forEach((file) => form.append("images", file));
-        const upload = await fetch("/api/listings/images", { method: "POST", body: form });
-        const uploaded = await upload.json() as { images?: Array<{ id: string; url: string; alt: string }>; error?: string };
-        if (!upload.ok) throw new Error(uploaded.error || "Photos could not be uploaded.");
-        nextImages = [...images, ...(uploaded.images ?? [])];
-        setImages(nextImages);
-        setFiles([]);
+        await uploadProductPhotoFiles({
+          endpoint: "/api/listings/images",
+          productId: body.productId,
+          files,
+          onUploaded(uploaded, processedCount) {
+            nextImages = [...nextImages, ...uploaded];
+            setImages(nextImages);
+            setFiles(files.slice(processedCount));
+          },
+        });
       }
       history.replaceState(null, "", `/sell/model?id=${encodeURIComponent(body.productId)}`);
       if (shouldSubmit) {
-        const review = await fetch("/api/listings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "submit", productId: body.productId }) });
+        const review = await fetch("/api/listings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "submit", productId: body.productId, sellerTermsVersion: POLICY_VERSION }) });
         const reviewBody = await review.json() as { error?: string };
         if (!review.ok) throw new Error(reviewBody.error || "The listing could not be submitted.");
         setMessage("Listing submitted for marketplace review.");
@@ -86,7 +95,7 @@ export function CollectorListingForm({
   async function startOnboarding() {
     setBusy(true); setError("");
     try {
-      const response = await fetch("/api/listings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "stripe_onboarding" }) });
+      const response = await fetch("/api/listings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "stripe_onboarding", sellerTermsVersion: POLICY_VERSION }) });
       const body = await response.json() as { onboardingUrl?: string; error?: string };
       if (!response.ok || !body.onboardingUrl) throw new Error(body.error || "Stripe onboarding could not be started.");
       window.location.assign(body.onboardingUrl);
@@ -99,6 +108,6 @@ export function CollectorListingForm({
     <section><h2>Price and availability</h2><div className="form-row"><label>Price (USD)<input name="price" inputMode="decimal" required defaultValue={product.priceCents == null ? "" : (Number(product.priceCents) / 100).toFixed(2)}/></label><label>Quantity<input name="quantity" type="number" min={1} max={100} required defaultValue={String(product.inventoryQuantity ?? 1)}/></label></div><label>Flat shipping price (USD)<input name="shippingPrice" inputMode="decimal" required defaultValue={seller?.defaultShippingCents == null ? "0.00" : (Number(seller.defaultShippingCents) / 100).toFixed(2)}/></label></section>
     <section><h2>Seller profile</h2><div className="form-row"><label>Seller display name<input name="sellerDisplayName" required maxLength={120} defaultValue={String(seller?.storeName ?? displayName)}/></label><label>Shipping country code<input name="shippingOriginCountry" required maxLength={2} defaultValue={String(seller?.shippingOriginCountry ?? "US")}/></label></div><label>State or region<input name="shippingOriginRegion" maxLength={80} defaultValue={String(seller?.shippingOriginRegion ?? "")}/></label><label>Short seller description<textarea name="sellerDescription" maxLength={1000} defaultValue={String(seller?.description ?? "")}/></label></section>
     <section><h2>Photos</h2><p>Upload up to 8 original JPEG, PNG, or WebP photos, 10 MB each. Do not reuse another seller’s photos.</p>{images.length > 0 && <div className="listing-images">{images.map((image) => <div key={image.id}><Image src={image.url} alt={image.alt} width={220} height={180} unoptimized/><button type="button" onClick={() => void removeImage(image.id)}>Remove</button></div>)}</div>}<label className="file-input">Add photos<input type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={(event) => setFiles([...event.target.files ?? []].slice(0, 8 - images.length))}/></label>{files.length > 0 && <p>{files.length} photo{files.length === 1 ? "" : "s"} ready to upload with this draft.</p>}</section>
-    <section className="listing-submit"><div><h2>Payouts and review</h2><p>{stripeReady ? "Stripe payouts are ready. Submitted listings are reviewed before going live." : "You can keep drafting now. Complete secure Stripe-hosted payout onboarding before submission."}</p>{!stripeReady && <button className="button outline small" type="button" disabled={busy} onClick={() => void startOnboarding()}>Complete Stripe onboarding</button>}</div>{message && <p className="admin-message" role="status">{message}</p>}{error && <p className="form-error" role="alert">{error}</p>}<div className="row-actions"><button className="button outline" type="submit" value="save" disabled={busy}>{busy ? "Saving…" : "Save draft"}</button><button className="button dark" type="submit" value="submit" disabled={busy || !stripeReady}>{busy ? "Saving…" : "Submit for review"}</button></div></section>
+    <section className="listing-submit"><div><h2>Payouts and review</h2><p>{stripeReady ? "Stripe payouts are ready. Submitted listings are reviewed before going live." : "You can keep drafting now. Complete secure Stripe-hosted payout onboarding before submission."}</p><label className="consent-check"><input type="checkbox" checked={acceptedSellerTerms} onChange={(event) => setAcceptedSellerTerms(event.target.checked)}/><span>I agree to the current <Link href="/seller-terms">Seller Terms</Link>, including the marketplace fee, fulfillment rules, and return obligations.</span></label>{!stripeReady && <button className="button outline small" type="button" disabled={busy || !acceptedSellerTerms} onClick={() => void startOnboarding()}>Complete Stripe onboarding</button>}</div>{message && <p className="admin-message" role="status">{message}</p>}{error && <p className="form-error" role="alert">{error}</p>}<div className="row-actions"><button className="button outline" type="submit" value="save" disabled={busy}>{busy ? "Saving…" : "Save draft"}</button><button className="button dark" type="submit" value="submit" disabled={busy || !stripeReady || !acceptedSellerTerms}>{busy ? "Saving…" : "Submit for review"}</button></div></section>
   </form><p><Link className="text-link" href="/account?view=listings">Back to My Listings</Link></p></div>;
 }
