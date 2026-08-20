@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { FormEvent, useMemo, useState } from "react";
-import { formatMoney } from "@/lib/format";
+import { formatMoney, formatUtcDate, formatUtcDateTime } from "@/lib/format";
 import {
   EditableProductImage,
   ProductImageFields,
@@ -1180,15 +1180,7 @@ function formatTrackingLocation(value: string) {
 }
 
 function dateTime(value: string) {
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime())
-    ? value
-    : parsed.toLocaleString(undefined, {
-        month: "short",
-        day: "numeric",
-        hour: "numeric",
-        minute: "2-digit",
-      });
+  return formatUtcDateTime(value);
 }
 
 function formatAddress(value: string) {
@@ -1218,14 +1210,7 @@ function formatAddress(value: string) {
 }
 
 function date(value: string) {
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime())
-    ? value
-    : parsed.toLocaleDateString(undefined, {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      });
+  return formatUtcDate(value);
 }
 
 function feePercent(basisPoints: number) {

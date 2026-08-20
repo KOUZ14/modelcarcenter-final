@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { formatUtcDate, formatUtcDateTime } from "../lib/format.ts";
 import {
   applyInventoryReservation,
   availableQuantity,
@@ -104,4 +105,11 @@ test("inventory reserve, release, and completion preserve quantities", () => {
   assert.deepEqual(releaseInventoryReservation(reserved, 2), initial);
   assert.deepEqual(completeInventoryReservation(reserved, 2), { inventoryQuantity: 2, reservedQuantity: 1 });
   assert.throws(() => applyInventoryReservation(initial, 4), /Insufficient/);
+});
+test("shipment timestamps render identically across server and browser timezones", () => {
+  const timestamp = "2026-08-20T17:26:00.000Z";
+
+  assert.equal(formatUtcDateTime(timestamp), "Aug 20, 5:26 PM UTC");
+  assert.equal(formatUtcDate(timestamp), "Aug 20, 2026");
+  assert.equal(formatUtcDateTime("not-a-date"), "not-a-date");
 });
