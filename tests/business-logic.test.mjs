@@ -111,5 +111,8 @@ test("shipment timestamps render identically across server and browser timezones
 
   assert.equal(formatUtcDateTime(timestamp), "Aug 20, 5:26 PM UTC");
   assert.equal(formatUtcDate(timestamp), "Aug 20, 2026");
+  assert.equal(formatUtcDate("2026-08-20 23:26:00"), "Aug 20, 2026");
+  assert.equal(formatUtcDate("2026-08-20T23:26:00"), "Aug 20, 2026");
+  assert.equal(formatUtcDateTime("2026-08-20 23:26:00"), "Aug 20, 11:26 PM UTC");
   assert.equal(formatUtcDateTime("not-a-date"), "not-a-date");
 });
