@@ -22,6 +22,7 @@ The professional-seller flow uses the same seller/product/order architecture: se
 - Collector Stripe-hosted payout onboarding and a seller-only sales/fulfillment view
 - Atomic inventory reservation, release on expiration/failure, and webhook-only paid-order finalization
 - Stripe-hosted seller onboarding, capability status tracking, full refunds with transfer and fee reversal
+- Shippo carrier-rate comparison, protected 4×6 label purchase, package dimensions, high-value insurance/signature enforcement, tracking timelines, and same-recipient combined shipping
 - Resend transactional email for authentication, paid orders, shipments, onboarding, listing review, and confirmed Model Hunt matches
 - Founder-only ChatGPT-authenticated admin with an explicit email allowlist
 - Founder listing-review queue with approve/reject controls and seller suspension
@@ -37,6 +38,7 @@ The marketplace intentionally does not include multi-vendor checkout, reviews, o
 - npm
 - Bash, GNU `timeout`, `flock`, `curl`, and `sha256sum` for the repository's Sites validation scripts (WSL2 is recommended on Windows)
 - A Stripe account with Connect enabled for marketplace test mode
+- A Shippo account and test API token for fulfillment development
 - A Resend account and verified sender/domain for live email
 - OpenAI Sites access for hosted D1, R2, and deployment
 
@@ -77,6 +79,13 @@ Copy `.env.example` to `.env.local`. Never commit real values.
 | `CHECKOUT_EXPIRATION_MINUTES` | Reservation/Checkout lifetime, 30–1440 minutes |
 | `SHIPPING_COUNTRIES` | Comma-separated ISO two-letter countries, default `US` |
 | `STRIPE_AUTOMATIC_TAX` | Enables Stripe automatic tax when `true`; no custom tax calculation exists |
+| `SHIPPO_API_KEY` | Server-only Shippo token; use `shippo_test_...` during development |
+| `SHIPPO_API_VERSION` | Pinned Shippo API version; default `2018-02-08` |
+| `SHIPPO_WEBHOOK_SECRET` | Random secret embedded in the private Shippo tracking-webhook URL |
+| `SHIPPO_INSURANCE_THRESHOLD_CENTS` | Item value that automatically requires carrier insurance; default `25000` ($250) |
+| `SHIPPO_SIGNATURE_THRESHOLD_CENTS` | Item value that automatically requires standard signature confirmation; default `75000` ($750) |
+| `SHIPPO_QUOTE_EXPIRATION_MINUTES` | Local rate-selection window; default `20` minutes |
+| `SHIPPO_MAX_LABEL_COST_CENTS` | Hard server-side purchase limit per label; default `10000` ($100) |
 | `RESEND_API_KEY` | Resend API key |
 | `EMAIL_FROM` | Verified sender, such as `Model Car Center <orders@example.com>` |
 
@@ -98,7 +107,7 @@ The Store Console provides:
 
 - Seller-scoped product creation and editing, stock changes that cannot drop below reserved inventory, publishing/unpublishing, and archival
 - CSV preview and seller-SKU upsert importing using the canonical inventory template; new imports start as drafts and updates preserve the existing product status
-- Paid-order details and shipping-address access for the owning store, plus tracking updates and customer shipment email
+- Paid-order details and shipping-address access for the owning store, carrier rates and labels, handling reminders, tracking events, and manual-tracking fallback
 - Lifetime sales, order, fee, unit, inventory-value, low-stock, rolling six-month, and top-product analytics calculated only from that seller's records
 - Storefront profile, shipping, and return-policy settings; contact-email changes, refunds, payout remediation, suspensions, and store closure remain founder/support actions
 
@@ -129,6 +138,28 @@ npm run db:seed
 OpenAI Sites provisions the real D1 resource from the `DB` declaration and applies packaged migrations during deployment. Do not run the development seed against production.
 
 Migration `0001_spicy_prism.sql` adds auth/session/profile, persistent cart/wishlist, account ownership, collector seller/listing, moderation, and R2 image metadata without rebuilding or deleting existing V1 tables. Apply migrations before testing account routes against an existing database.
+
+Migration `0007_sudden_jimmy_woo.sql` adds seller ship-from/package defaults, short-lived rate quotes, purchased shipments, combined-order links, and deduplicated tracking events. Apply it before opening the Store Console shipping workflow.
+
+Migration `0008_damp_eternity.sql` adds collector package dimensions, professional-store calculated/flat/free modes, buyer checkout-rate quotes, and immutable selected-service snapshots on reservations and orders.
+
+## Shippo fulfillment
+
+Shippo calls occur only on the server. The browser never receives the API token or an arbitrary Shippo label URL. Collector sellers use calculated checkout shipping from their listing package data. Professional stores choose calculated, flat-rate, or free shipping in Store settings. For calculated shipping, the buyer receives up to three server-selected carrier choices and the chosen rate is bound to the authoritative cart before Stripe Checkout starts.
+
+Authenticated sellers can request fulfillment rates only for their own paid, unfulfilled orders. The server filters those rates to the buyer-selected service or an objectively equal/faster service; a slower downgrade is rejected for both Shippo labels and manual tracking attestations. A label purchase accepts only a rate ID captured in that owner’s unexpired quote; the quote is atomically claimed before purchase and cannot be reused.
+
+Before requesting rates, complete the ship-from address, carrier phone, and default package dimensions in **Store Console → Settings**. Package values can be adjusted per shipment. The server calculates declared value from authoritative order subtotals and automatically adds insurance and standard signature confirmation at the configured thresholds. Sellers cannot turn those protections off in the browser.
+
+Combined shipping is available for up to ten open orders only when seller, currency, normalized buyer email, and normalized delivery address all match. One Shippo transaction and tracking number is then linked to every included order.
+
+Label creation moves orders to `processing`; it does not satisfy the handling deadline. Orders become `shipped` only after Shippo reports carrier transit, and `delivered` after a delivery event. Sellers can manually refresh tracking from the order view. For automatic events, create a Shippo `track_updated` webhook pointing to:
+
+```text
+https://YOUR_DOMAIN/api/shippo/webhook?token=YOUR_SHIPPO_WEBHOOK_SECRET
+```
+
+Use a test webhook with a `shippo_test_...` token. The handler rejects live events when the integration is in test mode. Rotate `SHIPPO_WEBHOOK_SECRET` if the webhook URL is exposed.
 
 ### Account deletion and retained records
 
@@ -257,7 +288,7 @@ npm run build
 npm run validate:artifact
 ```
 
-Tests cover search normalization, availability, server totals, fee calculation, the single-seller rule, Model Hunt validation, CSV validation/upsert planning, Stripe signature and event idempotency logic, inventory reservation/release/completion, safe auth redirects, resource ownership, seller-only fulfillment, wishlist deduplication, guest-data merging, verified legacy-record claims, moderation gates, image validation, and the built marketplace artifact.
+Tests cover search normalization, availability, server totals, fee calculation, the single-seller rule, Model Hunt validation, CSV validation/upsert planning, Stripe signature and event idempotency logic, inventory reservation/release/completion, safe auth redirects, resource ownership, seller-only fulfillment, wishlist deduplication, guest-data merging, verified legacy-record claims, moderation gates, image validation, high-value shipping rules, package validation, combined-shipping identity, handling reminders, tracking-state mapping, and the built marketplace artifact.
 
 ## Production launch checklist
 
@@ -267,7 +298,7 @@ Before moving from test keys to live operation:
 2. Configure the production Sites `DB` and `IMAGES` bindings and apply all committed migrations; do not seed demo inventory.
 3. Generate and securely configure a production-only `BETTER_AUTH_SECRET`; confirm that `SITE_URL` exactly matches the public HTTPS origin.
 4. Verify magic-link delivery, expiration, replay resistance, sign-out, protected-route redirects, and account deletion using a real production-domain inbox.
-5. Configure live Stripe Connect, platform branding, live secret key, live webhook endpoint, live webhook secret, commission, shipping countries, and optional automatic tax.
+5. Configure live Stripe Connect and Shippo, platform branding, live secret keys, both webhook endpoints/secrets, commission, shipping countries, high-value thresholds, and optional automatic tax.
 6. Onboard a professional seller and a collector seller in Stripe live mode; confirm charges/payouts, listing moderation, destination charges, fees, and seller-only fulfillment.
 7. Verify the Resend production domain and sender.
 8. Set production `SUPPORT_EMAIL` and `ADMIN_EMAILS`; keep `ADMIN_DEV_BYPASS` false or unset.

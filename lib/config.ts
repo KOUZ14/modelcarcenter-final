@@ -33,6 +33,33 @@ export const config = {
   stripeSecretKey: textEnv("STRIPE_SECRET_KEY"),
   stripeWebhookSecret: textEnv("STRIPE_WEBHOOK_SECRET"),
   stripeApiVersion: textEnv("STRIPE_API_VERSION", "2026-02-25.clover"),
+  shippoApiKey: textEnv("SHIPPO_API_KEY"),
+  shippoWebhookSecret: textEnv("SHIPPO_WEBHOOK_SECRET"),
+  shippoApiVersion: textEnv("SHIPPO_API_VERSION", "2018-02-08"),
+  shippoInsuranceThresholdCents: integerEnv(
+    "SHIPPO_INSURANCE_THRESHOLD_CENTS",
+    25_000,
+    0,
+    10_000_000,
+  ),
+  shippoSignatureThresholdCents: integerEnv(
+    "SHIPPO_SIGNATURE_THRESHOLD_CENTS",
+    75_000,
+    0,
+    10_000_000,
+  ),
+  shippoQuoteExpirationMinutes: integerEnv(
+    "SHIPPO_QUOTE_EXPIRATION_MINUTES",
+    20,
+    5,
+    1_440,
+  ),
+  shippoMaxLabelCostCents: integerEnv(
+    "SHIPPO_MAX_LABEL_COST_CENTS",
+    10_000,
+    100,
+    1_000_000,
+  ),
   collectorMarketplaceFeeBps: parseFeeBasisPoints(
     process.env.COLLECTOR_MARKETPLACE_FEE_BPS,
     850,

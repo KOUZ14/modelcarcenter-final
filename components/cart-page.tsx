@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { useState } from "react";
+import { FormEvent, useState } from "react";
 import { useMarketplace } from "./marketplace-provider";
 import { formatMoney as money } from "@/lib/format";
 import { POLICY_VERSION } from "@/lib/legal";
@@ -13,11 +13,76 @@ export function CartPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [acceptedPolicies, setAcceptedPolicies] = useState(false);
+  const [calculating, setCalculating] = useState(false);
+  const [shippingQuote, setShippingQuote] = useState<{
+    cartKey: string;
+    quoteId: string;
+    expiresAt: string;
+    insuranceRequired?: boolean;
+    signatureRequired?: boolean;
+    options: ShippingOption[];
+  } | null>(null);
+  const [selectedRateId, setSelectedRateId] = useState("");
   const subtotal = cart.reduce(
     (sum, item) => sum + item.priceCents * item.quantity,
     0,
   );
-  const shipping = cart[0]?.shippingCents ?? 0;
+  const shippingMode = cart[0]?.shippingMode ?? "flat";
+  const cartKey = cart.map((item) => `${item.productId}:${item.quantity}`).join("|");
+  const activeShippingQuote = shippingQuote?.cartKey === cartKey ? shippingQuote : null;
+  const selectedRate = activeShippingQuote?.options.find(
+    (option) => option.id === selectedRateId,
+  );
+  const shipping =
+    shippingMode === "free"
+      ? 0
+      : shippingMode === "flat"
+        ? (cart[0]?.shippingCents ?? 0)
+        : (selectedRate?.amountCents ?? 0);
+  async function calculateShipping(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setCalculating(true);
+    setError("");
+    try {
+      const fields = Object.fromEntries(new FormData(event.currentTarget));
+      const response = await fetch("/api/shipping/options", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          items: cart.map((item) => ({
+            productId: item.productId,
+            quantity: item.quantity,
+          })),
+          destination: fields,
+        }),
+      });
+      const data = (await response.json()) as {
+        quoteId?: string;
+        expiresAt?: string;
+        options?: ShippingOption[];
+        insuranceRequired?: boolean;
+        signatureRequired?: boolean;
+        error?: string;
+      };
+      if (!response.ok || !data.quoteId || !data.expiresAt || !data.options?.length)
+        throw new Error(data.error || "Shipping options could not be calculated.");
+      setShippingQuote({
+        cartKey,
+        quoteId: data.quoteId,
+        expiresAt: data.expiresAt,
+        options: data.options,
+        insuranceRequired: data.insuranceRequired,
+        signatureRequired: data.signatureRequired,
+      });
+      setSelectedRateId(data.options[0].id);
+    } catch (reason) {
+      setShippingQuote(null);
+      setSelectedRateId("");
+      setError(reason instanceof Error ? reason.message : "Shipping options could not be calculated.");
+    } finally {
+      setCalculating(false);
+    }
+  }
   async function checkout() {
     setLoading(true);
     setError("");
@@ -31,6 +96,10 @@ export function CartPage() {
             productId: item.productId,
             quantity: item.quantity,
           })),
+          shippingSelection:
+            shippingMode === "calculated"
+              ? { quoteId: activeShippingQuote?.quoteId, rateId: selectedRateId }
+              : { rateId: shippingMode },
         }),
       });
       const data = (await response.json()) as { url?: string; error?: string };
@@ -130,14 +199,27 @@ export function CartPage() {
         </div>
         <aside className="cart-summary">
           <h2>Order summary</h2>
+          {shippingMode === "calculated" && (
+            <form className="checkout-shipping-form" onSubmit={calculateShipping}>
+              <h3>Delivery address</h3>
+              <p>Enter the address you will confirm in Stripe to compare carrier services.</p>
+              <label>Full name<input name="name" autoComplete="shipping name" required /></label>
+              <label>Street address<input name="street1" autoComplete="shipping address-line1" required /></label>
+              <label>Apartment, suite, or unit<input name="street2" autoComplete="shipping address-line2" /></label>
+              <div className="checkout-address-row"><label>City<input name="city" autoComplete="shipping address-level2" required /></label><label>State<input name="state" autoComplete="shipping address-level1" required /></label></div>
+              <div className="checkout-address-row"><label>Postal code<input name="zip" autoComplete="shipping postal-code" required /></label><label>Country code<input name="country" autoComplete="shipping country" maxLength={2} defaultValue="US" required /></label></div>
+              <button className="button outline small" disabled={calculating}>{calculating ? "Calculatingâ€¦" : activeShippingQuote ? "Refresh carrier options" : "Calculate carrier options"}</button>
+              {activeShippingQuote && <fieldset className="shipping-options"><legend>Choose a carrier service</legend>{activeShippingQuote.options.map((option) => <label className="shipping-option" key={option.id}><input type="radio" name="shippingRate" value={option.id} checked={selectedRateId === option.id} onChange={() => setSelectedRateId(option.id)} /><span><b>{option.provider} {option.serviceLevel}</b><small>{option.estimatedDays == null ? option.durationTerms || "Carrier estimate unavailable" : `${option.estimatedDays} business day${option.estimatedDays === 1 ? "" : "s"}`}</small></span><b>{money(option.amountCents, option.currency)}</b></label>)}{(activeShippingQuote.insuranceRequired || activeShippingQuote.signatureRequired) && <p className="form-note">Protection is included automatically{activeShippingQuote.insuranceRequired ? " with insurance" : ""}{activeShippingQuote.signatureRequired ? " and signature confirmation" : ""}.</p>}</fieldset>}
+            </form>
+          )}
           <dl>
             <div>
               <dt>Subtotal</dt>
               <dd>{money(subtotal, cart[0].currency)}</dd>
             </div>
             <div>
-              <dt>Estimated seller shipping</dt>
-              <dd>{money(shipping, cart[0].currency)}</dd>
+              <dt>{shippingMode === "calculated" ? "Selected carrier service" : shippingMode === "free" ? "Shipping" : "Seller flat-rate shipping"}</dt>
+              <dd>{shippingMode === "calculated" && !selectedRate ? "Choose a service" : shippingMode === "free" ? "Free" : money(shipping, cart[0].currency)}</dd>
             </div>
             <div className="total">
               <dt>Total before tax</dt>
@@ -145,8 +227,7 @@ export function CartPage() {
             </div>
           </dl>
           <p>
-            Tax, when enabled, is calculated by Stripe Checkout. Shipping is a
-            flat seller rate for this order.
+            Tax, when enabled, is calculated by Stripe Checkout. {shippingMode === "calculated" ? "The seller must use your selected service or an equal/faster service." : shippingMode === "free" ? "This store offers free shipping." : "This store uses a flat shipping rate."}
           </p>
           <label className="consent-check checkout-consent">
             <input type="checkbox" checked={acceptedPolicies} onChange={(event) => setAcceptedPolicies(event.target.checked)} />
@@ -160,7 +241,7 @@ export function CartPage() {
           <button
             className="button dark checkout-button"
             type="button"
-            disabled={loading || !acceptedPolicies}
+            disabled={loading || !acceptedPolicies || (shippingMode === "calculated" && (!activeShippingQuote || !selectedRateId))}
             onClick={checkout}
           >
             {loading ? "Starting secure checkout…" : "Checkout with Stripe"}
@@ -173,3 +254,13 @@ export function CartPage() {
     </div>
   );
 }
+
+type ShippingOption = {
+  id: string;
+  provider: string;
+  serviceLevel: string;
+  amountCents: number;
+  currency: string;
+  estimatedDays: number | null;
+  durationTerms: string;
+};

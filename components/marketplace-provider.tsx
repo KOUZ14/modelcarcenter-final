@@ -77,6 +77,25 @@ export function MarketplaceProvider({ children }: { children: React.ReactNode })
       } catch {
         // Account service failures must not block guest browsing or checkout.
       }
+      if (guestCart.length) {
+        try {
+          const response = await fetch("/api/products/batch", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ids: guestCart.map((item) => item.productId) }),
+          });
+          const data = (await response.json()) as { products?: ProductSummary[] };
+          const fresh = new Map((data.products ?? []).map((product) => [product.id, product]));
+          guestCart = guestCart.flatMap((item) => {
+            const product = fresh.get(item.productId);
+            return product
+              ? [cartItemFromProduct(product, Math.min(item.quantity, product.availableQuantity))]
+              : [];
+          });
+        } catch {
+          // Preserve the locally saved cart if catalog refresh is temporarily unavailable.
+        }
+      }
       if (!active) return;
       setCart(guestCart);
       setWishlist(guestWishlist);
@@ -95,13 +114,11 @@ export function MarketplaceProvider({ children }: { children: React.ReactNode })
     return () => window.removeEventListener("keydown", onKey);
   }, [pendingProduct, pendingMerge]);
 
-  const toCartItem = useCallback((product: ProductSummary, quantity: number): CartItem => ({
-    productId: product.id, slug: product.slug, sellerId: product.sellerId, sellerName: product.sellerName,
-    title: product.title, scale: product.scale, modelManufacturer: product.modelManufacturer,
-    imageUrl: product.primaryImageUrl, priceCents: product.priceCents, currency: product.currency,
-    availableQuantity: product.availableQuantity, shippingCents: product.defaultShippingCents,
-    quantity: Math.min(Math.max(1, quantity), product.availableQuantity),
-  }), []);
+  const toCartItem = useCallback(
+    (product: ProductSummary, quantity: number) =>
+      cartItemFromProduct(product, quantity),
+    [],
+  );
   const persistCart = useCallback((next: CartItem[]) => {
     if (mode !== "account") return;
     void fetch("/api/account", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "cart", items: next.map((item) => ({ productId: item.productId, quantity: item.quantity })) }) });
@@ -147,6 +164,26 @@ export function MarketplaceProvider({ children }: { children: React.ReactNode })
     {pendingProduct && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setPendingProduct(null); }}><div className="cart-dialog" role="dialog" aria-modal="true" aria-labelledby="seller-conflict-title" tabIndex={-1} ref={dialogRef}><button className="dialog-close" type="button" aria-label="Close" onClick={() => setPendingProduct(null)}>×</button><p className="eyebrow">One seller per checkout</p><h2 id="seller-conflict-title">Your cart has another seller.</h2><p>Your current cart contains products from another seller. Model Car Center currently checks out one seller at a time.</p><div className="dialog-actions"><button className="button outline" type="button" onClick={() => setPendingProduct(null)}>Keep current cart</button><button className="button dark" type="button" onClick={() => { const next = [toCartItem(pendingProduct.product, pendingProduct.quantity)]; setCart(next); persistCart(next); setPendingProduct(null); }}>Clear cart &amp; add new model</button></div></div></div>}
     {pendingMerge && <div className="dialog-backdrop" role="presentation"><div className="cart-dialog" role="dialog" aria-modal="true" aria-labelledby="merge-conflict-title" tabIndex={-1} ref={dialogRef}><p className="eyebrow">Saved cart</p><h2 id="merge-conflict-title">You already have items from another seller in your saved cart.</h2><p>Choose which single-seller cart you want to keep. Neither cart will be changed until you decide.</p><div className="dialog-actions"><button className="button outline" type="button" onClick={() => void resolveMerge("keep")}>Keep saved cart</button><button className="button dark" type="button" onClick={() => void resolveMerge("replace")}>Replace saved cart with this cart</button></div></div></div>}
   </MarketplaceContext.Provider>;
+}
+
+function cartItemFromProduct(product: ProductSummary, quantity: number): CartItem {
+  return {
+    productId: product.id,
+    slug: product.slug,
+    sellerId: product.sellerId,
+    sellerName: product.sellerName,
+    title: product.title,
+    scale: product.scale,
+    modelManufacturer: product.modelManufacturer,
+    imageUrl: product.primaryImageUrl,
+    priceCents: product.priceCents,
+    currency: product.currency,
+    availableQuantity: product.availableQuantity,
+    shippingCents: product.defaultShippingCents,
+    shippingMode:
+      product.sellerType === "collector" ? "calculated" : product.shippingMode,
+    quantity: Math.min(Math.max(1, quantity), product.availableQuantity),
+  };
 }
 
 function clearGuestStorage() {

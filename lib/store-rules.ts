@@ -110,7 +110,7 @@ export function buildStoreAnalytics(
   return {
     paidOrders: paidOrders.length,
     unfulfilledOrders: paidOrders.filter(
-      (order) => order.fulfillmentStatus === "unfulfilled",
+      (order) => ["unfulfilled", "processing"].includes(order.fulfillmentStatus),
     ).length,
     unitsSold,
     grossSalesCents,

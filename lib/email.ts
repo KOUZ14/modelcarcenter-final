@@ -146,6 +146,23 @@ export async function sendShipmentEmail(input: { buyerEmail: string; orderNumber
   });
 }
 
+export async function sendLabelCreatedEmail(input: {
+  buyerEmail: string;
+  orderNumber: string;
+  carrier: string;
+  trackingNumber: string;
+  trackingUrl?: string | null;
+}) {
+  const trackingUrl = input.trackingUrl || trackingLink(input.carrier, input.trackingNumber);
+  return sendEmail({
+    to: input.buyerEmail,
+    subject: `Shipping label created for ${input.orderNumber}`,
+    html: `<h1>Your order is being prepared</h1><p>${escapeHtml(input.carrier)} tracking has been created: <a href="${escapeHtml(trackingUrl)}">${escapeHtml(input.trackingNumber)}</a>.</p><p>The carrier may show “label created” until it receives the package. Questions? Contact ${escapeHtml(config.supportEmail)}.</p>`,
+    text: `A ${input.carrier} shipping label was created for order ${input.orderNumber}. Tracking: ${input.trackingNumber}\n${trackingUrl}\nThe carrier may show “label created” until it receives the package. Questions: ${config.supportEmail}`,
+    idempotencyKey: `label-${input.orderNumber}-${input.trackingNumber}`,
+  });
+}
+
 export async function sendModelHuntMatchEmail(input: { email: string; referenceCode: string; requestedModel: string; productTitle: string; sellerName: string; priceCents: number; currency: string; productSlug: string }) {
   const url = `${config.siteUrl}/products/${encodeURIComponent(input.productSlug)}`;
   return sendEmail({

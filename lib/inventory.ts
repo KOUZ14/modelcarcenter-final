@@ -32,8 +32,13 @@ export async function loadAuthoritativeCart(items: RequestedCartItem[]) {
       reservedQuantity: products.reservedQuantity,
       status: products.status,
       imageUrl: products.primaryImageUrl,
+      packageLength: products.packageLength,
+      packageWidth: products.packageWidth,
+      packageHeight: products.packageHeight,
+      packageWeight: products.packageWeight,
       sellerStatus: sellers.status,
       sellerName: sellers.storeName,
+      contactName: sellers.contactName,
       sellerEmail: sellers.contactEmail,
       sellerType: sellers.sellerType,
       isFoundingSeller: sellers.isFoundingSeller,
@@ -43,6 +48,18 @@ export async function loadAuthoritativeCart(items: RequestedCartItem[]) {
       stripeChargesEnabled: sellers.stripeChargesEnabled,
       stripePayoutsEnabled: sellers.stripePayoutsEnabled,
       shippingCents: sellers.defaultShippingCents,
+      shippingMode: sellers.shippingMode,
+      shippingOriginCountry: sellers.shippingOriginCountry,
+      shippingOriginRegion: sellers.shippingOriginRegion,
+      shippingOriginStreet1: sellers.shippingOriginStreet1,
+      shippingOriginStreet2: sellers.shippingOriginStreet2,
+      shippingOriginCity: sellers.shippingOriginCity,
+      shippingOriginPostalCode: sellers.shippingOriginPostalCode,
+      shippingOriginPhone: sellers.shippingOriginPhone,
+      defaultPackageLength: sellers.defaultPackageLength,
+      defaultPackageWidth: sellers.defaultPackageWidth,
+      defaultPackageHeight: sellers.defaultPackageHeight,
+      defaultPackageWeight: sellers.defaultPackageWeight,
     })
     .from(products)
     .innerJoin(sellers, eq(products.sellerId, sellers.id))
@@ -62,9 +79,12 @@ export async function loadAuthoritativeCart(items: RequestedCartItem[]) {
   if (new Set(rows.map((row) => row.currency)).size !== 1) throw new Error("All products in a checkout must use the same currency.");
   const authoritativeItems = rows.map((row) => ({ ...row, quantity: consolidated.get(row.id)! }));
   const fee = determineMarketplaceFee(seller);
+  const shippingMode = seller.sellerType === "collector" ? "calculated" : seller.shippingMode;
+  const defaultShippingCents =
+    shippingMode === "free" ? 0 : shippingMode === "flat" ? seller.shippingCents : 0;
   const totals = calculateServerTotals(
     authoritativeItems,
-    seller.shippingCents,
+    defaultShippingCents,
     fee.marketplaceFeeBps,
   );
   return {
@@ -72,27 +92,71 @@ export async function loadAuthoritativeCart(items: RequestedCartItem[]) {
     seller,
     fee,
     totals,
+    shippingMode,
     currency: rows[0].currency,
   };
 }
+
+export type ResolvedCheckoutShipping = {
+  mode: "calculated" | "flat" | "free";
+  amountCents: number;
+  checkoutShippingQuoteId: string | null;
+  rateId: string | null;
+  carrier: string | null;
+  service: string | null;
+  serviceToken: string | null;
+  estimatedDays: number | null;
+  quotedAddress: string | null;
+};
 
 export async function reserveCart(
   input: Awaited<ReturnType<typeof loadAuthoritativeCart>>,
   buyerUserId: string | null = null,
   policyVersion: string,
+  shipping?: ResolvedCheckoutShipping,
 ) {
   const d1 = getD1();
   const reservationId = crypto.randomUUID();
   const expiresAt = new Date(Date.now() + config.checkoutExpirationMinutes * 60_000);
   const statements = [
     d1.prepare(`INSERT INTO checkout_reservations
-      (id, seller_id, buyer_user_id, status, subtotal_cents, shipping_cents, marketplace_fee_bps, platform_fee_cents, currency, policy_version, policy_accepted_at, expires_at)
-      VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)`)
-      .bind(reservationId, input.seller.sellerId, buyerUserId, input.totals.subtotalCents, input.totals.shippingCents, input.fee.marketplaceFeeBps, input.totals.platformFeeCents, input.currency, policyVersion, expiresAt.toISOString()),
+      (id, seller_id, buyer_user_id, status, subtotal_cents, shipping_cents, shipping_mode,
+       checkout_shipping_quote_id, selected_shipping_rate_id, selected_shipping_carrier,
+       selected_shipping_service, selected_shipping_service_token, selected_shipping_estimated_days,
+       quoted_shipping_address, marketplace_fee_bps, platform_fee_cents, currency,
+       policy_version, policy_accepted_at, expires_at)
+      VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)`)
+      .bind(
+        reservationId,
+        input.seller.sellerId,
+        buyerUserId,
+        input.totals.subtotalCents,
+        input.totals.shippingCents,
+        shipping?.mode ?? input.shippingMode,
+        shipping?.checkoutShippingQuoteId ?? null,
+        shipping?.rateId ?? null,
+        shipping?.carrier ?? null,
+        shipping?.service ?? null,
+        shipping?.serviceToken ?? null,
+        shipping?.estimatedDays ?? null,
+        shipping?.quotedAddress ?? null,
+        input.fee.marketplaceFeeBps,
+        input.totals.platformFeeCents,
+        input.currency,
+        policyVersion,
+        expiresAt.toISOString(),
+      ),
     d1.prepare(`UPDATE sellers SET
       default_shipping_cents = CASE WHEN status = 'active' THEN default_shipping_cents ELSE -1 END
       WHERE id = ?`).bind(input.seller.sellerId),
   ];
+  if (shipping?.checkoutShippingQuoteId) {
+    statements.push(
+      d1.prepare(`UPDATE checkout_shipping_quotes SET status = 'used', updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND status = 'active' AND expires_at > CURRENT_TIMESTAMP`)
+        .bind(shipping.checkoutShippingQuoteId),
+    );
+  }
   for (const item of input.items) {
     statements.push(
       d1.prepare(`UPDATE products SET

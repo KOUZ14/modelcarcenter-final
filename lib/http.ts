@@ -24,6 +24,9 @@ export function routeError(error: unknown, fallback = "Unable to complete the re
   if (message.includes("not configured") || message.includes("Missing required environment variable")) {
     return Response.json({ error: message }, { status: 503 });
   }
+  if (error instanceof Error && error.name === "ShippoApiError") {
+    return Response.json({ error: error.message }, { status: 502 });
+  }
   console.error(error);
   return Response.json({ error: fallback }, { status: 500 });
 }

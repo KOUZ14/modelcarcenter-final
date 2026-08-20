@@ -88,6 +88,11 @@ export const sellers = sqliteTable(
     defaultShippingCents: integer("default_shipping_cents")
       .notNull()
       .default(0),
+    shippingMode: text("shipping_mode", {
+      enum: ["calculated", "flat", "free"],
+    })
+      .notNull()
+      .default("flat"),
     handlingTimeBusinessDays: integer("handling_time_business_days")
       .notNull()
       .default(3),
@@ -95,6 +100,23 @@ export const sellers = sqliteTable(
       .notNull()
       .default("US"),
     shippingOriginRegion: text("shipping_origin_region"),
+    shippingOriginStreet1: text("shipping_origin_street_1"),
+    shippingOriginStreet2: text("shipping_origin_street_2"),
+    shippingOriginCity: text("shipping_origin_city"),
+    shippingOriginPostalCode: text("shipping_origin_postal_code"),
+    shippingOriginPhone: text("shipping_origin_phone"),
+    defaultPackageLength: text("default_package_length")
+      .notNull()
+      .default("12"),
+    defaultPackageWidth: text("default_package_width")
+      .notNull()
+      .default("9"),
+    defaultPackageHeight: text("default_package_height")
+      .notNull()
+      .default("6"),
+    defaultPackageWeight: text("default_package_weight")
+      .notNull()
+      .default("2"),
     shippingPolicySummary: text("shipping_policy_summary")
       .notNull()
       .default(""),
@@ -241,6 +263,10 @@ export const products = sqliteTable(
       .notNull()
       .default(false),
     priceCents: integer("price_cents").notNull(),
+    packageLength: text("package_length"),
+    packageWidth: text("package_width"),
+    packageHeight: text("package_height"),
+    packageWeight: text("package_weight"),
     currency: text("currency").notNull().default("usd"),
     inventoryQuantity: integer("inventory_quantity").notNull().default(0),
     reservedQuantity: integer("reserved_quantity").notNull().default(0),
@@ -461,6 +487,17 @@ export const orders = sqliteTable(
     currency: text("currency").notNull(),
     subtotalCents: integer("subtotal_cents").notNull(),
     shippingCents: integer("shipping_cents").notNull(),
+    shippingMode: text("shipping_mode", {
+      enum: ["calculated", "flat", "free"],
+    })
+      .notNull()
+      .default("flat"),
+    selectedShippingCarrier: text("selected_shipping_carrier"),
+    selectedShippingService: text("selected_shipping_service"),
+    selectedShippingServiceToken: text("selected_shipping_service_token"),
+    selectedShippingEstimatedDays: integer("selected_shipping_estimated_days"),
+    fulfillmentService: text("fulfillment_service"),
+    fulfillmentEstimatedDays: integer("fulfillment_estimated_days"),
     marketplaceFeeBps: integer("marketplace_fee_bps")
       .notNull()
       .default(1000),
@@ -534,6 +571,224 @@ export const orderItems = sqliteTable(
     index("order_items_order_idx").on(table.orderId),
     check("order_items_price_nonnegative", sql`${table.unitPriceCents} >= 0`),
     check("order_items_quantity_positive", sql`${table.quantity} > 0`),
+  ],
+);
+
+export const shippingQuotes = sqliteTable(
+  "shipping_quotes",
+  {
+    id: text("id").primaryKey(),
+    sellerId: text("seller_id")
+      .notNull()
+      .references(() => sellers.id, { onDelete: "cascade" }),
+    createdByUserId: text("created_by_user_id").references(() => authUser.id, {
+      onDelete: "set null",
+    }),
+    shippoShipmentId: text("shippo_shipment_id").notNull(),
+    orderIds: text("order_ids").notNull(),
+    rates: text("rates").notNull(),
+    parcelLength: text("parcel_length").notNull(),
+    parcelWidth: text("parcel_width").notNull(),
+    parcelHeight: text("parcel_height").notNull(),
+    parcelWeight: text("parcel_weight").notNull(),
+    declaredValueCents: integer("declared_value_cents").notNull(),
+    insuranceRequired: integer("insurance_required", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    signatureRequired: integer("signature_required", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    status: text("status", {
+      enum: ["quoted", "purchasing", "purchased", "failed", "expired"],
+    })
+      .notNull()
+      .default("quoted"),
+    expiresAt: text("expires_at").notNull(),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("shipping_quotes_shippo_unique").on(table.shippoShipmentId),
+    index("shipping_quotes_seller_status_idx").on(
+      table.sellerId,
+      table.status,
+      table.expiresAt,
+    ),
+    check(
+      "shipping_quotes_value_nonnegative",
+      sql`${table.declaredValueCents} >= 0`,
+    ),
+  ],
+);
+
+export const checkoutShippingQuotes = sqliteTable(
+  "checkout_shipping_quotes",
+  {
+    id: text("id").primaryKey(),
+    sellerId: text("seller_id")
+      .notNull()
+      .references(() => sellers.id, { onDelete: "cascade" }),
+    buyerUserId: text("buyer_user_id").references(() => authUser.id, {
+      onDelete: "set null",
+    }),
+    shippoShipmentId: text("shippo_shipment_id").notNull(),
+    cartFingerprint: text("cart_fingerprint").notNull(),
+    destinationAddress: text("destination_address").notNull(),
+    rates: text("rates").notNull(),
+    parcelLength: text("parcel_length").notNull(),
+    parcelWidth: text("parcel_width").notNull(),
+    parcelHeight: text("parcel_height").notNull(),
+    parcelWeight: text("parcel_weight").notNull(),
+    declaredValueCents: integer("declared_value_cents").notNull(),
+    status: text("status", {
+      enum: ["active", "used", "expired"],
+    })
+      .notNull()
+      .default("active"),
+    expiresAt: text("expires_at").notNull(),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("checkout_shipping_quotes_shippo_unique").on(
+      table.shippoShipmentId,
+    ),
+    index("checkout_shipping_quotes_seller_status_idx").on(
+      table.sellerId,
+      table.status,
+      table.expiresAt,
+    ),
+    check(
+      "checkout_shipping_quotes_value_nonnegative",
+      sql`${table.declaredValueCents} >= 0`,
+    ),
+  ],
+);
+
+export const shipments = sqliteTable(
+  "shipments",
+  {
+    id: text("id").primaryKey(),
+    sellerId: text("seller_id")
+      .notNull()
+      .references(() => sellers.id, { onDelete: "cascade" }),
+    quoteId: text("quote_id")
+      .notNull()
+      .references(() => shippingQuotes.id),
+    shippoShipmentId: text("shippo_shipment_id").notNull(),
+    shippoTransactionId: text("shippo_transaction_id").notNull(),
+    shippoRateId: text("shippo_rate_id").notNull(),
+    carrier: text("carrier").notNull(),
+    serviceLevel: text("service_level").notNull(),
+    rateAmountCents: integer("rate_amount_cents").notNull(),
+    currency: text("currency").notNull().default("USD"),
+    parcelLength: text("parcel_length").notNull(),
+    parcelWidth: text("parcel_width").notNull(),
+    parcelHeight: text("parcel_height").notNull(),
+    parcelWeight: text("parcel_weight").notNull(),
+    declaredValueCents: integer("declared_value_cents").notNull(),
+    insuranceRequired: integer("insurance_required", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    signatureRequired: integer("signature_required", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    trackingNumber: text("tracking_number").notNull(),
+    trackingUrl: text("tracking_url"),
+    labelFileType: text("label_file_type").notNull().default("PDF_4x6"),
+    status: text("status", {
+      enum: [
+        "label_created",
+        "pre_transit",
+        "in_transit",
+        "delivered",
+        "returned",
+        "failure",
+        "unknown",
+      ],
+    })
+      .notNull()
+      .default("label_created"),
+    statusDetails: text("status_details").notNull().default(""),
+    eta: text("eta"),
+    shippedAt: text("shipped_at"),
+    deliveredAt: text("delivered_at"),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("shipments_quote_unique").on(table.quoteId),
+    uniqueIndex("shipments_transaction_unique").on(table.shippoTransactionId),
+    index("shipments_seller_status_idx").on(
+      table.sellerId,
+      table.status,
+      table.createdAt,
+    ),
+    index("shipments_tracking_idx").on(table.carrier, table.trackingNumber),
+    check(
+      "shipments_money_nonnegative",
+      sql`${table.rateAmountCents} >= 0 AND ${table.declaredValueCents} >= 0`,
+    ),
+  ],
+);
+
+export const shipmentOrders = sqliteTable(
+  "shipment_orders",
+  {
+    id: text("id").primaryKey(),
+    shipmentId: text("shipment_id")
+      .notNull()
+      .references(() => shipments.id, { onDelete: "cascade" }),
+    orderId: text("order_id")
+      .notNull()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("shipment_orders_order_unique").on(table.orderId),
+    uniqueIndex("shipment_orders_pair_unique").on(
+      table.shipmentId,
+      table.orderId,
+    ),
+  ],
+);
+
+export const trackingEvents = sqliteTable(
+  "tracking_events",
+  {
+    id: text("id").primaryKey(),
+    shipmentId: text("shipment_id")
+      .notNull()
+      .references(() => shipments.id, { onDelete: "cascade" }),
+    eventKey: text("event_key").notNull(),
+    status: text("status").notNull(),
+    statusDetails: text("status_details").notNull().default(""),
+    statusDate: text("status_date").notNull(),
+    location: text("location").notNull().default("{}"),
+    source: text("source", { enum: ["label", "poll", "webhook"] })
+      .notNull()
+      .default("webhook"),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("tracking_events_key_unique").on(table.eventKey),
+    index("tracking_events_shipment_idx").on(table.shipmentId, table.statusDate),
   ],
 );
 
@@ -756,6 +1011,20 @@ export const checkoutReservations = sqliteTable(
       .default("pending"),
     subtotalCents: integer("subtotal_cents").notNull(),
     shippingCents: integer("shipping_cents").notNull(),
+    shippingMode: text("shipping_mode", {
+      enum: ["calculated", "flat", "free"],
+    })
+      .notNull()
+      .default("flat"),
+    checkoutShippingQuoteId: text("checkout_shipping_quote_id").references(
+      () => checkoutShippingQuotes.id,
+    ),
+    selectedShippingRateId: text("selected_shipping_rate_id"),
+    selectedShippingCarrier: text("selected_shipping_carrier"),
+    selectedShippingService: text("selected_shipping_service"),
+    selectedShippingServiceToken: text("selected_shipping_service_token"),
+    selectedShippingEstimatedDays: integer("selected_shipping_estimated_days"),
+    quotedShippingAddress: text("quoted_shipping_address"),
     marketplaceFeeBps: integer("marketplace_fee_bps")
       .notNull()
       .default(1000),
@@ -777,6 +1046,9 @@ export const checkoutReservations = sqliteTable(
     ),
     index("checkout_reservations_status_idx").on(table.status, table.expiresAt),
     index("checkout_reservations_buyer_idx").on(table.buyerUserId),
+    uniqueIndex("checkout_reservations_shipping_quote_unique").on(
+      table.checkoutShippingQuoteId,
+    ),
   ],
 );
 

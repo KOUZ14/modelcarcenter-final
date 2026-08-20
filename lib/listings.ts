@@ -40,16 +40,21 @@ export async function getOrCreateCollectorSeller(
         .set({
           storeName: input.sellerDisplayName,
           description: input.sellerDescription,
-          defaultShippingCents: input.shippingCents,
+          shippingMode: "calculated",
           shippingOriginCountry: input.shippingOriginCountry,
           shippingOriginRegion: input.shippingOriginRegion,
+          shippingOriginStreet1: input.shippingOriginStreet1,
+          shippingOriginStreet2: input.shippingOriginStreet2,
+          shippingOriginCity: input.shippingOriginCity,
+          shippingOriginPostalCode: input.shippingOriginPostalCode,
+          shippingOriginPhone: input.shippingOriginPhone,
           updatedAt: new Date().toISOString(),
         })
         .where(eq(sellers.id, existing[0].id));
       return {
         ...existing[0],
         storeName: input.sellerDisplayName,
-        defaultShippingCents: input.shippingCents,
+        shippingMode: "calculated" as const,
       };
     }
     return existing[0];
@@ -66,9 +71,15 @@ export async function getOrCreateCollectorSeller(
     sellerType: "collector" as const,
     ownerUserId: user.id,
     status: "approved" as const,
-    defaultShippingCents: input?.shippingCents ?? 0,
+    defaultShippingCents: 0,
+    shippingMode: "calculated" as const,
     shippingOriginCountry: input?.shippingOriginCountry ?? "US",
     shippingOriginRegion: input?.shippingOriginRegion ?? null,
+    shippingOriginStreet1: input?.shippingOriginStreet1 ?? null,
+    shippingOriginStreet2: input?.shippingOriginStreet2 ?? null,
+    shippingOriginCity: input?.shippingOriginCity ?? null,
+    shippingOriginPostalCode: input?.shippingOriginPostalCode ?? null,
+    shippingOriginPhone: input?.shippingOriginPhone ?? null,
     shippingPolicySummary: "Ships directly from this collector seller.",
     returnPolicySummary: "Contact Model Car Center before returning an order.",
     stripeAccountId: null,
@@ -161,6 +172,10 @@ function listingProductValues(
     photoPackagingChecked: values.photoPackagingChecked,
     photoIssuesChecked: values.photoIssuesChecked,
     priceCents: values.priceCents,
+    packageLength: values.packageLength,
+    packageWidth: values.packageWidth,
+    packageHeight: values.packageHeight,
+    packageWeight: values.packageWeight,
     inventoryQuantity: values.inventoryQuantity,
     keywords:
       `${values.vehicleMake} ${values.vehicleModel} ${values.modelManufacturer} ${values.scale} ${values.color ?? ""}`.trim(),

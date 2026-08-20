@@ -89,6 +89,7 @@ const cartSelection = {
   inventoryQuantity: products.inventoryQuantity,
   reservedQuantity: products.reservedQuantity,
   shippingCents: sellers.defaultShippingCents,
+  shippingMode: sellers.shippingMode,
   quantity: cartItems.quantity,
 };
 
@@ -124,6 +125,7 @@ export async function getAccountCart(userId: string): Promise<CartItem[]> {
         row.inventoryQuantity - row.reservedQuantity,
       ),
       shippingCents: row.shippingCents,
+      shippingMode: row.shippingMode,
       quantity: Math.min(
         row.quantity,
         Math.max(0, row.inventoryQuantity - row.reservedQuantity),
@@ -162,6 +164,7 @@ function authoritativeToCart(
     currency: item.currency,
     availableQuantity: item.inventoryQuantity - item.reservedQuantity,
     shippingCents: item.shippingCents,
+    shippingMode: input.shippingMode,
     quantity: item.quantity,
   }));
 }
@@ -389,6 +392,10 @@ export async function getGarageData(userId: string) {
           currency: orders.currency,
           subtotalCents: orders.subtotalCents,
           shippingCents: orders.shippingCents,
+          shippingMode: orders.shippingMode,
+          selectedShippingCarrier: orders.selectedShippingCarrier,
+          selectedShippingService: orders.selectedShippingService,
+          selectedShippingEstimatedDays: orders.selectedShippingEstimatedDays,
           taxCents: orders.taxCents,
           marketplaceFeeBps: orders.marketplaceFeeBps,
           platformFeeCents: orders.platformFeeCents,

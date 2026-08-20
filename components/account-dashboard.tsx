@@ -659,8 +659,9 @@ function Sales({
                 {String(sale.fulfillmentStatus)}
               </span>
             </p>
+            {String(sale.shippingMode) === "calculated" && <p className="shipping-service-commitment"><b>Buyer selected:</b> {String(sale.selectedShippingCarrier ?? "")} {String(sale.selectedShippingService ?? "")}{sale.selectedShippingEstimatedDays == null ? "" : ` (about ${Number(sale.selectedShippingEstimatedDays)} business days)`}. Use this service or an equal/faster one.</p>}
             {String(sale.fulfillmentStatus) !== "shipped" && (
-              <ShipmentForm orderId={String(sale.id)} action={action} />
+              <ShipmentForm orderId={String(sale.id)} sale={sale} action={action} />
             )}
           </article>
         ))}
@@ -671,9 +672,11 @@ function Sales({
 
 function ShipmentForm({
   orderId,
+  sale,
   action,
 }: {
   orderId: string;
+  sale: GarageData["sales"][number];
   action(payload: Record<string, unknown>): Promise<unknown>;
 }) {
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -686,7 +689,15 @@ function ShipmentForm({
     <form className="fulfillment-controls" onSubmit={submit}>
       <label>
         Carrier
-        <input name="carrier" required maxLength={100} />
+        <input name="carrier" required maxLength={100} defaultValue={String(sale.selectedShippingCarrier ?? "")} />
+      </label>
+      <label>
+        Carrier service
+        <input name="fulfillmentService" required={String(sale.shippingMode) === "calculated"} maxLength={150} defaultValue={String(sale.selectedShippingService ?? "")} />
+      </label>
+      <label>
+        Estimated transit days
+        <input name="fulfillmentEstimatedDays" type="number" min={0} max={60} required={String(sale.shippingMode) === "calculated"} defaultValue={sale.selectedShippingEstimatedDays == null ? "" : String(sale.selectedShippingEstimatedDays)} />
       </label>
       <label>
         Tracking number

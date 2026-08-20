@@ -133,6 +133,13 @@ async function finalizePaidCheckout(event: StripeEvent, session: StripeCheckoutS
       status: checkoutReservations.status,
       subtotalCents: checkoutReservations.subtotalCents,
       shippingCents: checkoutReservations.shippingCents,
+      shippingMode: checkoutReservations.shippingMode,
+      selectedShippingCarrier: checkoutReservations.selectedShippingCarrier,
+      selectedShippingService: checkoutReservations.selectedShippingService,
+      selectedShippingServiceToken:
+        checkoutReservations.selectedShippingServiceToken,
+      selectedShippingEstimatedDays:
+        checkoutReservations.selectedShippingEstimatedDays,
       marketplaceFeeBps: checkoutReservations.marketplaceFeeBps,
       platformFeeCents: checkoutReservations.platformFeeCents,
       currency: checkoutReservations.currency,
@@ -197,12 +204,17 @@ async function finalizePaidCheckout(event: StripeEvent, session: StripeCheckoutS
       WHERE id = ? AND status = 'pending'`).bind(reservationId),
     d1.prepare(`INSERT INTO orders
       (id, order_number, seller_id, buyer_user_id, stripe_checkout_session_id, stripe_payment_intent_id, stripe_charge_id,
-       buyer_email, currency, subtotal_cents, shipping_cents, marketplace_fee_bps, platform_fee_cents,
+       buyer_email, currency, subtotal_cents, shipping_cents, shipping_mode,
+       selected_shipping_carrier, selected_shipping_service, selected_shipping_service_token,
+       selected_shipping_estimated_days, marketplace_fee_bps, platform_fee_cents,
        payment_processing_fee_cents, seller_proceeds_cents, tax_cents, total_cents,
        payment_status, fulfillment_status, buyer_name, shipping_address, paid_at, ship_by_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'paid', 'unfulfilled', ?, ?, ?, ?)`)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'paid', 'unfulfilled', ?, ?, ?, ?)`)
       .bind(orderId, orderNumber, reservation.sellerId, reservation.buyerUserId, session.id, intent, charge, buyerEmail,
         session.currency ?? reservation.currency, reservation.subtotalCents, reservation.shippingCents,
+        reservation.shippingMode, reservation.selectedShippingCarrier,
+        reservation.selectedShippingService, reservation.selectedShippingServiceToken,
+        reservation.selectedShippingEstimatedDays,
         reservation.marketplaceFeeBps, reservation.platformFeeCents,
         settlement.paymentProcessingFeeCents, settlement.sellerProceedsCents,
         taxCents, totalCents, shipping.name ?? "", JSON.stringify(shipping),

@@ -26,9 +26,19 @@ type Store = {
   stripeChargesEnabled: boolean;
   stripePayoutsEnabled: boolean;
   defaultShippingCents: number;
+  shippingMode: "calculated" | "flat" | "free";
   handlingTimeBusinessDays: number;
   shippingOriginCountry: string;
   shippingOriginRegion: string | null;
+  shippingOriginStreet1: string | null;
+  shippingOriginStreet2: string | null;
+  shippingOriginCity: string | null;
+  shippingOriginPostalCode: string | null;
+  shippingOriginPhone: string | null;
+  defaultPackageLength: string;
+  defaultPackageWidth: string;
+  defaultPackageHeight: string;
+  defaultPackageWeight: string;
   shippingPolicySummary: string;
   returnPolicySummary: string;
 };
@@ -64,6 +74,10 @@ type Product = {
   photoPackagingChecked: boolean;
   photoIssuesChecked: boolean;
   priceCents: number;
+  packageLength: string | null;
+  packageWidth: string | null;
+  packageHeight: string | null;
+  packageWeight: string | null;
   currency: string;
   inventoryQuantity: number;
   reservedQuantity: number;
@@ -91,6 +105,11 @@ type StoreOrder = {
   currency: string;
   subtotalCents: number;
   shippingCents: number;
+  shippingMode: "calculated" | "flat" | "free";
+  selectedShippingCarrier: string | null;
+  selectedShippingService: string | null;
+  selectedShippingServiceToken: string | null;
+  selectedShippingEstimatedDays: number | null;
   taxCents: number;
   marketplaceFeeBps: number;
   platformFeeCents: number;
@@ -103,7 +122,39 @@ type StoreOrder = {
   carrier: string | null;
   trackingNumber: string | null;
   createdAt: string;
+  shipByAt: string | null;
+  shipment: Shipment | null;
   items: OrderItem[];
+};
+
+type TrackingEvent = {
+  id: string;
+  status: string;
+  statusDetails: string;
+  statusDate: string;
+  location: string;
+};
+
+type Shipment = {
+  id: string;
+  carrier: string;
+  serviceLevel: string;
+  rateAmountCents: number;
+  currency: string;
+  parcelLength: string;
+  parcelWidth: string;
+  parcelHeight: string;
+  parcelWeight: string;
+  declaredValueCents: number;
+  insuranceRequired: boolean;
+  signatureRequired: boolean;
+  trackingNumber: string;
+  trackingUrl: string | null;
+  status: string;
+  statusDetails: string;
+  eta: string | null;
+  combinedOrderIds: string[];
+  events: TrackingEvent[];
 };
 
 type Analytics = {
@@ -141,6 +192,11 @@ type StoreData = {
   inventory: Product[];
   orders: StoreOrder[];
   analytics: Analytics;
+  shipping: {
+    configured: boolean;
+    insuranceThresholdCents: number;
+    signatureThresholdCents: number;
+  };
 };
 
 const tabs = ["overview", "inventory", "orders", "analytics", "settings"] as const;
@@ -263,7 +319,13 @@ export function StoreDashboard({
           />
         )}
         {view === "orders" && (
-          <Orders rows={data.orders} disabled={suspended} action={action} />
+          <Orders
+            rows={data.orders}
+            store={data.store}
+            shipping={data.shipping}
+            disabled={suspended}
+            action={action}
+          />
         )}
         {view === "analytics" && <AnalyticsView analytics={data.analytics} />}
         {view === "settings" && (
@@ -624,6 +686,7 @@ function ProductEditor({
             <label>Price (USD)<input name="price" inputMode="decimal" required defaultValue={product ? (product.priceCents / 100).toFixed(2) : ""} /></label>
             <label>Inventory quantity<input name="inventoryQuantity" type="number" min={product?.reservedQuantity ?? 0} max={1000000} required defaultValue={product?.inventoryQuantity ?? 1} /></label>
           </div>
+          <fieldset><legend>Package override (optional)</legend><p className="form-note">Leave all four blank to use the store default package for calculated checkout rates.</p><div className="parcel-grid"><label>Length (in)<input name="packageLength" inputMode="decimal" defaultValue={product?.packageLength ?? ""} /></label><label>Width (in)<input name="packageWidth" inputMode="decimal" defaultValue={product?.packageWidth ?? ""} /></label><label>Height (in)<input name="packageHeight" inputMode="decimal" defaultValue={product?.packageHeight ?? ""} /></label><label>Weight (lb)<input name="packageWeight" inputMode="decimal" defaultValue={product?.packageWeight ?? ""} /></label></div></fieldset>
           <CollectibleListingFields product={product}/>
           <ProductImageFields
             images={images}
@@ -702,10 +765,14 @@ function InventoryImporter({
 
 function Orders({
   rows,
+  store,
+  shipping,
   disabled,
   action,
 }: {
   rows: StoreOrder[];
+  store: Store;
+  shipping: StoreData["shipping"];
   disabled: boolean;
   action(
     payload: Record<string, unknown>,
@@ -713,17 +780,22 @@ function Orders({
   ): Promise<Record<string, unknown>>;
 }) {
   const [filter, setFilter] = useState("open");
+  const urgentCount = rows.filter((order) =>
+    ["overdue", "due_today", "due_soon"].includes(
+      orderHandlingReminder(order).level,
+    ),
+  ).length;
   const visible = rows.filter((order) =>
     filter === "all"
       ? true
       : filter === "open"
-        ? ["paid", "partially_refunded"].includes(order.paymentStatus) && order.fulfillmentStatus === "unfulfilled"
+        ? ["paid", "partially_refunded"].includes(order.paymentStatus) && ["unfulfilled", "processing"].includes(order.fulfillmentStatus)
         : order.fulfillmentStatus === filter || order.paymentStatus === filter,
   );
   return (
     <div className="store-stack">
       <header className="store-page-heading">
-        <div><p className="eyebrow">Fulfillment</p><h2>Orders</h2><p>Review paid orders, shipping details, and tracking.</p></div>
+        <div><p className="eyebrow">Fulfillment</p><h2>Orders</h2><p>Compare protected carrier rates, print labels, and follow tracking events.</p>{urgentCount > 0 && <p className="handling-summary"><b>{urgentCount} handling reminder{urgentCount === 1 ? "" : "s"}</b> need attention.</p>}</div>
         <select aria-label="Filter orders" value={filter} onChange={(event) => setFilter(event.target.value)}>
           <option value="open">Needs fulfillment</option><option value="all">All orders</option><option value="shipped">Shipped</option><option value="refunded">Refunded</option><option value="cancelled">Cancelled</option>
         </select>
@@ -733,7 +805,7 @@ function Orders({
           <article className="store-order" key={order.id}>
             <div className="store-order-header">
               <div><p className="eyebrow">{date(order.createdAt)}</p><h3>{order.orderNumber}</h3></div>
-              <div><span className={`status ${order.paymentStatus}`}>{order.paymentStatus}</span> <span className={`status ${order.fulfillmentStatus}`}>{order.fulfillmentStatus}</span></div>
+              <div><HandlingBadge order={order} /> <span className={`status ${order.paymentStatus}`}>{order.paymentStatus}</span> <span className={`status ${order.fulfillmentStatus}`}>{order.fulfillmentStatus}</span></div>
             </div>
             <div className="store-order-body">
               <div>
@@ -743,7 +815,8 @@ function Orders({
               </div>
               <div>
                 <h4>Ship to</h4><p><b>{order.buyerName || "Customer"}</b><br />{formatAddress(order.shippingAddress)}</p><p><a href={`mailto:${order.buyerEmail}`}>{order.buyerEmail}</a></p>
-                {order.trackingNumber ? <p><b>Tracking</b><br />{order.carrier} · {order.trackingNumber}</p> : ["paid", "partially_refunded"].includes(order.paymentStatus) && <ShipmentForm orderId={order.id} disabled={disabled} action={action} />}
+                {order.shippingMode === "calculated" && <p className="shipping-service-commitment"><b>Buyer selected:</b> {order.selectedShippingCarrier} {order.selectedShippingService}{order.selectedShippingEstimatedDays == null ? "" : ` (about ${order.selectedShippingEstimatedDays} business days)`}. Use this service or an equal/faster one.</p>}
+                {["paid", "partially_refunded"].includes(order.paymentStatus) && <ShipmentPanel order={order} compatibleOrders={compatibleOrdersFor(order, rows)} store={store} shipping={shipping} disabled={disabled} action={action} />}
                 <Link className="button outline small" href={`/resolution?order=${order.id}`}>Open resolution record</Link>
               </div>
             </div>
@@ -755,26 +828,224 @@ function Orders({
   );
 }
 
-function ShipmentForm({
-  orderId,
+function ShipmentPanel({
+  order,
+  compatibleOrders,
+  store,
+  shipping,
   disabled,
   action,
 }: {
-  orderId: string;
+  order: StoreOrder;
+  compatibleOrders: StoreOrder[];
+  store: Store;
+  shipping: StoreData["shipping"];
   disabled: boolean;
   action(
     payload: Record<string, unknown>,
     options?: { reload?: boolean; message?: string },
   ): Promise<Record<string, unknown>>;
 }) {
-  async function submit(event: FormEvent<HTMLFormElement>) {
+  const [quote, setQuote] = useState<ShippingQuote | null>(null);
+  const [selectedOrders, setSelectedOrders] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  if (order.shipment)
+    return <ShipmentDetails shipment={order.shipment} order={order} />;
+
+  async function quoteRates(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      const form = Object.fromEntries(new FormData(event.currentTarget));
+      const response = await shippingRequest({
+        action: "quote",
+        orderIds: [order.id, ...selectedOrders],
+        length: form.length,
+        width: form.width,
+        height: form.height,
+        weight: form.weight,
+      });
+      setQuote(response.quote as ShippingQuote);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "Rates are unavailable.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function buyLabel(rateId: string) {
+    if (!quote) return;
+    setBusy(true);
+    setError("");
+    try {
+      await shippingRequest({ action: "buy_label", quoteId: quote.id, rateId });
+      window.location.reload();
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "The label could not be purchased.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function manualTracking(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     await action(
-      { action: "ship_order", orderId, ...Object.fromEntries(new FormData(event.currentTarget)) },
+      {
+        action: "ship_order",
+        orderId: order.id,
+        ...Object.fromEntries(new FormData(event.currentTarget)),
+      },
       { reload: true, message: "Order marked shipped and customer notified." },
     );
   }
-  return <form className="store-shipment-form" onSubmit={submit}><h4>Add tracking</h4><label>Carrier<input name="carrier" required maxLength={100} disabled={disabled} /></label><label>Tracking number<input name="trackingNumber" required maxLength={200} disabled={disabled} /></label><button className="button dark small" disabled={disabled}>Mark shipped</button></form>;
+
+  if (!shipping.configured)
+    return (
+      <div className="store-shipment-form">
+        <p className="form-note">Shippo is not configured on the server. Manual tracking remains available.</p>
+        <ManualTrackingForm disabled={disabled} order={order} onSubmit={manualTracking} />
+      </div>
+    );
+
+  return (
+    <div className="store-shipment-form shipping-workflow">
+      <h4>Create protected shipment</h4>
+      {compatibleOrders.length > 0 && (
+        <fieldset className="combined-orders">
+          <legend>Combine orders to this same buyer and address</legend>
+          {compatibleOrders.map((candidate) => (
+            <label key={candidate.id}>
+              <input
+                type="checkbox"
+                checked={selectedOrders.includes(candidate.id)}
+                disabled={disabled || busy || Boolean(quote)}
+                onChange={(event) =>
+                  setSelectedOrders((current) =>
+                    event.target.checked
+                      ? [...current, candidate.id]
+                      : current.filter((id) => id !== candidate.id),
+                  )
+                }
+              />
+              {candidate.orderNumber} · {formatMoney(candidate.subtotalCents, candidate.currency)}
+            </label>
+          ))}
+        </fieldset>
+      )}
+      {!quote ? (
+        <form onSubmit={quoteRates}>
+          <div className="parcel-grid">
+            <label>Length (in)<input name="length" inputMode="decimal" required defaultValue={store.defaultPackageLength} disabled={disabled || busy} /></label>
+            <label>Width (in)<input name="width" inputMode="decimal" required defaultValue={store.defaultPackageWidth} disabled={disabled || busy} /></label>
+            <label>Height (in)<input name="height" inputMode="decimal" required defaultValue={store.defaultPackageHeight} disabled={disabled || busy} /></label>
+            <label>Weight (lb)<input name="weight" inputMode="decimal" required defaultValue={store.defaultPackageWeight} disabled={disabled || busy} /></label>
+          </div>
+          <p className="shipping-rule-note">Insurance is automatic at {formatMoney(shipping.insuranceThresholdCents)}; signature is automatic at {formatMoney(shipping.signatureThresholdCents)}. The server enforces both rules.</p>
+          <button className="button dark small" disabled={disabled || busy}>{busy ? "Getting rates…" : "Get carrier rates"}</button>
+        </form>
+      ) : (
+        <div className="shipping-rates">
+          <div className="shipping-guardrails">
+            <b>{quote.orderNumbers.length > 1 ? `${quote.orderNumbers.length} orders combined` : "Single order"}</b>
+            <span>{quote.insuranceRequired ? `Insured for ${formatMoney(quote.declaredValueCents)}` : "Insurance below threshold"}</span>
+            <span>{quote.signatureRequired ? "Signature required" : "No signature required"}</span>
+          </div>
+          <small>Rates expire {dateTime(quote.expiresAt)}. Buying a rate charges the connected Shippo account and creates one label.</small>
+          {quote.selectedServices.length > 0 && <p className="shipping-rule-note">Only the buyer-selected service or objectively equal/faster services are shown.</p>}
+          {quote.rates.map((rate) => (
+            <button type="button" key={rate.id} disabled={disabled || busy} onClick={() => void buyLabel(rate.id)}>
+              <span><b>{rate.provider}</b><small>{rate.serviceLevel}{rate.estimatedDays == null ? "" : ` · ${rate.estimatedDays} day${rate.estimatedDays === 1 ? "" : "s"}`}</small></span>
+              <strong>Buy · {formatMoney(rate.amountCents, rate.currency)}</strong>
+            </button>
+          ))}
+          <button type="button" className="text-button" disabled={busy} onClick={() => setQuote(null)}>Change package or refresh rates</button>
+        </div>
+      )}
+      {error && <p className="form-error" role="alert">{error}</p>}
+      <details className="manual-tracking">
+        <summary>Use a label bought elsewhere</summary>
+        <ManualTrackingForm disabled={disabled || busy} order={order} onSubmit={manualTracking} />
+      </details>
+    </div>
+  );
+}
+
+type ShippingQuote = {
+  id: string;
+  expiresAt: string;
+  orderNumbers: string[];
+  declaredValueCents: number;
+  insuranceRequired: boolean;
+  signatureRequired: boolean;
+  selectedServices: Array<{
+    carrier: string | null;
+    serviceToken: string | null;
+    estimatedDays: number | null;
+  }>;
+  rates: Array<{
+    id: string;
+    provider: string;
+    serviceLevel: string;
+    amountCents: number;
+    currency: string;
+    estimatedDays: number | null;
+  }>;
+};
+
+function ManualTrackingForm({
+  disabled,
+  order,
+  onSubmit,
+}: {
+  disabled: boolean;
+  order: StoreOrder;
+  onSubmit(event: FormEvent<HTMLFormElement>): Promise<void>;
+}) {
+  const protectedService = order.shippingMode === "calculated";
+  return <form onSubmit={onSubmit}><label>Carrier<input name="carrier" required maxLength={100} disabled={disabled} defaultValue={protectedService ? order.selectedShippingCarrier ?? "" : ""} /></label><label>Carrier service<input name="fulfillmentService" required={protectedService} maxLength={150} disabled={disabled} defaultValue={protectedService ? order.selectedShippingService ?? "" : ""} /></label><label>Estimated transit days<input name="fulfillmentEstimatedDays" type="number" min={0} max={60} required={protectedService} disabled={disabled} defaultValue={protectedService ? order.selectedShippingEstimatedDays ?? "" : ""} /></label><label>Tracking number<input name="trackingNumber" required maxLength={200} disabled={disabled} /></label>{protectedService && <p className="form-note">By submitting, you confirm this service matches or improves on the buyer&apos;s selection.</p>}<button className="button outline small" disabled={disabled}>Mark shipped manually</button></form>;
+}
+
+function ShipmentDetails({ shipment, order }: { shipment: Shipment; order: StoreOrder }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  async function sync() {
+    setBusy(true);
+    setError("");
+    try {
+      await shippingRequest({ action: "sync_tracking", shipmentId: shipment.id });
+      window.location.reload();
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : "Tracking could not be refreshed.");
+      setBusy(false);
+    }
+  }
+  return (
+    <section className="shipment-details">
+      <p><b>Tracking</b><br />{shipment.carrier} · {shipment.trackingNumber}</p>
+      <p><span className={`status ${shipment.status}`}>{shipment.status.replaceAll("_", " ")}</span> {shipment.serviceLevel}</p>
+      {shipment.statusDetails && <p>{shipment.statusDetails}</p>}
+      {shipment.combinedOrderIds.length > 1 && <p><b>Combined shipment:</b> {shipment.combinedOrderIds.length} orders share this label.</p>}
+      <p>{shipment.parcelLength} × {shipment.parcelWidth} × {shipment.parcelHeight} in · {shipment.parcelWeight} lb<br />{shipment.insuranceRequired ? `Insured for ${formatMoney(shipment.declaredValueCents)}` : "No added insurance"} · {shipment.signatureRequired ? "Signature required" : "No signature"}</p>
+      <div className="row-actions"><a className="button dark small" href={`/api/shipping/label?shipment_id=${encodeURIComponent(shipment.id)}`} target="_blank" rel="noreferrer">Print 4×6 label</a>{shipment.trackingUrl && <a className="button outline small" href={shipment.trackingUrl} target="_blank" rel="noreferrer">Carrier tracking</a>}<button className="button outline small" disabled={busy} onClick={() => void sync()}>{busy ? "Refreshing…" : "Refresh events"}</button></div>
+      {shipment.events.length > 0 && <ol className="tracking-events">{shipment.events.slice(0, 5).map((event) => <li key={event.id}><b>{event.status.replaceAll("_", " ")}</b><span>{event.statusDetails || "Carrier update"}</span><small>{dateTime(event.statusDate)}{formatTrackingLocation(event.location) ? ` · ${formatTrackingLocation(event.location)}` : ""}</small></li>)}</ol>}
+      {error && <p className="form-error" role="alert">{error}</p>}
+      {order.fulfillmentStatus === "processing" && <p className="form-note">A label is ready, but handling remains open until the carrier records the package in transit.</p>}
+    </section>
+  );
+}
+
+async function shippingRequest(payload: Record<string, unknown>) {
+  const response = await fetch("/api/shipping", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const body = (await response.json()) as Record<string, unknown> & { error?: string };
+  if (!response.ok) throw new Error(body.error || "The shipping request failed.");
+  return body;
 }
 
 function AnalyticsView({ analytics }: { analytics: Analytics }) {
@@ -834,8 +1105,17 @@ function StoreSettings({
           <label>Account email<input value={store.contactEmail} disabled /><span>Contact support to change the email that owns this store.</span></label>
           <label>Store description<textarea name="description" rows={5} maxLength={2000} disabled={disabled} defaultValue={store.description} /></label>
           <div className="form-row"><label>Website URL<input name="websiteUrl" type="url" disabled={disabled} defaultValue={store.websiteUrl ?? ""} /></label><label>Logo URL<input name="logoUrl" type="url" disabled={disabled} defaultValue={store.logoUrl ?? ""} /></label></div>
-          <div className="form-row"><label>Default shipping (USD)<input name="defaultShipping" inputMode="decimal" required disabled={disabled} defaultValue={(store.defaultShippingCents / 100).toFixed(2)} /></label><label>Handling time (business days)<input name="handlingTimeBusinessDays" type="number" min={1} max={10} required disabled={disabled} defaultValue={store.handlingTimeBusinessDays} /></label></div>
-          <div className="form-row"><label>Shipping country<input name="shippingOriginCountry" required maxLength={2} disabled={disabled} defaultValue={store.shippingOriginCountry} /></label><label>State or region<input name="shippingOriginRegion" maxLength={80} disabled={disabled} defaultValue={store.shippingOriginRegion ?? ""} /></label></div>
+          <div className="form-row"><label>Shipping model<select name="shippingMode" required disabled={disabled} defaultValue={store.shippingMode}><option value="calculated">Calculated carrier rates</option><option value="flat">Flat-rate shipping</option><option value="free">Free shipping</option></select></label><label>Handling time (business days)<input name="handlingTimeBusinessDays" type="number" min={1} max={10} required disabled={disabled} defaultValue={store.handlingTimeBusinessDays} /></label></div>
+          <label>Flat-rate amount (USD)<input name="defaultShipping" inputMode="decimal" required disabled={disabled} defaultValue={(store.defaultShippingCents / 100).toFixed(2)} /><span>Used only when the shipping model is flat rate.</span></label>
+          <h3>Ship-from address</h3>
+          <p className="form-note">This protected address is sent only to carriers for rates and labels.</p>
+          <label>Street address<input name="shippingOriginStreet1" required maxLength={200} disabled={disabled} defaultValue={store.shippingOriginStreet1 ?? ""} /></label>
+          <label>Apartment, suite, or unit<input name="shippingOriginStreet2" maxLength={200} disabled={disabled} defaultValue={store.shippingOriginStreet2 ?? ""} /></label>
+          <div className="form-row"><label>City<input name="shippingOriginCity" required maxLength={120} disabled={disabled} defaultValue={store.shippingOriginCity ?? ""} /></label><label>State or region<input name="shippingOriginRegion" required maxLength={80} disabled={disabled} defaultValue={store.shippingOriginRegion ?? ""} /></label></div>
+          <div className="form-row"><label>Postal code<input name="shippingOriginPostalCode" required maxLength={20} disabled={disabled} defaultValue={store.shippingOriginPostalCode ?? ""} /></label><label>Country code<input name="shippingOriginCountry" required maxLength={2} disabled={disabled} defaultValue={store.shippingOriginCountry} /></label></div>
+          <label>Carrier contact phone<input name="shippingOriginPhone" type="tel" required maxLength={50} disabled={disabled} defaultValue={store.shippingOriginPhone ?? ""} /></label>
+          <h3>Default package</h3>
+          <div className="parcel-grid"><label>Length (in)<input name="defaultPackageLength" inputMode="decimal" required disabled={disabled} defaultValue={store.defaultPackageLength} /></label><label>Width (in)<input name="defaultPackageWidth" inputMode="decimal" required disabled={disabled} defaultValue={store.defaultPackageWidth} /></label><label>Height (in)<input name="defaultPackageHeight" inputMode="decimal" required disabled={disabled} defaultValue={store.defaultPackageHeight} /></label><label>Weight (lb)<input name="defaultPackageWeight" inputMode="decimal" required disabled={disabled} defaultValue={store.defaultPackageWeight} /></label></div>
           <label>Shipping policy<textarea name="shippingPolicySummary" rows={4} maxLength={1000} disabled={disabled} defaultValue={store.shippingPolicySummary} /></label>
           <label>Return policy<textarea name="returnPolicySummary" rows={4} maxLength={1000} disabled={disabled} defaultValue={store.returnPolicySummary} /></label>
           <button className="button dark small" disabled={disabled}>Save store settings</button>
@@ -845,6 +1125,70 @@ function StoreSettings({
       <section className="store-panel payout-status"><p className="eyebrow">Selling fees</p><h3>{fee.rateKind === "founding_professional" ? "Founding Seller Rate" : "Professional Store Rate"} — {feePercent(fee.marketplaceFeeBps)} marketplace fee</h3>{fee.foundingPromotionActive && <p>Your promotional rate is active. It automatically becomes the {feePercent(fee.standardMarketplaceFeeBps)} standard professional rate when the six-month period ends.</p>}<p><b>Payment processing is charged separately.</b> Under the current Stripe destination-charge setup, Model Car Center pays Stripe processing fees; recorded order details show those costs separately from your marketplace fee.</p><p>No listing fees. No monthly marketplace subscription for V1.</p></section>
     </div>
   );
+}
+
+function HandlingBadge({ order }: { order: StoreOrder }) {
+  const reminder = orderHandlingReminder(order);
+  if (reminder.level === "none") return null;
+  return <span className={`handling-badge ${reminder.level}`}>{reminder.label}</span>;
+}
+
+function orderHandlingReminder(order: StoreOrder) {
+  if (
+    !["paid", "partially_refunded"].includes(order.paymentStatus) ||
+    ["shipped", "delivered", "cancelled"].includes(order.fulfillmentStatus) ||
+    !order.shipByAt
+  )
+    return { level: "none", label: "" };
+  const deadline = new Date(order.shipByAt);
+  if (Number.isNaN(deadline.getTime())) return { level: "none", label: "" };
+  const hours = Math.ceil((deadline.getTime() - Date.now()) / 3_600_000);
+  if (hours < 0) return { level: "overdue", label: "Handling overdue" };
+  if (hours <= 24) return { level: "due_today", label: "Ship today" };
+  if (hours <= 48) return { level: "due_soon", label: "Ship within 2 days" };
+  return { level: "on_track", label: `Ship by ${date(order.shipByAt)}` };
+}
+
+function compatibleOrdersFor(order: StoreOrder, rows: StoreOrder[]) {
+  return rows.filter(
+    (candidate) =>
+      candidate.id !== order.id &&
+      !candidate.shipment &&
+      candidate.fulfillmentStatus === "unfulfilled" &&
+      ["paid", "partially_refunded"].includes(candidate.paymentStatus) &&
+      candidate.buyerEmail.trim().toLowerCase() ===
+        order.buyerEmail.trim().toLowerCase() &&
+      candidate.shippingAddress === order.shippingAddress &&
+      candidate.currency.toLowerCase() === order.currency.toLowerCase(),
+  );
+}
+
+function formatTrackingLocation(value: string) {
+  try {
+    const location = JSON.parse(value) as {
+      city?: string;
+      state?: string;
+      zip?: string;
+      country?: string;
+    };
+    return [location.city, location.state, location.zip, location.country]
+      .filter(Boolean)
+      .join(", ");
+  } catch {
+    return "";
+  }
+}
+
+function dateTime(value: string) {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime())
+    ? value
+    : parsed.toLocaleString(undefined, {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      });
 }
 
 function formatAddress(value: string) {

@@ -123,6 +123,22 @@ export default async function ProductPage({
                 compact
               />
             )}
+          </aside>
+        </div>
+        <section
+          className="product-information"
+          aria-labelledby="product-information-title"
+        >
+          <div className="product-information-intro">
+            <p className="eyebrow">Model details</p>
+            <h2 id="product-information-title">About this model</h2>
+            <p>
+              {product.description ||
+                "The seller has not added a longer description for this model."}
+            </p>
+          </div>
+          <div className="product-specifications">
+            <p className="eyebrow">Collector specifications</p>
             <dl className="product-facts">
               <div>
                 <dt>Condition</dt>
@@ -190,9 +206,11 @@ export default async function ProductPage({
               <div>
                 <dt>Shipping</dt>
                 <dd>
-                  {product.defaultShippingCents
-                    ? `${formatMoney(product.defaultShippingCents, product.currency)} flat shipping`
-                    : "Free seller shipping"}
+                  {product.shippingMode === "calculated"
+                    ? "Buyer chooses from calculated carrier services"
+                    : product.shippingMode === "free"
+                      ? "Free seller shipping"
+                      : `${formatMoney(product.defaultShippingCents, product.currency)} flat shipping`}
                   <br />
                   Ships within {product.handlingTimeBusinessDays} business day
                   {product.handlingTimeBusinessDays === 1 ? "" : "s"}
@@ -208,15 +226,8 @@ export default async function ProductPage({
                 </dd>
               </div>
             </dl>
-            <div className="product-description">
-              <h2>About this model</h2>
-              <p>
-                {product.description ||
-                  "The seller has not added a longer description for this model."}
-              </p>
-            </div>
-          </aside>
-        </div>
+          </div>
+        </section>
         {related.length > 0 && (
           <section className="related-section">
             <div className="section-heading">

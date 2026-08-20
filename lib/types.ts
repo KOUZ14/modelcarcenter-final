@@ -41,6 +41,7 @@ export type ProductSummary = {
   primaryImageUrl: string | null;
   keywords: string;
   defaultShippingCents: number;
+  shippingMode: "calculated" | "flat" | "free";
   handlingTimeBusinessDays: number;
   createdAt: string;
 };
@@ -78,6 +79,7 @@ export type CartItem = {
   currency: string;
   availableQuantity: number;
   shippingCents: number;
+  shippingMode: "calculated" | "flat" | "free";
   quantity: number;
 };
 

@@ -15,11 +15,16 @@ import {
   productImages,
   products,
   sellers,
+  shipmentOrders,
+  shipments,
+  trackingEvents,
 } from "@/db/schema";
 import { sendShipmentEmail } from "./email";
+import { config } from "./config";
 import { canClaimProfessionalStore } from "./account-rules";
 import { buildStoreAnalytics } from "./store-rules";
 import { determineMarketplaceFee } from "./fees";
+import { parseParcel } from "./shipping-rules";
 import {
   assertCollectibleListingReady,
   cleanText,
@@ -122,6 +127,11 @@ export async function getStoreDashboardData(userId: string) {
         currency: orders.currency,
         subtotalCents: orders.subtotalCents,
         shippingCents: orders.shippingCents,
+        shippingMode: orders.shippingMode,
+        selectedShippingCarrier: orders.selectedShippingCarrier,
+        selectedShippingService: orders.selectedShippingService,
+        selectedShippingServiceToken: orders.selectedShippingServiceToken,
+        selectedShippingEstimatedDays: orders.selectedShippingEstimatedDays,
         taxCents: orders.taxCents,
         marketplaceFeeBps: orders.marketplaceFeeBps,
         platformFeeCents: orders.platformFeeCents,
@@ -135,6 +145,7 @@ export async function getStoreDashboardData(userId: string) {
         trackingNumber: orders.trackingNumber,
         createdAt: orders.createdAt,
         paidAt: orders.paidAt,
+        shipByAt: orders.shipByAt,
         shippedAt: orders.shippedAt,
       })
       .from(orders)
@@ -156,6 +167,26 @@ export async function getStoreDashboardData(userId: string) {
         .where(inArray(orderItems.orderId, orderIds))
         .orderBy(asc(orderItems.id))
     : [];
+  const shipmentLinks = orderIds.length
+    ? await db
+        .select({
+          orderId: shipmentOrders.orderId,
+          shipment: shipments,
+        })
+        .from(shipmentOrders)
+        .innerJoin(shipments, eq(shipmentOrders.shipmentId, shipments.id))
+        .where(inArray(shipmentOrders.orderId, orderIds))
+    : [];
+  const shipmentIds = [
+    ...new Set(shipmentLinks.map((link) => link.shipment.id)),
+  ];
+  const events = shipmentIds.length
+    ? await db
+        .select()
+        .from(trackingEvents)
+        .where(inArray(trackingEvents.shipmentId, shipmentIds))
+        .orderBy(desc(trackingEvents.statusDate))
+    : [];
   const analytics = buildStoreAnalytics(orderRows, items, inventory);
   return {
     store,
@@ -167,8 +198,14 @@ export async function getStoreDashboardData(userId: string) {
     orders: orderRows.map((order) => ({
       ...order,
       items: items.filter((item) => item.orderId === order.id),
+      shipment: shipmentForOrder(order.id, shipmentLinks, events),
     })),
     analytics,
+    shipping: {
+      configured: Boolean(config.shippoApiKey),
+      insuranceThresholdCents: config.shippoInsuranceThresholdCents,
+      signatureThresholdCents: config.shippoSignatureThresholdCents,
+    },
   };
 }
 
@@ -218,6 +255,20 @@ export async function saveStoreProduct(
     1_000_000,
   );
   const collectible = parseCollectibleDetails(payload);
+  const hasPackageOverride = [
+    payload.packageLength,
+    payload.packageWidth,
+    payload.packageHeight,
+    payload.packageWeight,
+  ].some((value) => cleanText(value, 40));
+  const packageOverride = hasPackageOverride
+    ? parseParcel({
+        length: payload.packageLength,
+        width: payload.packageWidth,
+        height: payload.packageHeight,
+        weight: payload.packageWeight,
+      })
+    : null;
   const values = {
     sellerId: store.id,
     sellerSku,
@@ -239,6 +290,10 @@ export async function saveStoreProduct(
     condition: legacyConditionFromCollectibleDetails(collectible),
     ...collectible,
     priceCents: moneyToCents(payload.price, "price"),
+    packageLength: packageOverride?.length ?? null,
+    packageWidth: packageOverride?.width ?? null,
+    packageHeight: packageOverride?.height ?? null,
+    packageWeight: packageOverride?.weight ?? null,
     inventoryQuantity,
     primaryImageUrl: existing?.primaryImageUrl ?? null,
     keywords: cleanText(payload.keywords, 1_000),
@@ -352,6 +407,23 @@ export async function saveStoreProfile(
   const logoUrl = rawLogo ? optionalHttpUrl(rawLogo) : null;
   if (rawLogo && !logoUrl)
     throw new ValidationError("Logo must be an http or https URL.");
+  const parcel = parseParcel({
+    length: payload.defaultPackageLength,
+    width: payload.defaultPackageWidth,
+    height: payload.defaultPackageHeight,
+    weight: payload.defaultPackageWeight,
+  });
+  const shippingOriginCountry = requiredString(
+    payload.shippingOriginCountry || "US",
+    "shippingOriginCountry",
+    2,
+  ).toUpperCase();
+  const shippingOriginRegion = cleanText(payload.shippingOriginRegion, 80) || null;
+  if (["US", "CA"].includes(shippingOriginCountry) && !shippingOriginRegion)
+    throw new ValidationError("State or region is required for US and Canadian ship-from addresses.");
+  const shippingMode = cleanText(payload.shippingMode, 20);
+  if (!["calculated", "flat", "free"].includes(shippingMode))
+    throw new ValidationError("Choose calculated, flat-rate, or free shipping.");
   const values = {
     storeName: requiredString(payload.storeName, "storeName", 120),
     contactName: requiredString(payload.contactName, "contactName", 120),
@@ -359,27 +431,67 @@ export async function saveStoreProfile(
     logoUrl,
     description: cleanText(payload.description, 2_000),
     defaultShippingCents: moneyToCents(
-      payload.defaultShipping,
+      shippingMode === "flat" ? payload.defaultShipping : "0",
       "default shipping",
     ),
+    shippingMode: shippingMode as "calculated" | "flat" | "free",
     handlingTimeBusinessDays: integer(
       payload.handlingTimeBusinessDays,
       "handling time",
       1,
       10,
     ),
-    shippingOriginCountry: requiredString(
-      payload.shippingOriginCountry || "US",
-      "shippingOriginCountry",
-      2,
-    ).toUpperCase(),
-    shippingOriginRegion: cleanText(payload.shippingOriginRegion, 80) || null,
+    shippingOriginCountry,
+    shippingOriginRegion,
+    shippingOriginStreet1: requiredString(
+      payload.shippingOriginStreet1,
+      "shippingOriginStreet1",
+      200,
+    ),
+    shippingOriginStreet2:
+      cleanText(payload.shippingOriginStreet2, 200) || null,
+    shippingOriginCity: requiredString(
+      payload.shippingOriginCity,
+      "shippingOriginCity",
+      120,
+    ),
+    shippingOriginPostalCode: requiredString(
+      payload.shippingOriginPostalCode,
+      "shippingOriginPostalCode",
+      20,
+    ),
+    shippingOriginPhone: requiredString(
+      payload.shippingOriginPhone,
+      "shippingOriginPhone",
+      50,
+    ),
+    defaultPackageLength: parcel.length,
+    defaultPackageWidth: parcel.width,
+    defaultPackageHeight: parcel.height,
+    defaultPackageWeight: parcel.weight,
     shippingPolicySummary: cleanText(payload.shippingPolicySummary, 1_000),
     returnPolicySummary: cleanText(payload.returnPolicySummary, 1_000),
     updatedAt: new Date().toISOString(),
   };
   await getDb().update(sellers).set(values).where(eq(sellers.id, store.id));
   return { store: { ...store, ...values } };
+}
+
+function shipmentForOrder(
+  orderId: string,
+  links: Array<{ orderId: string; shipment: typeof shipments.$inferSelect }>,
+  events: Array<typeof trackingEvents.$inferSelect>,
+) {
+  const shipment = links.find((link) => link.orderId === orderId)?.shipment;
+  if (!shipment) return null;
+  const combinedOrderIds = links
+    .filter((link) => link.shipment.id === shipment.id)
+    .map((link) => link.orderId);
+  return {
+    ...shipment,
+    combinedOrderIds,
+    events: events.filter((event) => event.shipmentId === shipment.id),
+  };
 }
 
 export async function shipOwnedStoreOrder(
@@ -408,11 +520,41 @@ export async function shipOwnedStoreOrder(
     throw new ValidationError(
       "This store is suspended. Contact Model Car Center support.",
     );
+  const fulfillmentService = cleanText(payload.fulfillmentService, 150) || null;
+  const fulfillmentEstimatedDays =
+    cleanText(payload.fulfillmentEstimatedDays, 10)
+      ? integer(
+          payload.fulfillmentEstimatedDays,
+          "fulfillmentEstimatedDays",
+          0,
+          60,
+        )
+      : null;
+  if (row.order.shippingMode === "calculated") {
+    if (!fulfillmentService)
+      throw new ValidationError("Enter the carrier service used for this shipment.");
+    const exactService =
+      carrier.trim().toLowerCase() ===
+        String(row.order.selectedShippingCarrier ?? "").trim().toLowerCase() &&
+      fulfillmentService.trim().toLowerCase() ===
+        String(row.order.selectedShippingService ?? "").trim().toLowerCase();
+    if (
+      !exactService &&
+      (fulfillmentEstimatedDays == null ||
+        row.order.selectedShippingEstimatedDays == null ||
+        fulfillmentEstimatedDays > row.order.selectedShippingEstimatedDays)
+    )
+      throw new ValidationError(
+        "Use the buyer-selected service or attest to an equal/faster transit time; shipping downgrades are not allowed.",
+      );
+  }
   await getDb()
     .update(orders)
     .set({
       carrier,
       trackingNumber,
+      fulfillmentService,
+      fulfillmentEstimatedDays,
       fulfillmentStatus: "shipped",
       shippedAt: row.order.shippedAt ?? new Date().toISOString(),
       updatedAt: new Date().toISOString(),

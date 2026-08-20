@@ -58,6 +58,7 @@ const productSelection = {
   primaryImageUrl: products.primaryImageUrl,
   keywords: products.keywords,
   defaultShippingCents: sellers.defaultShippingCents,
+  shippingMode: sellers.shippingMode,
   handlingTimeBusinessDays: sellers.handlingTimeBusinessDays,
   createdAt: products.createdAt,
 };
@@ -244,6 +245,7 @@ export async function getSellerStorefront(slug: string) {
       logoUrl: sellers.logoUrl,
       description: sellers.description,
       defaultShippingCents: sellers.defaultShippingCents,
+      shippingMode: sellers.shippingMode,
       handlingTimeBusinessDays: sellers.handlingTimeBusinessDays,
       shippingPolicySummary: sellers.shippingPolicySummary,
       returnPolicySummary: sellers.returnPolicySummary,

@@ -306,6 +306,14 @@ export function assertCollectibleListingReady(
 
 export function parseCollectorListing(payload: Record<string, unknown>) {
   const collectible = parseCollectibleDetails(payload);
+  const packageLength = listingPackageDecimal(payload.packageLength, "package length", 108);
+  const packageWidth = listingPackageDecimal(payload.packageWidth, "package width", 108);
+  const packageHeight = listingPackageDecimal(payload.packageHeight, "package height", 108);
+  const packageWeight = listingPackageDecimal(payload.packageWeight, "package weight", 150);
+  const shippingOriginCountry = requiredString(payload.shippingOriginCountry || "US", "shippingOriginCountry", 2).toUpperCase();
+  const shippingOriginRegion = cleanText(payload.shippingOriginRegion, 80) || null;
+  if (["US", "CA"].includes(shippingOriginCountry) && !shippingOriginRegion)
+    throw new ValidationError("State or region is required for US and Canadian ship-from addresses.");
   return {
     title: requiredString(payload.title, "title", 200),
     description: requiredString(payload.description, "description", 4_000),
@@ -319,12 +327,30 @@ export function parseCollectorListing(payload: Record<string, unknown>) {
     ...collectible,
     priceCents: moneyToCents(payload.price, "price"),
     inventoryQuantity: integer(payload.quantity, "quantity", 1, 100),
-    shippingCents: moneyToCents(payload.shippingPrice ?? "0", "shipping price"),
+    packageLength,
+    packageWidth,
+    packageHeight,
+    packageWeight,
     sellerDisplayName: requiredString(payload.sellerDisplayName, "sellerDisplayName", 120),
     sellerDescription: cleanText(payload.sellerDescription, 1_000),
-    shippingOriginCountry: requiredString(payload.shippingOriginCountry || "US", "shippingOriginCountry", 2).toUpperCase(),
-    shippingOriginRegion: cleanText(payload.shippingOriginRegion, 80) || null,
+    shippingOriginCountry,
+    shippingOriginRegion,
+    shippingOriginStreet1: requiredString(payload.shippingOriginStreet1, "shippingOriginStreet1", 200),
+    shippingOriginStreet2: cleanText(payload.shippingOriginStreet2, 200) || null,
+    shippingOriginCity: requiredString(payload.shippingOriginCity, "shippingOriginCity", 120),
+    shippingOriginPostalCode: requiredString(payload.shippingOriginPostalCode, "shippingOriginPostalCode", 20),
+    shippingOriginPhone: requiredString(payload.shippingOriginPhone, "shippingOriginPhone", 50),
   };
+}
+
+function listingPackageDecimal(value: unknown, label: string, max: number) {
+  const text = String(value ?? "").trim();
+  if (!/^\d+(?:\.\d{1,2})?$/.test(text))
+    throw new ValidationError(`${label} must be a positive number with up to two decimal places.`);
+  const number = Number(text);
+  if (!Number.isFinite(number) || number <= 0 || number > max)
+    throw new ValidationError(`${label} must be greater than 0 and no more than ${max}.`);
+  return String(Number(number.toFixed(2)));
 }
 
 export type CsvRow = Record<string, string>;

@@ -54,6 +54,7 @@ export async function POST(request: Request) {
         primaryImageUrl: products.primaryImageUrl,
         keywords: products.keywords,
         defaultShippingCents: sellers.defaultShippingCents,
+        shippingMode: sellers.shippingMode,
         createdAt: products.createdAt,
       })
       .from(products)

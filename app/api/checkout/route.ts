@@ -3,6 +3,8 @@ import { readJsonObject } from "@/lib/http";
 import { createCheckoutSession } from "@/lib/stripe";
 import { getCurrentCollector } from "@/lib/collector-auth";
 import { isCurrentPolicyVersion, POLICY_VERSION } from "@/lib/legal";
+import { resolveCheckoutShipping } from "@/lib/checkout-shipping";
+import { calculateServerTotals } from "@/lib/business";
 
 export const dynamic = "force-dynamic";
 
@@ -20,8 +22,26 @@ export async function POST(request: Request) {
       return { productId: String(value.productId ?? ""), quantity: Number(value.quantity) };
     });
     await releaseStaleReservations();
-    const cart = await loadAuthoritativeCart(requested);
-    const reservation = await reserveCart(cart, collector?.user.id ?? null, POLICY_VERSION);
+    const loadedCart = await loadAuthoritativeCart(requested);
+    const shipping = await resolveCheckoutShipping(
+      loadedCart,
+      payload.shippingSelection,
+      collector?.user.id ?? null,
+    );
+    const cart = {
+      ...loadedCart,
+      totals: calculateServerTotals(
+        loadedCart.items,
+        shipping.amountCents,
+        loadedCart.fee.marketplaceFeeBps,
+      ),
+    };
+    const reservation = await reserveCart(
+      cart,
+      collector?.user.id ?? null,
+      POLICY_VERSION,
+      shipping,
+    );
     reservationId = reservation.reservationId;
     const session = await createCheckoutSession({
       reservationId,
