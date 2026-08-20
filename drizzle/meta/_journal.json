@@ -43,6 +43,13 @@
       "when": 1787204688157,
       "tag": "0005_whole_zemo",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1787231837176,
+      "tag": "0006_bouncy_sersi",
+      "breakpoints": true
     }
   ]
 }

@@ -88,6 +88,9 @@ export const sellers = sqliteTable(
     defaultShippingCents: integer("default_shipping_cents")
       .notNull()
       .default(0),
+    handlingTimeBusinessDays: integer("handling_time_business_days")
+      .notNull()
+      .default(3),
     shippingOriginCountry: text("shipping_origin_country")
       .notNull()
       .default("US"),
@@ -108,6 +111,10 @@ export const sellers = sqliteTable(
     check(
       "sellers_shipping_nonnegative",
       sql`${table.defaultShippingCents} >= 0`,
+    ),
+    check(
+      "sellers_handling_time_range",
+      sql`${table.handlingTimeBusinessDays} BETWEEN 1 AND 10`,
     ),
   ],
 );
@@ -481,6 +488,7 @@ export const orders = sqliteTable(
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),
     paidAt: text("paid_at"),
+    shipByAt: text("ship_by_at"),
     shippedAt: text("shipped_at"),
     updatedAt: text("updated_at")
       .notNull()
@@ -526,6 +534,33 @@ export const orderItems = sqliteTable(
     index("order_items_order_idx").on(table.orderId),
     check("order_items_price_nonnegative", sql`${table.unitPriceCents} >= 0`),
     check("order_items_quantity_positive", sql`${table.quantity} > 0`),
+  ],
+);
+
+export const sellerFeedback = sqliteTable(
+  "seller_feedback",
+  {
+    id: text("id").primaryKey(),
+    orderId: text("order_id")
+      .notNull()
+      .references(() => orders.id, { onDelete: "cascade" }),
+    sellerId: text("seller_id")
+      .notNull()
+      .references(() => sellers.id, { onDelete: "cascade" }),
+    buyerUserId: text("buyer_user_id").references(() => authUser.id, {
+      onDelete: "set null",
+    }),
+    rating: integer("rating").notNull(),
+    comment: text("comment").notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("seller_feedback_order_unique").on(table.orderId),
+    index("seller_feedback_seller_idx").on(table.sellerId, table.createdAt),
+    check(
+      "seller_feedback_rating_range",
+      sql`${table.rating} BETWEEN 1 AND 5`,
+    ),
   ],
 );
 

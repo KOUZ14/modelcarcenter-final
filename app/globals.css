@@ -312,6 +312,36 @@ footer { padding-top: 70px; color: white; background: var(--ink); }
 .policy-grid article { padding: 40px; background: #efede8; }
 .policy-grid h2 { margin-bottom: 12px; font-size: 25px; }
 .policy-grid p { color: var(--muted); line-height: 1.65; }
+.seller-reputation { scroll-margin-top: 24px; padding: clamp(42px, 6vw, 76px); background: white; border: 1px solid var(--line); border-top: 0; }
+.seller-reputation > header { display: grid; grid-template-columns: minmax(0, .85fr) minmax(360px, .65fr); gap: clamp(36px, 7vw, 110px); align-items: end; margin-bottom: 42px; }
+.seller-reputation > header h2 { font-size: clamp(38px, 5vw, 66px); line-height: .95; letter-spacing: -.05em; font-weight: 500; }
+.seller-reputation > header > p { margin: 0; color: var(--muted); line-height: 1.65; }
+.reputation-metrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); margin: 0; border-top: 1px solid var(--line); border-left: 1px solid var(--line); }
+.reputation-metrics > div { min-height: 178px; display: flex; flex-direction: column; padding: 20px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.reputation-metrics dt, .reputation-compact dt { color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.reputation-metrics dd { margin: auto 0 12px; font-size: clamp(24px, 2.5vw, 38px); line-height: 1; letter-spacing: -.04em; font-weight: 600; }
+.reputation-metrics small, .reputation-compact small { color: var(--muted); font-size: 11px; line-height: 1.45; }
+.verified-feedback { margin-top: 54px; }
+.verified-feedback-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding-bottom: 20px; border-bottom: 1px solid var(--ink); }
+.verified-feedback-heading h3 { font-size: 30px; }
+.verified-feedback-heading > span, .feedback-list em { padding: 6px 9px; color: #075c39; background: #dff6ea; font-size: 9px; font-style: normal; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.feedback-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.feedback-list article { min-width: 0; padding: 26px 0; border-bottom: 1px solid var(--line); }
+.feedback-list article:nth-child(odd) { padding-right: 30px; border-right: 1px solid var(--line); }
+.feedback-list article:nth-child(even) { padding-left: 30px; }
+.feedback-list article > div { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+.feedback-list article > div > span { display: flex; align-items: center; gap: 8px; }
+.feedback-list strong { font-size: 12px; }
+.feedback-list p { margin: 20px 0 16px; color: #444; line-height: 1.65; }
+.feedback-list time { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .07em; }
+.feedback-empty { margin: 0; padding: 32px 0; color: var(--muted); border-bottom: 1px solid var(--line); }
+.reputation-compact { margin: 0 0 36px; padding: 21px; background: #f0eee8; border-left: 3px solid var(--accent); }
+.reputation-compact-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+.reputation-compact-heading b { display: block; font-size: 13px; line-height: 1.4; }
+.reputation-compact-heading a { flex: 0 0 auto; padding-bottom: 3px; border-bottom: 1px solid var(--ink); font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
+.reputation-compact dl { display: grid; grid-template-columns: 1fr 1fr; margin: 0; border-top: 1px solid #d1cec7; border-left: 1px solid #d1cec7; }
+.reputation-compact dl > div { min-width: 0; min-height: 116px; display: flex; flex-direction: column; padding: 13px; border-right: 1px solid #d1cec7; border-bottom: 1px solid #d1cec7; }
+.reputation-compact dd { margin: auto 0 7px; font-size: 19px; line-height: 1.05; letter-spacing: -.02em; font-weight: 700; }
 
 .page-title, .empty-state { max-width: 850px; padding-block: 35px 65px; }
 .page-title > p:not(.eyebrow), .empty-state > p:not(.eyebrow), .sell-intro > p:not(.eyebrow), .contact-page > p { max-width: 680px; color: var(--muted); font-size: 18px; line-height: 1.65; }
@@ -442,6 +472,7 @@ footer { padding-top: 70px; color: white; background: var(--ink); }
   .process-grid article:nth-child(2) { border-right: 0; }
   .process-grid article { border-bottom: 1px solid var(--line); }
   .demand-grid { grid-template-columns: 1fr; }
+  .reputation-metrics { grid-template-columns: repeat(3, 1fr); }
 }
 
 @media (max-width: 720px) {
@@ -470,6 +501,11 @@ footer { padding-top: 70px; color: white; background: var(--ink); }
   .inspection-nav.next { right: 14px; }
   .inspection-help { padding-inline: 16px; line-height: 1.4; }
   .seller-hero { grid-template-columns: 1fr; padding: 34px 25px; }
+  .seller-reputation { padding: 36px 24px; }
+  .seller-reputation > header, .feedback-list { grid-template-columns: 1fr; }
+  .seller-reputation > header { gap: 22px; }
+  .reputation-metrics { grid-template-columns: 1fr 1fr; }
+  .feedback-list article:nth-child(odd), .feedback-list article:nth-child(even) { padding-inline: 0; border-right: 0; }
   .policy-grid, .process-grid, .metric-grid, .hunt-admin-grid, .order-admin-body { grid-template-columns: 1fr; }
   .process-grid article { border-right: 0; }
   .application-section { padding: 40px 22px; }
@@ -482,6 +518,8 @@ footer { padding-top: 70px; color: white; background: var(--ink); }
   .admin-tabs { padding-inline: 15px; }
   .admin-filters, .fulfillment-controls { grid-template-columns: 1fr; }
   .mini-grid { grid-template-columns: 1fr; }
+  .verified-feedback-form form { grid-template-columns: 1fr; }
+  .verified-feedback-form form > p, .verified-feedback-form form > button { grid-column: auto; }
 }
 
 /* Collector accounts, My Garage, and self-service listings */
@@ -499,7 +537,7 @@ footer { padding-top: 70px; color: white; background: var(--ink); }
 .auth-card h1 { margin-bottom: 0; font-size: clamp(42px, 6vw, 70px); line-height: .95; letter-spacing: -.05em; font-weight: 500; }
 .auth-card > p { color: var(--muted); line-height: 1.6; }
 .auth-card label, .listing-form label, .garage-section label { display: grid; gap: 8px; color: #555; font-size: 12px; font-weight: 700; }
-.auth-card input, .listing-form input, .listing-form select, .listing-form textarea, .garage-section input, .garage-section textarea { width: 100%; min-height: 50px; padding: 12px 14px; color: var(--ink); background: #f6f5f2; border: 1px solid var(--line); }
+.auth-card input, .listing-form input, .listing-form select, .listing-form textarea, .garage-section input, .garage-section select, .garage-section textarea { width: 100%; min-height: 50px; padding: 12px 14px; color: var(--ink); background: #f6f5f2; border: 1px solid var(--line); }
 .form-note, .field-note { color: var(--muted); font-size: 12px; font-weight: 400; }
 .garage-layout { display: grid; grid-template-columns: 250px 1fr; gap: clamp(35px, 6vw, 90px); min-height: 700px; }
 .garage-nav { align-self: start; padding: 26px; background: var(--ink); color: white; }
@@ -522,6 +560,11 @@ footer { padding-top: 70px; color: white; background: var(--ink); }
 .garage-list small { color: var(--muted); }
 .order-line { display: flex !important; align-items: center; justify-content: flex-start !important; gap: 12px !important; }
 .order-line img, .order-line > span { width: 64px; height: 64px; object-fit: cover; background: #eceae5; }
+.verified-feedback-form { margin-top: 10px; padding-top: 18px; border-top: 1px solid var(--line); }
+.verified-feedback-form summary { width: fit-content; cursor: pointer; font-size: 13px; font-weight: 800; }
+.verified-feedback-form form { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 14px; margin-top: 18px; padding: 20px; background: #f3f1ec; }
+.verified-feedback-form form > p { grid-column: 1 / -1; margin: 0; font-size: 12px; }
+.verified-feedback-form form > button { grid-column: 2; justify-self: start; }
 .account-callout { margin-bottom: 22px; padding: 20px; background: #fff8df; border-left: 3px solid #be8500; }
 .account-callout p { margin: 8px 0 16px; }
 .delete-account { margin-top: 45px; padding-top: 25px; border-top: 1px solid var(--line); }

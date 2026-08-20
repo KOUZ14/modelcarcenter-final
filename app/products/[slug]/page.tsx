@@ -8,6 +8,8 @@ import { ProductCard } from "@/components/product-card";
 import { formatCondition, formatMoney } from "@/lib/format";
 import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
+import { SellerReputation } from "@/components/seller-reputation";
+import { getSellerReputation } from "@/lib/reputation";
 
 export const dynamic = "force-dynamic";
 
@@ -44,7 +46,10 @@ export default async function ProductPage({
 }) {
   const product = await getProductBySlug((await params).slug);
   if (!product) notFound();
-  const related = await getRelatedProducts(product);
+  const [related, reputation] = await Promise.all([
+    getRelatedProducts(product),
+    getSellerReputation(product.sellerId),
+  ]);
   const photoChecklistComplete = [
     product.photoFrontChecked,
     product.photoRearChecked,
@@ -111,6 +116,13 @@ export default async function ProductPage({
               · Model: {formatCondition(product.modelCondition)}
             </p>
             <ProductPurchase product={product} />
+            {reputation && (
+              <SellerReputation
+                reputation={reputation}
+                sellerSlug={product.sellerSlug}
+                compact
+              />
+            )}
             <dl className="product-facts">
               <div>
                 <dt>Condition</dt>
@@ -181,6 +193,9 @@ export default async function ProductPage({
                   {product.defaultShippingCents
                     ? `${formatMoney(product.defaultShippingCents, product.currency)} flat shipping`
                     : "Free seller shipping"}
+                  <br />
+                  Ships within {product.handlingTimeBusinessDays} business day
+                  {product.handlingTimeBusinessDays === 1 ? "" : "s"}
                   <br />
                   {product.shippingPolicySummary}
                 </dd>

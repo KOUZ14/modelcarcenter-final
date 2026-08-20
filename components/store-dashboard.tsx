@@ -26,6 +26,7 @@ type Store = {
   stripeChargesEnabled: boolean;
   stripePayoutsEnabled: boolean;
   defaultShippingCents: number;
+  handlingTimeBusinessDays: number;
   shippingOriginCountry: string;
   shippingOriginRegion: string | null;
   shippingPolicySummary: string;
@@ -833,8 +834,8 @@ function StoreSettings({
           <label>Account email<input value={store.contactEmail} disabled /><span>Contact support to change the email that owns this store.</span></label>
           <label>Store description<textarea name="description" rows={5} maxLength={2000} disabled={disabled} defaultValue={store.description} /></label>
           <div className="form-row"><label>Website URL<input name="websiteUrl" type="url" disabled={disabled} defaultValue={store.websiteUrl ?? ""} /></label><label>Logo URL<input name="logoUrl" type="url" disabled={disabled} defaultValue={store.logoUrl ?? ""} /></label></div>
-          <div className="form-row"><label>Default shipping (USD)<input name="defaultShipping" inputMode="decimal" required disabled={disabled} defaultValue={(store.defaultShippingCents / 100).toFixed(2)} /></label><label>Shipping country<input name="shippingOriginCountry" required maxLength={2} disabled={disabled} defaultValue={store.shippingOriginCountry} /></label></div>
-          <label>State or region<input name="shippingOriginRegion" maxLength={80} disabled={disabled} defaultValue={store.shippingOriginRegion ?? ""} /></label>
+          <div className="form-row"><label>Default shipping (USD)<input name="defaultShipping" inputMode="decimal" required disabled={disabled} defaultValue={(store.defaultShippingCents / 100).toFixed(2)} /></label><label>Handling time (business days)<input name="handlingTimeBusinessDays" type="number" min={1} max={10} required disabled={disabled} defaultValue={store.handlingTimeBusinessDays} /></label></div>
+          <div className="form-row"><label>Shipping country<input name="shippingOriginCountry" required maxLength={2} disabled={disabled} defaultValue={store.shippingOriginCountry} /></label><label>State or region<input name="shippingOriginRegion" maxLength={80} disabled={disabled} defaultValue={store.shippingOriginRegion ?? ""} /></label></div>
           <label>Shipping policy<textarea name="shippingPolicySummary" rows={4} maxLength={1000} disabled={disabled} defaultValue={store.shippingPolicySummary} /></label>
           <label>Return policy<textarea name="returnPolicySummary" rows={4} maxLength={1000} disabled={disabled} defaultValue={store.returnPolicySummary} /></label>
           <button className="button dark small" disabled={disabled}>Save store settings</button>

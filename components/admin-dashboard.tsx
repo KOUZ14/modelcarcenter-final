@@ -222,6 +222,7 @@ type Seller = {
   stripeChargesEnabled: boolean;
   stripePayoutsEnabled: boolean;
   defaultShippingCents: number;
+  handlingTimeBusinessDays: number;
   description: string;
   websiteUrl?: string | null;
   logoUrl?: string | null;
@@ -495,6 +496,7 @@ function emptySeller(): Seller {
     stripeChargesEnabled: false,
     stripePayoutsEnabled: false,
     defaultShippingCents: 0,
+    handlingTimeBusinessDays: 3,
     description: "",
     shippingPolicySummary: "",
     returnPolicySummary: "",
@@ -579,16 +581,29 @@ function SellerEditor({
           Description
           <textarea name="description" defaultValue={seller.description} />
         </label>
-        <label>
-          Default shipping, cents
-          <input
-            name="defaultShippingCents"
-            type="number"
-            min="0"
-            required
-            defaultValue={seller.defaultShippingCents}
-          />
-        </label>
+        <div className="form-row">
+          <label>
+            Default shipping, cents
+            <input
+              name="defaultShippingCents"
+              type="number"
+              min="0"
+              required
+              defaultValue={seller.defaultShippingCents}
+            />
+          </label>
+          <label>
+            Handling time, business days
+            <input
+              name="handlingTimeBusinessDays"
+              type="number"
+              min="1"
+              max="10"
+              required
+              defaultValue={seller.handlingTimeBusinessDays}
+            />
+          </label>
+        </div>
         <label>
           Shipping summary
           <textarea

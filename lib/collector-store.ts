@@ -8,6 +8,7 @@ import {
   orders,
   productImages,
   products,
+  sellerFeedback,
   sellers,
   wantedRequests,
   wishlistItems,
@@ -356,9 +357,20 @@ export async function getGarageData(userId: string) {
     db.select().from(sellers).where(eq(sellers.ownerUserId, userId)).limit(1),
   ]);
   const ids = orderRows.map((order) => order.id);
-  const items = ids.length
-    ? await db.select().from(orderItems).where(inArray(orderItems.orderId, ids))
-    : [];
+  const [items, feedbackRows] = ids.length
+    ? await Promise.all([
+        db.select().from(orderItems).where(inArray(orderItems.orderId, ids)),
+        db
+          .select({
+            orderId: sellerFeedback.orderId,
+            rating: sellerFeedback.rating,
+            comment: sellerFeedback.comment,
+            updatedAt: sellerFeedback.updatedAt,
+          })
+          .from(sellerFeedback)
+          .where(inArray(sellerFeedback.orderId, ids)),
+      ])
+    : [[], []];
   const seller = sellerRows[0] ?? null;
   const listingRows = seller
     ? await db
@@ -410,6 +422,8 @@ export async function getGarageData(userId: string) {
     orders: orderRows.map((order) => ({
       ...order,
       items: items.filter((item) => item.orderId === order.id),
+      feedback:
+        feedbackRows.find((feedback) => feedback.orderId === order.id) ?? null,
     })),
     hunts: huntRows,
     seller,

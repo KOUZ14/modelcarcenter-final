@@ -15,6 +15,7 @@ import {
   type StripeCheckoutSession,
 } from "./stripe";
 import type { ShippingAddress } from "./types";
+import { addBusinessDays } from "./reputation-rules";
 
 type StripeEvent = { id: string; type: string; data: { object: Record<string, unknown> } };
 
@@ -138,6 +139,7 @@ async function finalizePaidCheckout(event: StripeEvent, session: StripeCheckoutS
       buyerUserId: checkoutReservations.buyerUserId,
       sellerName: sellers.storeName,
       sellerEmail: sellers.contactEmail,
+      handlingTimeBusinessDays: sellers.handlingTimeBusinessDays,
     })
     .from(checkoutReservations)
     .innerJoin(sellers, eq(checkoutReservations.sellerId, sellers.id))
@@ -172,6 +174,11 @@ async function finalizePaidCheckout(event: StripeEvent, session: StripeCheckoutS
     session,
     reservation.platformFeeCents,
   );
+  const paidAt = new Date();
+  const shipByAt = addBusinessDays(
+    paidAt,
+    reservation.handlingTimeBusinessDays,
+  );
   const d1 = getD1();
   const pendingGuard = `EXISTS (SELECT 1 FROM checkout_reservations WHERE id = ? AND status = 'pending')`;
   const statements = [d1.prepare("INSERT INTO stripe_events (id, type) VALUES (?, ?)").bind(event.id, event.type)];
@@ -192,13 +199,14 @@ async function finalizePaidCheckout(event: StripeEvent, session: StripeCheckoutS
       (id, order_number, seller_id, buyer_user_id, stripe_checkout_session_id, stripe_payment_intent_id, stripe_charge_id,
        buyer_email, currency, subtotal_cents, shipping_cents, marketplace_fee_bps, platform_fee_cents,
        payment_processing_fee_cents, seller_proceeds_cents, tax_cents, total_cents,
-       payment_status, fulfillment_status, buyer_name, shipping_address, paid_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'paid', 'unfulfilled', ?, ?, CURRENT_TIMESTAMP)`)
+       payment_status, fulfillment_status, buyer_name, shipping_address, paid_at, ship_by_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'paid', 'unfulfilled', ?, ?, ?, ?)`)
       .bind(orderId, orderNumber, reservation.sellerId, reservation.buyerUserId, session.id, intent, charge, buyerEmail,
         session.currency ?? reservation.currency, reservation.subtotalCents, reservation.shippingCents,
         reservation.marketplaceFeeBps, reservation.platformFeeCents,
         settlement.paymentProcessingFeeCents, settlement.sellerProceedsCents,
-        taxCents, totalCents, shipping.name ?? "", JSON.stringify(shipping)),
+        taxCents, totalCents, shipping.name ?? "", JSON.stringify(shipping),
+        paidAt.toISOString(), shipByAt.toISOString()),
   );
   for (const item of items) {
     statements.push(

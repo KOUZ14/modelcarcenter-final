@@ -14,6 +14,7 @@ import { readJsonObject, routeError } from "@/lib/http";
 import { cleanText, optionalHttpUrl, requiredString, ValidationError } from "@/lib/validation";
 import { deactivateCollectorListing } from "@/lib/listings";
 import { shipOwnedStoreOrder } from "@/lib/store";
+import { saveVerifiedPurchaseFeedback } from "@/lib/reputation";
 
 export const dynamic = "force-dynamic";
 
@@ -103,6 +104,12 @@ export async function POST(request: Request) {
     }
     if (action === "ship_sale") {
       return Response.json({ ok: true, ...await shipOwnedStoreOrder(collector.user.id, payload) });
+    }
+    if (action === "seller_feedback") {
+      return Response.json({
+        ok: true,
+        ...(await saveVerifiedPurchaseFeedback(collector.user.id, payload)),
+      });
     }
     if (action === "deactivate_listing") {
       await deactivateCollectorListing(collector.user.id, requiredString(payload.productId, "productId", 100));

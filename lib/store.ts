@@ -362,6 +362,12 @@ export async function saveStoreProfile(
       payload.defaultShipping,
       "default shipping",
     ),
+    handlingTimeBusinessDays: integer(
+      payload.handlingTimeBusinessDays,
+      "handling time",
+      1,
+      10,
+    ),
     shippingOriginCountry: requiredString(
       payload.shippingOriginCountry || "US",
       "shippingOriginCountry",

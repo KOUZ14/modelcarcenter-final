@@ -22,5 +22,9 @@ test("the built artifact contains the real marketplace and no starter preview ma
   assert.match(source, /Find model cars from independent sellers in one place/i);
   assert.match(source, /Every live listing\. One place\./i);
   assert.match(source, /\/marketplace/i);
+  assert.match(source, /Verified marketplace record/i);
+  assert.match(source, /Completed transactions/i);
+  assert.match(source, /On-time shipment/i);
+  assert.match(source, /Resolved cases/i);
   assert.doesNotMatch(source, /codex-preview/i);
 });

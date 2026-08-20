@@ -158,7 +158,7 @@ function GarageView({
       />
     );
   if (view === "hunts") return <Hunts rows={data.hunts} />;
-  if (view === "orders") return <Orders rows={data.orders} />;
+  if (view === "orders") return <Orders rows={data.orders} action={action} />;
   if (view === "listings")
     return (
       <Listings rows={data.listings} seller={data.seller} action={action} />
@@ -314,7 +314,13 @@ function Hunts({ rows }: { rows: GarageData["hunts"] }) {
   );
 }
 
-function Orders({ rows }: { rows: GarageData["orders"] }) {
+function Orders({
+  rows,
+  action,
+}: {
+  rows: GarageData["orders"];
+  action(payload: Record<string, unknown>): Promise<unknown>;
+}) {
   if (!rows.length)
     return (
       <EmptyOrCount
@@ -374,10 +380,91 @@ function Orders({ rows }: { rows: GarageData["orders"] }) {
             <Link className="button outline small" href={`/resolution?order=${String(order.id)}`}>
               Get help with this order
             </Link>
+            {["paid", "partially_refunded"].includes(
+              String(order.paymentStatus),
+            ) &&
+              ["shipped", "delivered"].includes(
+                String(order.fulfillmentStatus),
+              ) && (
+                <VerifiedFeedbackForm order={order} action={action} />
+              )}
           </article>
         ))}
       </div>
     </div>
+  );
+}
+
+function VerifiedFeedbackForm({
+  order,
+  action,
+}: {
+  order: GarageData["orders"][number];
+  action(payload: Record<string, unknown>): Promise<unknown>;
+}) {
+  const existing = order.feedback as
+    | { rating?: number; comment?: string }
+    | null
+    | undefined;
+  const [rating, setRating] = useState(Number(existing?.rating ?? 5));
+  const [comment, setComment] = useState(String(existing?.comment ?? ""));
+  const [saved, setSaved] = useState(Boolean(existing));
+  const [busy, setBusy] = useState(false);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    try {
+      await action({
+        action: "seller_feedback",
+        orderId: String(order.id),
+        rating,
+        comment,
+      });
+      setSaved(true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <details className="verified-feedback-form" open={!saved}>
+      <summary>{saved ? "Edit verified feedback" : "Leave verified feedback"}</summary>
+      <form onSubmit={submit}>
+        <p>
+          Your feedback will carry a Verified purchase label because it is tied
+          to order {String(order.orderNumber)}.
+        </p>
+        <label>
+          Rating
+          <select
+            value={rating}
+            onChange={(event) => setRating(Number(event.target.value))}
+          >
+            <option value={5}>5 — Excellent</option>
+            <option value={4}>4 — Good</option>
+            <option value={3}>3 — Fair</option>
+            <option value={2}>2 — Poor</option>
+            <option value={1}>1 — Very poor</option>
+          </select>
+        </label>
+        <label>
+          Feedback
+          <textarea
+            value={comment}
+            onChange={(event) => setComment(event.target.value)}
+            minLength={10}
+            maxLength={1000}
+            rows={4}
+            required
+            placeholder="Describe the item, packing, communication, and shipping experience."
+          />
+        </label>
+        <button className="button dark small" disabled={busy}>
+          {busy ? "Saving…" : saved ? "Update feedback" : "Publish feedback"}
+        </button>
+      </form>
+    </details>
   );
 }
 

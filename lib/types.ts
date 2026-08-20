@@ -41,6 +41,7 @@ export type ProductSummary = {
   primaryImageUrl: string | null;
   keywords: string;
   defaultShippingCents: number;
+  handlingTimeBusinessDays: number;
   createdAt: string;
 };
 

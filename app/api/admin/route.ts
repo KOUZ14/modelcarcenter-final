@@ -643,6 +643,12 @@ async function saveSeller(payload: Record<string, unknown>) {
       0,
       1_000_000,
     ),
+    handlingTimeBusinessDays: integer(
+      payload.handlingTimeBusinessDays,
+      "handlingTimeBusinessDays",
+      1,
+      10,
+    ),
     shippingPolicySummary: cleanText(payload.shippingPolicySummary, 1_000),
     returnPolicySummary: cleanText(payload.returnPolicySummary, 1_000),
   };
