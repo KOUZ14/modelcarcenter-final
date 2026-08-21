@@ -4,6 +4,7 @@ import {
   eq,
   inArray,
   isNotNull,
+  or,
   sql,
 } from "drizzle-orm";
 import { getDb } from "@/db";
@@ -16,8 +17,10 @@ import {
 } from "@/db/schema";
 import {
   canLeaveVerifiedFeedback,
+  getVerifiedFeedbackEligibility,
   percentage,
   publicCollectorName,
+  VERIFIED_FEEDBACK_WAIT_DAYS,
 } from "./reputation-rules";
 import {
   integer,
@@ -49,6 +52,17 @@ export async function getSellerReputation(
   sellerId: string,
 ): Promise<SellerReputation | null> {
   const db = getDb();
+  const feedbackWaitingPeriodStart = new Date(
+    Date.now() - VERIFIED_FEEDBACK_WAIT_DAYS * 24 * 60 * 60 * 1_000,
+  ).toISOString();
+  const eligibleFeedbackDelivery = or(
+    eq(orders.fulfillmentStatus, "delivered"),
+    and(
+      eq(orders.fulfillmentStatus, "shipped"),
+      isNotNull(orders.shippedAt),
+      sql`julianday(${orders.shippedAt}) <= julianday(${feedbackWaitingPeriodStart})`,
+    ),
+  );
   const [sellerRows, completedRows, shippingRows, caseRows, feedbackRows, recentRows] =
     await Promise.all([
       db
@@ -96,7 +110,13 @@ export async function getSellerReputation(
           average: sql<number | null>`avg(${sellerFeedback.rating})`,
         })
         .from(sellerFeedback)
-        .where(eq(sellerFeedback.sellerId, sellerId)),
+        .innerJoin(orders, eq(sellerFeedback.orderId, orders.id))
+        .where(
+          and(
+            eq(sellerFeedback.sellerId, sellerId),
+            eligibleFeedbackDelivery,
+          ),
+        ),
       db
         .select({
           id: sellerFeedback.id,
@@ -106,11 +126,17 @@ export async function getSellerReputation(
           displayName: collectorProfiles.displayName,
         })
         .from(sellerFeedback)
+        .innerJoin(orders, eq(sellerFeedback.orderId, orders.id))
         .leftJoin(
           collectorProfiles,
           eq(sellerFeedback.buyerUserId, collectorProfiles.userId),
         )
-        .where(eq(sellerFeedback.sellerId, sellerId))
+        .where(
+          and(
+            eq(sellerFeedback.sellerId, sellerId),
+            eligibleFeedbackDelivery,
+          ),
+        )
         .orderBy(desc(sellerFeedback.createdAt))
         .limit(6),
     ]);
@@ -158,6 +184,7 @@ export async function saveVerifiedPurchaseFeedback(
       sellerId: orders.sellerId,
       paymentStatus: orders.paymentStatus,
       fulfillmentStatus: orders.fulfillmentStatus,
+      shippedAt: orders.shippedAt,
     })
     .from(orders)
     .where(and(eq(orders.id, orderId), eq(orders.buyerUserId, buyerUserId)))
@@ -165,10 +192,20 @@ export async function saveVerifiedPurchaseFeedback(
   const order = orderRows[0];
   if (!order)
     throw new ValidationError("This order is not connected to your account.");
-  if (!canLeaveVerifiedFeedback(order))
+  if (!canLeaveVerifiedFeedback(order)) {
+    const eligibility = getVerifiedFeedbackEligibility(order);
+    const fallbackDate = eligibility.eligibleAt
+      ? new Intl.DateTimeFormat("en-US", {
+          dateStyle: "medium",
+          timeZone: "UTC",
+        }).format(new Date(eligibility.eligibleAt))
+      : null;
     throw new ValidationError(
-      "Verified feedback is available after the seller ships your paid order.",
+      fallbackDate
+        ? `Verified feedback becomes available after carrier-confirmed delivery, or on ${fallbackDate} if no delivery event arrives.`
+        : "Verified feedback becomes available after carrier-confirmed delivery.",
     );
+  }
   const now = new Date().toISOString();
   const id = crypto.randomUUID();
   await db

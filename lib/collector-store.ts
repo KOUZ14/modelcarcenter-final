@@ -22,6 +22,7 @@ import {
   uniqueWishlistIds,
 } from "./account-rules";
 import { loadAuthoritativeCart, type RequestedCartItem } from "./inventory";
+import { getVerifiedFeedbackEligibility } from "./reputation-rules";
 import type { CartItem } from "./types";
 import { normalizeEmail } from "./validation";
 
@@ -328,6 +329,7 @@ export async function getGarageData(userId: string) {
         refundedAmountCents: orders.refundedAmountCents,
         paymentStatus: orders.paymentStatus,
         fulfillmentStatus: orders.fulfillmentStatus,
+        shippedAt: orders.shippedAt,
         carrier: orders.carrier,
         trackingNumber: orders.trackingNumber,
         createdAt: orders.createdAt,
@@ -449,6 +451,7 @@ export async function getGarageData(userId: string) {
     wishlist,
     orders: orderRows.map((order) => ({
       ...order,
+      feedbackEligibility: getVerifiedFeedbackEligibility(order),
       items: items.filter((item) => item.orderId === order.id),
       feedback:
         feedbackRows.find((feedback) => feedback.orderId === order.id) ?? null,

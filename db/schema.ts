@@ -951,6 +951,56 @@ export const resolutionFiles = sqliteTable(
   ],
 );
 
+export const resolutionNotifications = sqliteTable(
+  "resolution_notifications",
+  {
+    id: text("id").primaryKey(),
+    caseId: text("case_id")
+      .notNull()
+      .references(() => resolutionCases.id, { onDelete: "cascade" }),
+    eventKey: text("event_key").notNull(),
+    kind: text("kind", {
+      enum: [
+        "case_opened",
+        "response",
+        "evidence",
+        "return_authorized",
+        "escalation",
+        "refund",
+        "deadline",
+      ],
+    }).notNull(),
+    recipientRole: text("recipient_role", {
+      enum: ["buyer", "seller", "support"],
+    }).notNull(),
+    recipientEmail: text("recipient_email").notNull(),
+    message: text("message"),
+    deadlineAt: text("deadline_at"),
+    status: text("status", { enum: ["pending", "sent"] })
+      .notNull()
+      .default("pending"),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    lastError: text("last_error"),
+    sentAt: text("sent_at"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("resolution_notifications_event_unique").on(table.eventKey),
+    index("resolution_notifications_pending_idx").on(
+      table.status,
+      table.createdAt,
+    ),
+    index("resolution_notifications_case_idx").on(
+      table.caseId,
+      table.createdAt,
+    ),
+    check(
+      "resolution_notifications_attempts_nonnegative",
+      sql`${table.attemptCount} >= 0`,
+    ),
+  ],
+);
+
 export const resolutionRefunds = sqliteTable(
   "resolution_refunds",
   {

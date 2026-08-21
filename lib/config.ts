@@ -26,8 +26,8 @@ export function parseFeeBasisPoints(
 
 export const config = {
   siteUrl: textEnv("SITE_URL", "http://localhost:5173").replace(/\/$/, ""),
-  supportEmail: textEnv("SUPPORT_EMAIL", "help@modelcarcenter.com"),
-  emailFrom: textEnv("EMAIL_FROM", "Model Car Center <orders@modelcarcenter.com>"),
+  supportEmail: textEnv("SUPPORT_EMAIL", "support@modelcarcenter.com"),
+  emailFrom: textEnv("EMAIL_FROM", "Model Car Center <support@modelcarcenter.com>"),
   resendApiKey: textEnv("RESEND_API_KEY"),
   betterAuthSecret: textEnv("BETTER_AUTH_SECRET"),
   stripeSecretKey: textEnv("STRIPE_SECRET_KEY"),

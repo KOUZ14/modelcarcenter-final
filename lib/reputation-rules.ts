@@ -1,6 +1,24 @@
 const COMPLETED_FULFILLMENT_STATUSES = new Set(["shipped", "delivered"]);
 const ELIGIBLE_PAYMENT_STATUSES = new Set(["paid", "partially_refunded"]);
 
+export const VERIFIED_FEEDBACK_WAIT_DAYS = 14;
+
+type FeedbackOrder = {
+  paymentStatus: string;
+  fulfillmentStatus: string;
+  shippedAt?: string | null;
+};
+
+export type VerifiedFeedbackEligibility = {
+  eligible: boolean;
+  eligibleAt: string | null;
+  basis:
+    | "carrier_confirmed_delivery"
+    | "waiting_period_elapsed"
+    | "awaiting_delivery"
+    | "ineligible_payment";
+};
+
 export function addBusinessDays(start: Date, businessDays: number) {
   const result = new Date(start);
   let remaining = Math.max(1, Math.trunc(businessDays));
@@ -27,11 +45,49 @@ export function isCompletedTransaction(order: {
   );
 }
 
-export function canLeaveVerifiedFeedback(order: {
-  paymentStatus: string;
-  fulfillmentStatus: string;
-}) {
-  return isCompletedTransaction(order);
+export function getVerifiedFeedbackEligibility(
+  order: FeedbackOrder,
+  now = new Date(),
+): VerifiedFeedbackEligibility {
+  if (!ELIGIBLE_PAYMENT_STATUSES.has(order.paymentStatus)) {
+    return {
+      eligible: false,
+      eligibleAt: null,
+      basis: "ineligible_payment",
+    };
+  }
+  // In this system, only carrier tracking updates set an order to delivered.
+  if (order.fulfillmentStatus === "delivered") {
+    return {
+      eligible: true,
+      eligibleAt: null,
+      basis: "carrier_confirmed_delivery",
+    };
+  }
+  const shippedAt = Date.parse(order.shippedAt ?? "");
+  if (order.fulfillmentStatus !== "shipped" || !Number.isFinite(shippedAt)) {
+    return {
+      eligible: false,
+      eligibleAt: null,
+      basis: "awaiting_delivery",
+    };
+  }
+  const eligibleAt = new Date(
+    shippedAt + VERIFIED_FEEDBACK_WAIT_DAYS * 24 * 60 * 60 * 1_000,
+  );
+  const eligible = now.getTime() >= eligibleAt.getTime();
+  return {
+    eligible,
+    eligibleAt: eligibleAt.toISOString(),
+    basis: eligible ? "waiting_period_elapsed" : "awaiting_delivery",
+  };
+}
+
+export function canLeaveVerifiedFeedback(
+  order: FeedbackOrder,
+  now = new Date(),
+) {
+  return getVerifiedFeedbackEligibility(order, now).eligible;
 }
 
 export function publicCollectorName(value: string | null | undefined) {

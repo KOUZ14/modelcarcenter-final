@@ -388,18 +388,40 @@ function Orders({
             <Link className="button outline small" href={`/resolution?order=${String(order.id)}`}>
               Get help with this order
             </Link>
-            {["paid", "partially_refunded"].includes(
-              String(order.paymentStatus),
-            ) &&
-              ["shipped", "delivered"].includes(
-                String(order.fulfillmentStatus),
-              ) && (
-                <VerifiedFeedbackForm order={order} action={action} />
-              )}
+            <VerifiedFeedbackAvailability order={order} action={action} />
           </article>
         ))}
       </div>
     </div>
+  );
+}
+
+function VerifiedFeedbackAvailability({
+  order,
+  action,
+}: {
+  order: GarageData["orders"][number];
+  action(payload: Record<string, unknown>): Promise<unknown>;
+}) {
+  if (
+    !["paid", "partially_refunded"].includes(String(order.paymentStatus)) ||
+    !["shipped", "delivered"].includes(String(order.fulfillmentStatus))
+  ) {
+    return null;
+  }
+  const eligibility = order.feedbackEligibility as
+    | { eligible?: boolean; eligibleAt?: string | null }
+    | undefined;
+  if (eligibility?.eligible) {
+    return <VerifiedFeedbackForm order={order} action={action} />;
+  }
+  return (
+    <p className="form-note">
+      Verified feedback opens after the carrier confirms delivery
+      {eligibility?.eligibleAt
+        ? `, or on ${date(String(eligibility.eligibleAt))} if no delivery event arrives.`
+        : "."}
+    </p>
   );
 }
 

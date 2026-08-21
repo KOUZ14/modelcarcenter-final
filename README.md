@@ -66,7 +66,7 @@ Copy `.env.example` to `.env.local`. Never commit real values.
 | --- | --- |
 | `SITE_URL` | Public origin used in Checkout returns, email links, canonical URLs, and sitemap |
 | `BETTER_AUTH_SECRET` | High-entropy secret (at least 32 characters) used to sign collector sessions and auth state |
-| `SUPPORT_EMAIL` | Customer-facing support address |
+| `SUPPORT_EMAIL` | Customer-facing support and email reply-to address; use `support@modelcarcenter.com` |
 | `ADMIN_EMAILS` | Comma-separated ChatGPT-authenticated emails allowed into `/admin` |
 | `ADMIN_DEV_BYPASS` | Explicit local-only bypass; ignored when `NODE_ENV=production` |
 | `STRIPE_SECRET_KEY` | Platform secret key; test key during development |
@@ -87,7 +87,7 @@ Copy `.env.example` to `.env.local`. Never commit real values.
 | `SHIPPO_QUOTE_EXPIRATION_MINUTES` | Local rate-selection window; default `20` minutes |
 | `SHIPPO_MAX_LABEL_COST_CENTS` | Hard server-side purchase limit per label; default `10000` ($100) |
 | `RESEND_API_KEY` | Resend API key |
-| `EMAIL_FROM` | Verified sender, such as `Model Car Center <orders@example.com>` |
+| `EMAIL_FROM` | Verified sender; use `Model Car Center <support@modelcarcenter.com>` |
 
 Hosted runtime values are configured through OpenAI Sites rather than committed env files.
 
@@ -154,6 +154,8 @@ Before requesting rates, complete the ship-from address, carrier phone, and defa
 Combined shipping is available for up to ten open orders only when seller, currency, normalized buyer email, and normalized delivery address all match. One Shippo transaction and tracking number is then linked to every included order.
 
 Label creation moves orders to `processing`; it does not satisfy the handling deadline. Orders become `shipped` only after Shippo reports carrier transit, and `delivered` after a delivery event. Sellers can manually refresh tracking from the order view. For automatic events, create a Shippo `track_updated` webhook pointing to:
+
+Verified-purchase feedback does not unlock when an order is merely marked `shipped`. Publishing is allowed after the carrier changes the order to `delivered`, with a 14-calendar-day fallback from `shipped_at` so a missing final carrier scan cannot block the buyer indefinitely. The same delivery eligibility rule protects the write endpoint and filters public seller reputation.
 
 ```text
 https://YOUR_DOMAIN/api/shippo/webhook?token=YOUR_SHIPPO_WEBHOOK_SECRET
@@ -230,12 +232,18 @@ Use Stripe test mode and test payment methods until every seller/account, webhoo
 
 Full admin refunds are available only for paid, unrefunded orders. The server uses Stripe idempotency, reverses the seller transfer, refunds the application fee, and optionally restocks inventory after Stripe reports success. Partial refunds and disputes remain in the Stripe Dashboard for V1.
 
+## Resolution notifications
+
+Resolution Center updates queue transactional email for the affected party when a case is opened, the seller responds, either party adds evidence, a return is authorized, a case is escalated, or a refund is recorded. Escalations also notify the monitored support inbox. Each message links directly to the shared case timeline.
+
+The worker checks once an hour for active seller-response, buyer-evidence, buyer-escalation, and return-shipment deadlines that are less than 24 hours away. Reminder records and case-event emails use a durable D1 outbox, so repeated runs are idempotent and delivery failures remain pending for a later retry.
+
 ## Resend
 
 1. Verify the sender domain in Resend.
 2. Create an API key and set `RESEND_API_KEY`.
-3. Set `EMAIL_FROM` to an address on the verified domain.
-4. Set `SUPPORT_EMAIL` to the monitored support inbox.
+3. Set `EMAIL_FROM` to `Model Car Center <support@modelcarcenter.com>`.
+4. Set `SUPPORT_EMAIL` to the monitored `support@modelcarcenter.com` inbox. All notification replies are routed there.
 
 When Resend is absent in development, the email abstraction logs a clear skipped-email message and returns `sent: false`. Admin actions that require a real notification, such as notifying a Model Hunt collector, do not mark the collector notified when email is unavailable.
 

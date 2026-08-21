@@ -386,7 +386,7 @@ function Sellers({
                         </b>
                         <br />
                         <small>
-                          {shortDate(seller.foundingRateStartsAt)} â€“{" "}
+                          {shortDate(seller.foundingRateStartsAt)} –{" "}
                           {shortDate(seller.foundingRateEndsAt)}
                         </small>
                       </>

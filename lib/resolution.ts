@@ -9,6 +9,7 @@ import {
   resolutionRefunds,
   sellers,
 } from "@/db/schema";
+import { config } from "./config";
 import { POLICY_VERSION } from "./legal";
 import {
   addCalendarDays,
@@ -26,6 +27,10 @@ import {
   type ProtectionReason,
   type RequestedResolution,
 } from "./protection";
+import {
+  prepareResolutionNotification,
+  safelyDeliverResolutionNotifications,
+} from "./resolution-notifications";
 import { createOrderRefund } from "./stripe";
 import {
   cleanText,
@@ -201,7 +206,11 @@ export async function openResolutionCase(input: {
 
   const db = getDb();
   const rows = await db
-    .select({ order: orders, sellerName: sellers.storeName })
+    .select({
+      order: orders,
+      sellerName: sellers.storeName,
+      sellerEmail: sellers.contactEmail,
+    })
     .from(orders)
     .innerJoin(sellers, eq(orders.sellerId, sellers.id))
     .where(and(eq(orders.id, orderId), eq(orders.buyerUserId, input.userId)))
@@ -247,6 +256,7 @@ export async function openResolutionCase(input: {
   const now = new Date();
   const caseId = crypto.randomUUID();
   const caseNumber = makeCaseNumber(now);
+  const notificationId = crypto.randomUUID();
   const prepared = await storeResolutionFiles({
     storage: input.storage,
     caseId,
@@ -305,6 +315,16 @@ export async function openResolutionCase(input: {
             now.toISOString(),
           ),
       ),
+      prepareResolutionNotification(d1, {
+        id: notificationId,
+        caseId,
+        eventKey: `resolution:${caseId}:case-opened`,
+        kind: "case_opened",
+        recipientRole: "seller",
+        recipientEmail: row.sellerEmail,
+        message: details,
+        deadlineAt: addCalendarDays(now, SELLER_RESPONSE_DAYS),
+      }),
     ];
     await d1.batch(statements);
   } catch (error) {
@@ -313,6 +333,7 @@ export async function openResolutionCase(input: {
     );
     throw error;
   }
+  await safelyDeliverResolutionNotifications([notificationId]);
   return { caseId, caseNumber };
 }
 
@@ -338,6 +359,7 @@ export async function addResolutionEvidence(input: {
     caseId: input.caseId,
     files: input.files,
   });
+  const notificationId = crypto.randomUUID();
   const now = new Date().toISOString();
   try {
     const d1 = getD1();
@@ -386,6 +408,18 @@ export async function addResolutionEvidence(input: {
           "UPDATE resolution_cases SET updated_at = ? WHERE id = ?",
         )
         .bind(now, input.caseId),
+      prepareResolutionNotification(d1, {
+        id: notificationId,
+        caseId: input.caseId,
+        eventKey: `resolution:${input.caseId}:evidence:${prepared[0].id}`,
+        kind: "evidence",
+        recipientRole: access.role === "buyer" ? "seller" : "buyer",
+        recipientEmail:
+          access.role === "buyer"
+            ? access.seller.contactEmail
+            : access.order.buyerEmail,
+        message: `${prepared.length} evidence file${prepared.length === 1 ? " was" : "s were"} added${caption ? `: ${caption}` : "."}`,
+      }),
     ]);
   } catch (error) {
     await Promise.allSettled(
@@ -393,6 +427,7 @@ export async function addResolutionEvidence(input: {
     );
     throw error;
   }
+  await safelyDeliverResolutionNotifications([notificationId]);
   return { uploaded: prepared.length };
 }
 
@@ -409,15 +444,17 @@ export async function respondToResolutionCase(
   const now = new Date();
   const nextStatus =
     access.case.status === "under_review" ? "under_review" : "awaiting_buyer";
-  await getD1().batch([
-    getD1()
+  const notificationId = crypto.randomUUID();
+  const d1 = getD1();
+  await d1.batch([
+    d1
       .prepare(
         `INSERT INTO resolution_messages
         (id, case_id, author_user_id, author_role, kind, body, created_at)
         VALUES (?, ?, ?, 'seller', 'seller_response', ?, ?)`,
       )
       .bind(crypto.randomUUID(), caseId, userId, response, now.toISOString()),
-    getD1()
+    d1
       .prepare(
         `UPDATE resolution_cases
         SET status = ?, buyer_escalate_by = ?, updated_at = ? WHERE id = ?`,
@@ -428,7 +465,18 @@ export async function respondToResolutionCase(
         now.toISOString(),
         caseId,
       ),
+    prepareResolutionNotification(d1, {
+      id: notificationId,
+      caseId,
+      eventKey: `resolution:${caseId}:response:${notificationId}`,
+      kind: "response",
+      recipientRole: "buyer",
+      recipientEmail: access.order.buyerEmail,
+      message: response,
+      deadlineAt: addCalendarDays(now, BUYER_ESCALATION_DAYS),
+    }),
   ]);
+  await safelyDeliverResolutionNotifications([notificationId]);
   return { caseId, status: nextStatus };
 }
 
@@ -457,6 +505,7 @@ export async function authorizeResolutionReturn(input: {
   const now = new Date();
   const authorizationNumber = makeReturnAuthorizationNumber(access.case.caseNumber);
   const buyerShipBy = addCalendarDays(now, RETURN_SHIP_DAYS);
+  const notificationId = crypto.randomUUID();
   try {
     const d1 = getD1();
     await d1.batch([
@@ -504,11 +553,22 @@ export async function authorizeResolutionReturn(input: {
           now.toISOString(),
           caseId,
         ),
+      prepareResolutionNotification(d1, {
+        id: notificationId,
+        caseId,
+        eventKey: `resolution:${caseId}:return-authorized:${authorizationNumber}`,
+        kind: "return_authorized",
+        recipientRole: "buyer",
+        recipientEmail: access.order.buyerEmail,
+        message: `${authorizationNumber}: ${instructions}`,
+        deadlineAt: buyerShipBy,
+      }),
     ]);
   } catch (error) {
     await input.storage.delete(file.storageKey);
     throw error;
   }
+  await safelyDeliverResolutionNotifications([notificationId]);
   return { caseId, authorizationNumber, buyerShipBy };
 }
 
@@ -571,19 +631,44 @@ export async function escalateResolutionCase(
     );
   const reason = cleanText(payload.message, 1_500) || "Buyer requested platform review.";
   const now = new Date().toISOString();
-  await getD1().batch([
-    getD1()
+  const sellerNotificationId = crypto.randomUUID();
+  const supportNotificationId = crypto.randomUUID();
+  const d1 = getD1();
+  await d1.batch([
+    d1
       .prepare(
         "UPDATE resolution_cases SET status = 'under_review', updated_at = ? WHERE id = ?",
       )
       .bind(now, caseId),
-    getD1()
+    d1
       .prepare(
         `INSERT INTO resolution_messages
         (id, case_id, author_user_id, author_role, kind, body, created_at)
         VALUES (?, ?, ?, 'buyer', 'escalation', ?, ?)`,
       )
       .bind(crypto.randomUUID(), caseId, userId, reason, now),
+    prepareResolutionNotification(d1, {
+      id: sellerNotificationId,
+      caseId,
+      eventKey: `resolution:${caseId}:escalation:${sellerNotificationId}:seller`,
+      kind: "escalation",
+      recipientRole: "seller",
+      recipientEmail: access.seller.contactEmail,
+      message: reason,
+    }),
+    prepareResolutionNotification(d1, {
+      id: supportNotificationId,
+      caseId,
+      eventKey: `resolution:${caseId}:escalation:${sellerNotificationId}:support`,
+      kind: "escalation",
+      recipientRole: "support",
+      recipientEmail: config.supportEmail,
+      message: reason,
+    }),
+  ]);
+  await safelyDeliverResolutionNotifications([
+    sellerNotificationId,
+    supportNotificationId,
   ]);
   return { caseId, status: "under_review" };
 }
@@ -653,6 +738,7 @@ export async function issueResolutionRefund(
   const now = new Date().toISOString();
   const summary = `${requestedKind === "full" ? "Full" : "Partial"} refund of ${formatRefundAmount(amountCents, access.order.currency)} ${succeeded ? "issued" : "submitted"} to the original payment method.`;
   const d1 = getD1();
+  const notificationId = crypto.randomUUID();
   const statements = [
     d1
       .prepare(
@@ -691,6 +777,15 @@ export async function issueResolutionRefund(
         now,
         caseId,
       ),
+    prepareResolutionNotification(d1, {
+      id: notificationId,
+      caseId,
+      eventKey: `resolution:${caseId}:refund:${refund.id}:buyer`,
+      kind: "refund",
+      recipientRole: "buyer",
+      recipientEmail: access.order.buyerEmail,
+      message: summary,
+    }),
   ];
   if (succeeded) {
     statements.push(
@@ -709,6 +804,7 @@ export async function issueResolutionRefund(
     );
   }
   await d1.batch(statements);
+  await safelyDeliverResolutionNotifications([notificationId]);
   return {
     caseId,
     refundId: refund.id,
@@ -807,9 +903,10 @@ export async function decideAdminResolutionCase(
   if (summary.length < 10)
     throw new ValidationError("Provide an outcome explanation of at least 10 characters.");
   const rows = await getDb()
-    .select({ case: resolutionCases, order: orders })
+    .select({ case: resolutionCases, order: orders, seller: sellers })
     .from(resolutionCases)
     .innerJoin(orders, eq(resolutionCases.orderId, orders.id))
+    .innerJoin(sellers, eq(orders.sellerId, sellers.id))
     .where(eq(resolutionCases.id, caseId))
     .limit(1);
   const row = rows[0];
@@ -865,6 +962,8 @@ export async function decideAdminResolutionCase(
   const full = newRefundedAmount >= row.order.totalCents;
   const status = succeeded ? "resolved" : "under_review";
   const message = `${summary}\n\n${formatRefundAmount(amountCents, row.order.currency)} ${succeeded ? "refunded" : "refund submitted"} to the original payment method.`;
+  const buyerNotificationId = crypto.randomUUID();
+  const sellerNotificationId = crypto.randomUUID();
   const statements = [
     d1
       .prepare(
@@ -896,6 +995,24 @@ export async function decideAdminResolutionCase(
         resolved_at = ?, updated_at = ? WHERE id = ?`,
       )
       .bind(status, message, succeeded ? now : null, now, caseId),
+    prepareResolutionNotification(d1, {
+      id: buyerNotificationId,
+      caseId,
+      eventKey: `resolution:${caseId}:refund:${refund.id}:buyer`,
+      kind: "refund",
+      recipientRole: "buyer",
+      recipientEmail: row.order.buyerEmail,
+      message,
+    }),
+    prepareResolutionNotification(d1, {
+      id: sellerNotificationId,
+      caseId,
+      eventKey: `resolution:${caseId}:refund:${refund.id}:seller`,
+      kind: "refund",
+      recipientRole: "seller",
+      recipientEmail: row.seller.contactEmail,
+      message,
+    }),
   ];
   if (succeeded) {
     statements.push(
@@ -914,6 +1031,10 @@ export async function decideAdminResolutionCase(
     );
   }
   await d1.batch(statements);
+  await safelyDeliverResolutionNotifications([
+    buyerNotificationId,
+    sellerNotificationId,
+  ]);
   return { caseId, status, refundId: refund.id, refundStatus: refund.status };
 }
 

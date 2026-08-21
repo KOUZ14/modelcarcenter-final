@@ -1,5 +1,8 @@
 import { config } from "./config";
+import { escapeHtml, renderEmailHtml } from "./email-template";
 import type { ShippingAddress } from "./types";
+
+export { escapeHtml, renderEmailHtml } from "./email-template";
 
 type SendEmailInput = {
   to: string;
@@ -8,15 +11,6 @@ type SendEmailInput = {
   text: string;
   idempotencyKey?: string;
 };
-
-export function escapeHtml(value: unknown) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
 
 function money(cents: number, currency = "usd") {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: currency.toUpperCase() }).format(cents / 100);
@@ -51,7 +45,12 @@ export async function sendEmail(input: SendEmailInput) {
       to: [input.to],
       reply_to: config.supportEmail,
       subject: input.subject,
-      html: input.html,
+      html: renderEmailHtml(
+        input.subject,
+        input.html,
+        config.siteUrl,
+        config.supportEmail,
+      ),
       text: input.text,
     }),
   });

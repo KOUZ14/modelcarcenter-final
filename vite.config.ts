@@ -32,6 +32,9 @@ const localBindingConfig = {
         },
       ]
     : [],
+  triggers: {
+    crons: ["0 * * * *"],
+  },
 };
 
 export default defineConfig(async () => {
