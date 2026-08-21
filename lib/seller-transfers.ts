@@ -3,7 +3,7 @@ import {
   reverseSellerTransfer,
   sellerProceedsAfterRefund,
   sellerTransferReversalTarget,
-} from "./stripe";
+} from "./stripe.ts";
 
 const PROCESSING_RETRY_MINUTES = 15;
 const RELEASE_BATCH_SIZE = 50;
@@ -33,10 +33,21 @@ type TransferredOrder = {
   sellerProceedsCents: number;
 };
 
+export type SellerTransferGateway = {
+  create(input: Parameters<typeof createSellerTransfer>[0]): ReturnType<typeof createSellerTransfer>;
+  reverse(input: Parameters<typeof reverseSellerTransfer>[0]): ReturnType<typeof reverseSellerTransfer>;
+};
+
+const stripeTransferGateway: SellerTransferGateway = {
+  create: createSellerTransfer,
+  reverse: reverseSellerTransfer,
+};
+
 export async function processEligibleSellerTransfers(input: {
   database: D1Database;
   now?: Date;
   limit?: number;
+  gateway?: SellerTransferGateway;
 }) {
   const now = input.now ?? new Date();
   const nowIso = now.toISOString();
@@ -44,6 +55,7 @@ export async function processEligibleSellerTransfers(input: {
     now.getTime() - PROCESSING_RETRY_MINUTES * 60_000,
   ).toISOString();
   const limit = Math.min(RELEASE_BATCH_SIZE, Math.max(1, input.limit ?? RELEASE_BATCH_SIZE));
+  const gateway = input.gateway ?? stripeTransferGateway;
   const candidates = await input.database
     .prepare(
       `SELECT o.id, o.order_number AS orderNumber, o.seller_id AS sellerId,
@@ -147,7 +159,7 @@ export async function processEligibleSellerTransfers(input: {
         continue;
       }
 
-      const transfer = await createSellerTransfer({
+      const transfer = await gateway.create({
         orderId: order.id,
         orderNumber: order.orderNumber,
         sellerId: order.sellerId,
@@ -193,7 +205,7 @@ export async function processEligibleSellerTransfers(input: {
       });
       const alreadyReversed = latest?.sellerTransferReversedCents ?? 0;
       if (targetReversedCents > alreadyReversed) {
-        await reverseSellerTransfer({
+        await gateway.reverse({
           transferId: transfer.id,
           orderId: order.id,
           amountCents: targetReversedCents - alreadyReversed,
@@ -227,6 +239,7 @@ export async function processEligibleSellerTransfers(input: {
     database: input.database,
     nowIso,
     limit,
+    gateway,
   });
   return {
     considered: candidates.results?.length ?? 0,
@@ -241,6 +254,7 @@ async function reconcileTransferReversals(input: {
   database: D1Database;
   nowIso: string;
   limit: number;
+  gateway: SellerTransferGateway;
 }) {
   const rows = await input.database
     .prepare(
@@ -271,7 +285,7 @@ async function reconcileTransferReversals(input: {
     });
     if (targetReversedCents <= order.sellerTransferReversedCents) continue;
     try {
-      await reverseSellerTransfer({
+      await input.gateway.reverse({
         transferId: order.stripeTransferId,
         orderId: order.id,
         amountCents: targetReversedCents - order.sellerTransferReversedCents,

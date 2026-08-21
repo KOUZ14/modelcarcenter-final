@@ -14,6 +14,7 @@ import {
   retrieveCheckoutSession,
   reverseSellerTransfer,
   sellerTransferReversalTarget,
+  stripeSettlementDetails,
   stripeTransferGroup,
   type StripeCheckoutSession,
 } from "./stripe";
@@ -399,34 +400,6 @@ async function finalizePaidCheckout(event: StripeEvent, session: StripeCheckoutS
     })),
   });
   return { orderId, orderNumber };
-}
-
-export function stripeSettlementDetails(
-  session: StripeCheckoutSession,
-  expectedPlatformFeeCents: number,
-) {
-  const charge =
-    typeof session.payment_intent === "object" && session.payment_intent
-      ? session.payment_intent.latest_charge
-      : null;
-  const expandedCharge =
-    charge && typeof charge === "object" ? charge : null;
-  if (
-    expandedCharge?.application_fee_amount != null &&
-    expandedCharge.application_fee_amount !== expectedPlatformFeeCents
-  ) {
-    throw new Error("Stripe application fee does not match the reserved marketplace fee.");
-  }
-  const balanceTransaction = expandedCharge?.balance_transaction;
-  const paymentProcessingFeeCents =
-    balanceTransaction && typeof balanceTransaction === "object"
-      ? balanceTransaction.fee
-      : null;
-  const sellerProceedsCents =
-    session.amount_total == null
-      ? null
-      : Math.max(0, session.amount_total - expectedPlatformFeeCents);
-  return { paymentProcessingFeeCents, sellerProceedsCents };
 }
 
 function normalizeShipping(session: StripeCheckoutSession): ShippingAddress {

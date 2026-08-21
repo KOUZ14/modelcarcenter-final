@@ -8,7 +8,10 @@ import {
   foundingSellerRatePeriod,
   isEligibleForFoundingSellerRate,
 } from "../lib/fees.ts";
-import { buildCheckoutSessionBody } from "../lib/stripe.ts";
+import {
+  buildCheckoutSessionBody,
+  stripeSettlementDetails,
+} from "../lib/stripe.ts";
 
 const rates = {
   collectorMarketplaceFeeBps: 850,
@@ -150,6 +153,35 @@ test("Stripe Checkout keeps funds on-platform for a later seller transfer", () =
   );
 });
 
+test("seller settlement withholds marketplace tax and records processing separately", () => {
+  const settlement = stripeSettlementDetails(
+    {
+      id: "cs_taxed",
+      url: null,
+      payment_status: "paid",
+      status: "complete",
+      amount_total: 11_325,
+      total_details: { amount_tax: 825, amount_shipping: 500 },
+      payment_intent: {
+        id: "pi_taxed",
+        latest_charge: {
+          id: "ch_taxed",
+          balance_transaction: {
+            id: "txn_taxed",
+            fee: 358,
+            net: 10_967,
+          },
+        },
+      },
+    },
+    700,
+  );
+  assert.deepEqual(settlement, {
+    paymentProcessingFeeCents: 358,
+    sellerProceedsCents: 9_800,
+  });
+});
+
 test("checkout ignores browser-supplied fee values and historical orders copy the reservation snapshot", async () => {
   const checkout = await readFile(
     new URL("../app/api/checkout/route.ts", import.meta.url),
@@ -165,6 +197,7 @@ test("checkout ignores browser-supplied fee values and historical orders copy th
   );
   assert.doesNotMatch(checkout, /payload\.(?:marketplace|platform|application).*fee/i);
   assert.match(checkout, /loadAuthoritativeCart\(requested\)/);
+  assert.match(checkout, /retrieveStripeAccount/);
   assert.match(orders, /reservation\.marketplaceFeeBps/);
   assert.match(orders, /reservation\.platformFeeCents/);
   assert.match(migration, /`marketplace_fee_bps` integer DEFAULT 1000 NOT NULL/);

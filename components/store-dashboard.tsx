@@ -16,6 +16,7 @@ import {
   ShipmentTimeline,
   type ShipmentTimelineData,
 } from "@/components/shipment-timeline";
+import { POLICY_VERSION } from "@/lib/legal";
 
 type Store = {
   id: string;
@@ -45,6 +46,8 @@ type Store = {
   defaultPackageWeight: string;
   shippingPolicySummary: string;
   returnPolicySummary: string;
+  sellerTermsVersion: string | null;
+  sellerTermsAcceptedAt: string | null;
 };
 
 type Product = {
@@ -1179,11 +1182,26 @@ function StoreSettings({
     options?: { reload?: boolean; message?: string },
   ): Promise<Record<string, unknown>>;
 }) {
+  const [acceptedSellerTerms, setAcceptedSellerTerms] = useState(false);
+  const currentSellerTerms =
+    store.sellerTermsVersion === POLICY_VERSION &&
+    Boolean(store.sellerTermsAcceptedAt);
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     await action(
       { action: "save_store", ...Object.fromEntries(new FormData(event.currentTarget)) },
       { reload: true, message: "Store profile updated." },
+    );
+  }
+
+  async function acceptTerms() {
+    await action(
+      {
+        action: "accept_seller_terms",
+        sellerTermsVersion: POLICY_VERSION,
+      },
+      { reload: true, message: "Current Seller Terms accepted." },
     );
   }
   return (
@@ -1212,6 +1230,35 @@ function StoreSettings({
         </form>
       </section>
       <section className="store-panel payout-status"><p className="eyebrow">Payout account</p><h3>Stripe Connect</h3><p><span className={`status ${store.stripeChargesEnabled ? "active" : "onboarding"}`}>Charges {store.stripeChargesEnabled ? "enabled" : "pending"}</span> <span className={`status ${store.stripePayoutsEnabled ? "active" : "onboarding"}`}>Payouts {store.stripePayoutsEnabled ? "enabled" : "pending"}</span></p><p>Bank and identity details remain securely hosted by Stripe. Contact Model Car Center if you need a fresh onboarding link.</p></section>
+      <section className="store-panel payout-status">
+        <p className="eyebrow">Seller agreement</p>
+        <h3>{currentSellerTerms ? "Current Seller Terms accepted" : "Action required before selling"}</h3>
+        {currentSellerTerms ? (
+          <p>
+            Accepted {formatUtcDateTime(store.sellerTermsAcceptedAt!)}. Review the current <Link href="/seller-terms">Seller Terms</Link> at any time.
+          </p>
+        ) : (
+          <>
+            <p>Review and accept the current Seller Terms before publishing inventory or accepting new marketplace payments.</p>
+            <label className="consent-check">
+              <input
+                type="checkbox"
+                checked={acceptedSellerTerms}
+                onChange={(event) => setAcceptedSellerTerms(event.target.checked)}
+              />
+              <span>I am authorized to accept the <Link href="/seller-terms">Seller Terms</Link> for this store.</span>
+            </label>
+            <button
+              className="button dark small"
+              type="button"
+              disabled={!acceptedSellerTerms}
+              onClick={() => void acceptTerms()}
+            >
+              Accept current Seller Terms
+            </button>
+          </>
+        )}
+      </section>
       <section className="store-panel payout-status"><p className="eyebrow">Selling fees</p><h3>{fee.rateKind === "founding_professional" ? "Founding Seller Rate" : "Professional Store Rate"} — {feePercent(fee.marketplaceFeeBps)} marketplace fee</h3>{fee.foundingPromotionActive && <p>Your promotional rate is active. It automatically becomes the {feePercent(fee.standardMarketplaceFeeBps)} standard professional rate when the six-month period ends.</p>}<p><b>Payment processing is charged separately.</b> Model Car Center holds seller proceeds until three days after carrier-confirmed delivery, then releases them to Stripe if no case is open. Recorded order details show processing costs and payout status separately from your marketplace fee.</p><p>No listing fees. No monthly fees to sell.</p></section>
     </div>
   );

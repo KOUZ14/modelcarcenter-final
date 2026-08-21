@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 import { formatMoney } from "@/lib/format";
 import {
@@ -55,6 +56,7 @@ export function AccountDashboard({
   email: string;
   isNew: boolean;
 }) {
+  const router = useRouter();
   const professionalStore = data.seller?.sellerType === "professional";
   const [view, setView] = useState<(typeof tabs)[number]>(
     tabs.includes(initialView as never)
@@ -84,7 +86,7 @@ export function AccountDashboard({
       throw new Error(body.error);
     }
     if (body.deleted) {
-      window.location.assign("/");
+      router.push("/");
       return body;
     }
     setMessage("Saved.");

@@ -2,6 +2,7 @@ import { requireCollectorApi } from "@/lib/collector-auth";
 import { commitInventoryCsv, previewInventoryCsv } from "@/lib/csv-import";
 import { readJsonObject, routeError } from "@/lib/http";
 import {
+  acceptCurrentSellerTerms,
   archiveStoreProduct,
   saveStoreProduct,
   saveStoreProfile,
@@ -24,6 +25,15 @@ export async function POST(request: Request) {
   try {
     const payload = await readJsonObject(request);
     const action = requiredString(payload.action, "action", 40);
+    if (action === "accept_seller_terms") {
+      return Response.json({
+        ok: true,
+        ...(await acceptCurrentSellerTerms(
+          store,
+          requiredString(payload.sellerTermsVersion, "sellerTermsVersion", 40),
+        )),
+      });
+    }
     if (action === "preview_import") {
       return Response.json({
         ok: true,

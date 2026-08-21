@@ -39,16 +39,17 @@ const worker = {
 
     if (url.pathname === "/_vinext/image") {
       const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];
-      return handleImageOptimization(request, {
+      const response = await handleImageOptimization(request, {
         fetchAsset: (path) => env.ASSETS.fetch(new Request(new URL(path, request.url))),
         transformImage: async (body, { width, format, quality }) => {
           const result = await env.IMAGES.input(body).transform(width > 0 ? { width } : {}).output({ format, quality });
           return result.response();
         },
       }, allowedWidths);
+      return withSecurityHeaders(response);
     }
 
-    return handler.fetch(request, env, ctx);
+    return withSecurityHeaders(await handler.fetch(request, env, ctx));
   },
   async scheduled(
     controller: ScheduledController,
@@ -56,13 +57,46 @@ const worker = {
     ctx: ExecutionContext,
   ): Promise<void> {
     const now = new Date(controller.scheduledTime);
-    ctx.waitUntil(
-      Promise.all([
-        processResolutionNotifications({ database: env.DB, now }),
-        processEligibleSellerTransfers({ database: env.DB, now }),
-      ]).then(() => undefined),
-    );
+    ctx.waitUntil(runScheduledMaintenance(env.DB, now));
   },
 };
+
+async function runScheduledMaintenance(database: D1Database, now: Date) {
+  try {
+    const [notifications, transfers] = await Promise.all([
+      processResolutionNotifications({ database, now }),
+      processEligibleSellerTransfers({ database, now }),
+    ]);
+    console.info(
+      "Scheduled marketplace maintenance completed.",
+      JSON.stringify({
+        scheduledAt: now.toISOString(),
+        notifications,
+        transfers,
+      }),
+    );
+  } catch (error) {
+    console.error("Scheduled marketplace maintenance failed.", error);
+    throw error;
+  }
+}
+
+function withSecurityHeaders(response: Response) {
+  const headers = new Headers(response.headers);
+  headers.set(
+    "Content-Security-Policy",
+    "default-src 'self'; base-uri 'self'; connect-src 'self'; font-src 'self' data:; form-action 'self' https://checkout.stripe.com; frame-ancestors 'none'; frame-src 'none'; img-src 'self' data: https:; object-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; upgrade-insecure-requests",
+  );
+  headers.set("Permissions-Policy", "camera=(), geolocation=(), microphone=()");
+  headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  headers.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  headers.set("X-Content-Type-Options", "nosniff");
+  headers.set("X-Frame-Options", "DENY");
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
 
 export default worker;

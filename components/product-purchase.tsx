@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useState } from "react";
 import type { ProductSummary } from "@/lib/types";
 import { useMarketplace } from "./marketplace-provider";
 import { Icon } from "./icons";
@@ -9,14 +9,12 @@ import { Icon } from "./icons";
 export function ProductPurchase({ product }: { product: ProductSummary }) {
   const { addToCart, toggleWishlist, wishlistHas, collector } = useMarketplace();
   const [added, setAdded] = useState(false);
-  const [email, setEmail] = useState("");
+  const [emailOverride, setEmailOverride] = useState<string | null>(null);
   const [alertState, setAlertState] = useState<
     "idle" | "loading" | "success" | "error"
   >("idle");
   const [alertError, setAlertError] = useState("");
-  useEffect(() => {
-    if (collector?.email && !email) setEmail(collector.email);
-  }, [collector?.email, email]);
+  const email = emailOverride ?? collector?.email ?? "";
   const saved = wishlistHas(product.id);
   async function subscribe(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -45,7 +43,7 @@ export function ProductPurchase({ product }: { product: ProductSummary }) {
       <h2>Get a restock alert</h2>
       <p>We’ll email you once when this model becomes available again.</p>
       {alertState === "success" ? <p className="restock-success" role="status"><Icon name="check"/> Alert set for {email}.</p> : <form className="restock-form" onSubmit={subscribe}>
-        <label>Email address<input type="email" required autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)}/></label>
+        <label>Email address<input type="email" required autoComplete="email" value={email} onChange={(event) => setEmailOverride(event.target.value)}/></label>
         <button className="button dark" disabled={alertState === "loading"}>{alertState === "loading" ? "Setting alert…" : "Notify me"}</button>
         {alertState === "error" && <p className="form-error" role="alert">{alertError}</p>}
       </form>}

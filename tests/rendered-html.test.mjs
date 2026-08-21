@@ -28,3 +28,24 @@ test("the built artifact contains the real marketplace and no starter preview ma
   assert.match(source, /Resolved cases/i);
   assert.doesNotMatch(source, /codex-preview/i);
 });
+
+test("the worker applies baseline browser security headers and logs scheduled maintenance", async () => {
+  const worker = await readFile(
+    new URL("../worker/index.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(worker, /Content-Security-Policy/);
+  assert.match(worker, /Strict-Transport-Security/);
+  assert.match(worker, /X-Content-Type-Options/);
+  assert.match(worker, /Scheduled marketplace maintenance completed/);
+});
+
+test("the production catalog correction is conditional and matches the verified listing", async () => {
+  const migration = await readFile(
+    new URL("../drizzle/0013_production_catalog_correction.sql", import.meta.url),
+    "utf8",
+  );
+  assert.match(migration, /ut-models-mclaren-f1-lm-orange-124341-ede41d/);
+  assert.match(migration, /WHERE `id` = 'ede41d23-6367-4444-96e3-8577d6422fcb'/);
+  assert.match(migration, /AND `title` = 'UT Models Mclaren F1 LM - Orange'/);
+});

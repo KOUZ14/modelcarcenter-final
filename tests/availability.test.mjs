@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   parseProductAvailability,
@@ -53,5 +54,17 @@ test("mixed preorder carts ship from the latest release date", () => {
       releaseDate: "2027-05-01",
     }),
     true,
+  );
+});
+
+test("preorder schedule changes preserve closed and historical order snapshots", async () => {
+  const source = await readFile(
+    new URL("../lib/availability.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /inArray\(\s*orderItems\.orderId,[\s\S]*affected\.map/);
+  assert.match(
+    source,
+    /inArray\(orders\.fulfillmentStatus, \["unfulfilled", "processing"\]\)/,
   );
 });

@@ -191,7 +191,15 @@ export async function syncPreorderReleaseSchedule(input: {
       availabilityTypeSnapshot: input.availabilityType,
       releaseDateSnapshot: input.releaseDate,
     })
-    .where(eq(orderItems.productId, input.productId));
+    .where(
+      and(
+        eq(orderItems.productId, input.productId),
+        inArray(
+          orderItems.orderId,
+          affected.map((order) => order.orderId),
+        ),
+      ),
+    );
 
   const uniqueOrders = [...new Map(affected.map((order) => [order.orderId, order])).values()];
   let notificationsSent = 0;

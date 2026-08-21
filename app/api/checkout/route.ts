@@ -1,6 +1,6 @@
 import { attachStripeSession, loadAuthoritativeCart, releaseReservation, releaseStaleReservations, reserveCart } from "@/lib/inventory";
 import { readJsonObject } from "@/lib/http";
-import { createCheckoutSession } from "@/lib/stripe";
+import { createCheckoutSession, retrieveStripeAccount } from "@/lib/stripe";
 import { getCurrentCollector } from "@/lib/collector-auth";
 import { isCurrentPolicyVersion, POLICY_VERSION } from "@/lib/legal";
 import { resolveCheckoutShipping } from "@/lib/checkout-shipping";
@@ -23,6 +23,14 @@ export async function POST(request: Request) {
     });
     await releaseStaleReservations();
     const loadedCart = await loadAuthoritativeCart(requested);
+    const connectedAccount = await retrieveStripeAccount(
+      loadedCart.seller.sellerStripeAccountId!,
+    );
+    if (!connectedAccount.charges_enabled || !connectedAccount.payouts_enabled) {
+      throw new Error(
+        "This seller's Stripe account is not ready to accept marketplace payments.",
+      );
+    }
     const shipping = await resolveCheckoutShipping(
       loadedCart,
       payload.shippingSelection,

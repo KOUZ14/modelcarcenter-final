@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import type { CartItem, ProductSummary } from "@/lib/types";
 import { cartSellerConflict } from "@/lib/business";
 import { authClient } from "@/lib/auth-client";
@@ -31,6 +32,7 @@ const CART_KEY = "mcc-cart-v1";
 const WISHLIST_KEY = "mcc-wishlist-v1";
 
 export function MarketplaceProvider({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
   const [cart, setCart] = useState<CartItem[]>([]);
   const [wishlist, setWishlist] = useState<string[]>([]);
   const [collector, setCollector] = useState<Collector | null>(null);
@@ -156,8 +158,8 @@ export function MarketplaceProvider({ children }: { children: React.ReactNode })
       if (mode === "account") void fetch("/api/account", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "wishlist", productId, saved }) });
     },
     wishlistHas(productId) { return wishlist.includes(productId); },
-    async signOut() { await authClient.signOut(); clearGuestStorage(); window.location.assign("/"); },
-  }), [addDirect, cart, collector, mode, persistCart, wishlist]);
+    async signOut() { await authClient.signOut(); clearGuestStorage(); router.push("/"); },
+  }), [addDirect, cart, collector, mode, persistCart, router, wishlist]);
 
   return <MarketplaceContext.Provider value={value}>
     {children}

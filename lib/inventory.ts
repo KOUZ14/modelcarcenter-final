@@ -4,6 +4,7 @@ import { checkoutReservationItems, checkoutReservations, products, sellers } fro
 import { calculateServerTotals } from "./business";
 import { config } from "./config";
 import { determineMarketplaceFee } from "./fees";
+import { sellerAcceptedCurrentTerms } from "./legal";
 
 export type RequestedCartItem = { productId: string; quantity: number };
 
@@ -49,6 +50,8 @@ export async function loadAuthoritativeCart(items: RequestedCartItem[]) {
       sellerStripeAccountId: sellers.stripeAccountId,
       stripeChargesEnabled: sellers.stripeChargesEnabled,
       stripePayoutsEnabled: sellers.stripePayoutsEnabled,
+      sellerTermsVersion: sellers.sellerTermsVersion,
+      sellerTermsAcceptedAt: sellers.sellerTermsAcceptedAt,
       shippingCents: sellers.defaultShippingCents,
       shippingMode: sellers.shippingMode,
       shippingOriginCountry: sellers.shippingOriginCountry,
@@ -79,6 +82,11 @@ export async function loadAuthoritativeCart(items: RequestedCartItem[]) {
   const seller = rows[0];
   if (!seller.sellerStripeAccountId || !seller.stripeChargesEnabled || !seller.stripePayoutsEnabled) {
     throw new Error("This seller is not ready to accept marketplace payments.");
+  }
+  if (!sellerAcceptedCurrentTerms(seller)) {
+    throw new Error(
+      "This seller must accept the current Seller Terms before accepting marketplace payments.",
+    );
   }
   if (new Set(rows.map((row) => row.currency)).size !== 1) throw new Error("All products in a checkout must use the same currency.");
   const authoritativeItems = rows.map((row) => ({ ...row, quantity: consolidated.get(row.id)! }));

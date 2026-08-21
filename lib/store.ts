@@ -24,6 +24,11 @@ import { config } from "./config";
 import { canClaimProfessionalStore } from "./account-rules";
 import { buildStoreAnalytics } from "./store-rules";
 import { determineMarketplaceFee } from "./fees";
+import {
+  isCurrentPolicyVersion,
+  POLICY_VERSION,
+  sellerAcceptedCurrentTerms,
+} from "./legal";
 import { parseParcel } from "./shipping-rules";
 import { registerShippoTracking } from "./shippo";
 import { recordOrderTrackingUpdate } from "./shipping";
@@ -289,9 +294,7 @@ export async function saveStoreProduct(
     sellerId: store.id,
     sellerSku,
     title,
-    slug:
-      existing?.slug ??
-      `${makeSlug(title)}-${makeSlug(sellerSku)}-${id.slice(0, 6)}`,
+    slug: `${makeSlug(title)}-${makeSlug(sellerSku)}-${id.slice(0, 6)}`,
     description: cleanText(payload.description, 4_000),
     scale: requiredString(payload.scale, "scale", 30),
     modelManufacturer: requiredString(
@@ -374,10 +377,11 @@ export async function setStoreProductStatus(
     requestedStatus === "active" &&
     (store.status !== "active" ||
       !store.stripeChargesEnabled ||
-      !store.stripePayoutsEnabled)
+      !store.stripePayoutsEnabled ||
+      !sellerAcceptedCurrentTerms(store))
   )
     throw new ValidationError(
-      "Complete store approval and Stripe onboarding before publishing.",
+      "Complete store approval, Stripe onboarding, and current Seller Terms acceptance before publishing.",
     );
   if (
     requestedStatus === "active" &&
@@ -506,6 +510,28 @@ export async function saveStoreProfile(
   };
   await getDb().update(sellers).set(values).where(eq(sellers.id, store.id));
   return { store: { ...store, ...values } };
+}
+
+export async function acceptCurrentSellerTerms(
+  store: typeof sellers.$inferSelect,
+  sellerTermsVersion: string,
+) {
+  if (!isCurrentPolicyVersion(sellerTermsVersion)) {
+    throw new ValidationError("Accept the current Seller Terms to continue.");
+  }
+  const acceptedAt = new Date().toISOString();
+  await getDb()
+    .update(sellers)
+    .set({
+      sellerTermsVersion: POLICY_VERSION,
+      sellerTermsAcceptedAt: acceptedAt,
+      updatedAt: acceptedAt,
+    })
+    .where(eq(sellers.id, store.id));
+  return {
+    sellerTermsVersion: POLICY_VERSION,
+    sellerTermsAcceptedAt: acceptedAt,
+  };
 }
 
 function shipmentForOrder(

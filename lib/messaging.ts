@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, or } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, or } from "drizzle-orm";
 import { getD1, getDb } from "@/db";
 import {
   collectorProfiles,
@@ -13,6 +13,7 @@ import {
   isUnreadMessage,
   messagePreview,
 } from "./messaging-rules";
+import { POLICY_VERSION } from "./legal";
 import { ValidationError } from "./validation";
 
 const conversationSelection = {
@@ -353,6 +354,8 @@ async function getMessageableProduct(productId: string) {
         eq(products.id, productId),
         eq(products.status, "active"),
         eq(sellers.status, "active"),
+        eq(sellers.sellerTermsVersion, POLICY_VERSION),
+        isNotNull(sellers.sellerTermsAcceptedAt),
       ),
     )
     .limit(1);

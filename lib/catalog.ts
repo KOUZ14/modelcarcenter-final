@@ -1,7 +1,8 @@
-import { and, asc, desc, eq, gt, inArray, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, sql, type SQL } from "drizzle-orm";
 import { getDb } from "@/db";
 import { productImages, products, sellers } from "@/db/schema";
 import { normalizeSearch } from "./business";
+import { POLICY_VERSION } from "./legal";
 import type { CatalogResponse, ProductDetail, ProductSummary } from "./types";
 
 export type CatalogQuery = {
@@ -69,6 +70,8 @@ function activeConditions(query: CatalogQuery): SQL[] {
   const conditions: SQL[] = [
     eq(products.status, "active"),
     eq(sellers.status, "active"),
+    eq(sellers.sellerTermsVersion, POLICY_VERSION),
+    isNotNull(sellers.sellerTermsAcceptedAt),
     gt(
       sql<number>`${products.inventoryQuantity} - ${products.reservedQuantity}`,
       0,
@@ -140,25 +143,25 @@ export async function searchCatalog(
         .selectDistinct({ value: products.scale })
         .from(products)
         .innerJoin(sellers, eq(products.sellerId, sellers.id))
-        .where(and(eq(products.status, "active"), eq(sellers.status, "active")))
+        .where(and(eq(products.status, "active"), eq(sellers.status, "active"), eq(sellers.sellerTermsVersion, POLICY_VERSION), isNotNull(sellers.sellerTermsAcceptedAt)))
         .orderBy(asc(products.scale)),
       db
         .selectDistinct({ value: products.modelManufacturer })
         .from(products)
         .innerJoin(sellers, eq(products.sellerId, sellers.id))
-        .where(and(eq(products.status, "active"), eq(sellers.status, "active")))
+        .where(and(eq(products.status, "active"), eq(sellers.status, "active"), eq(sellers.sellerTermsVersion, POLICY_VERSION), isNotNull(sellers.sellerTermsAcceptedAt)))
         .orderBy(asc(products.modelManufacturer)),
       db
         .selectDistinct({ id: sellers.id, name: sellers.storeName })
         .from(sellers)
         .innerJoin(products, eq(products.sellerId, sellers.id))
-        .where(and(eq(products.status, "active"), eq(sellers.status, "active")))
+        .where(and(eq(products.status, "active"), eq(sellers.status, "active"), eq(sellers.sellerTermsVersion, POLICY_VERSION), isNotNull(sellers.sellerTermsAcceptedAt)))
         .orderBy(asc(sellers.storeName)),
       db
         .selectDistinct({ value: products.modelCondition })
         .from(products)
         .innerJoin(sellers, eq(products.sellerId, sellers.id))
-        .where(and(eq(products.status, "active"), eq(sellers.status, "active")))
+        .where(and(eq(products.status, "active"), eq(sellers.status, "active"), eq(sellers.sellerTermsVersion, POLICY_VERSION), isNotNull(sellers.sellerTermsAcceptedAt)))
         .orderBy(asc(products.modelCondition)),
     ]);
 
@@ -200,6 +203,8 @@ export async function getProductBySlug(
         eq(products.slug, slug),
         inArray(products.status, ["active", "sold_out"]),
         eq(sellers.status, "active"),
+        eq(sellers.sellerTermsVersion, POLICY_VERSION),
+        isNotNull(sellers.sellerTermsAcceptedAt),
       ),
     )
     .limit(1);
@@ -254,7 +259,7 @@ export async function getSellerStorefront(slug: string) {
       sellerType: sellers.sellerType,
     })
     .from(sellers)
-    .where(and(eq(sellers.slug, slug), eq(sellers.status, "active")))
+    .where(and(eq(sellers.slug, slug), eq(sellers.status, "active"), eq(sellers.sellerTermsVersion, POLICY_VERSION), isNotNull(sellers.sellerTermsAcceptedAt)))
     .limit(1);
   if (!sellerRows[0]) return null;
   const catalog = await searchCatalog({

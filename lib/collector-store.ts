@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull } from "drizzle-orm";
 import { getD1, getDb } from "@/db";
 import {
   cartItems,
@@ -22,6 +22,7 @@ import {
   uniqueWishlistIds,
 } from "./account-rules";
 import { loadAuthoritativeCart, type RequestedCartItem } from "./inventory";
+import { POLICY_VERSION } from "./legal";
 import { getVerifiedFeedbackEligibility } from "./reputation-rules";
 import type { CartItem } from "./types";
 import { normalizeEmail } from "./validation";
@@ -111,6 +112,8 @@ export async function getAccountCart(userId: string): Promise<CartItem[]> {
         eq(carts.userId, userId),
         eq(products.status, "active"),
         eq(sellers.status, "active"),
+        eq(sellers.sellerTermsVersion, POLICY_VERSION),
+        isNotNull(sellers.sellerTermsAcceptedAt),
       ),
     )
     .orderBy(asc(cartItems.createdAt));
@@ -244,6 +247,8 @@ export async function setWishlistItem(
         eq(products.id, productId),
         eq(products.status, "active"),
         eq(sellers.status, "active"),
+        eq(sellers.sellerTermsVersion, POLICY_VERSION),
+        isNotNull(sellers.sellerTermsAcceptedAt),
       ),
     )
     .limit(1);
@@ -284,6 +289,8 @@ export async function mergeGuestData(
           inArray(products.id, wishlist),
           eq(products.status, "active"),
           eq(sellers.status, "active"),
+          eq(sellers.sellerTermsVersion, POLICY_VERSION),
+          isNotNull(sellers.sellerTermsAcceptedAt),
         ),
       );
     for (const item of valid) await setWishlistItem(userId, item.id, true);

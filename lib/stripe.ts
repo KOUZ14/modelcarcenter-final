@@ -179,6 +179,40 @@ export async function retrieveCheckoutSession(sessionId: string) {
   );
 }
 
+export function stripeSettlementDetails(
+  session: StripeCheckoutSession,
+  expectedPlatformFeeCents: number,
+) {
+  const charge =
+    typeof session.payment_intent === "object" && session.payment_intent
+      ? session.payment_intent.latest_charge
+      : null;
+  const expandedCharge =
+    charge && typeof charge === "object" ? charge : null;
+  if (
+    expandedCharge?.application_fee_amount != null &&
+    expandedCharge.application_fee_amount !== expectedPlatformFeeCents
+  ) {
+    throw new Error(
+      "Stripe application fee does not match the reserved marketplace fee.",
+    );
+  }
+  const balanceTransaction = expandedCharge?.balance_transaction;
+  const paymentProcessingFeeCents =
+    balanceTransaction && typeof balanceTransaction === "object"
+      ? balanceTransaction.fee
+      : null;
+  const taxCents = Math.max(0, session.total_details?.amount_tax ?? 0);
+  const sellerProceedsCents =
+    session.amount_total == null
+      ? null
+      : Math.max(
+          0,
+          session.amount_total - taxCents - expectedPlatformFeeCents,
+        );
+  return { paymentProcessingFeeCents, sellerProceedsCents };
+}
+
 export async function createOrderRefund(input: {
   orderId: string;
   paymentIntentId: string;

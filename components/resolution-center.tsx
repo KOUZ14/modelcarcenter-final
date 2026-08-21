@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { FormEvent, useMemo, useState } from "react";
 import { formatMoney } from "@/lib/format";
@@ -320,7 +321,7 @@ function CaseDetail({
         <div className="case-files">
           {evidence.map((file) => (
             <a href={`/api/resolution/files/${file.id}`} key={file.id} target="_blank" rel="noreferrer">
-              {file.mimeType.startsWith("image/") ? <img src={`/api/resolution/files/${file.id}`} alt={file.caption || file.originalName} /> : <span className="case-pdf">PDF</span>}
+              {file.mimeType.startsWith("image/") ? <Image unoptimized width={480} height={360} src={`/api/resolution/files/${file.id}`} alt={file.caption || file.originalName} /> : <span className="case-pdf">PDF</span>}
               <b>{file.originalName}</b>
               <small>{file.uploaderRole} · {formatBytes(file.sizeBytes)}</small>
             </a>
