@@ -1,8 +1,8 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { FormEvent, useState } from "react";
+import { ProductImageFields } from "@/components/product-image-fields";
 import { uploadProductPhotoFiles } from "@/lib/upload-client";
 import { POLICY_VERSION } from "@/lib/legal";
 import {
@@ -32,6 +32,9 @@ export function CollectorListingForm({
   const product = initial?.product ?? {};
   const [productId, setProductId] = useState(String(product.id ?? ""));
   const [images, setImages] = useState(initial?.images ?? []);
+  const [primaryImageUrl, setPrimaryImageUrl] = useState<string | null>(
+    typeof product.primaryImageUrl === "string" ? product.primaryImageUrl : null,
+  );
   const [files, setFiles] = useState<File[]>([]);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -64,6 +67,7 @@ export function CollectorListingForm({
             nextImages = [...nextImages, ...uploaded];
             setImages(nextImages);
             setFiles(files.slice(processedCount));
+            setPrimaryImageUrl((current) => current ?? uploaded[0]?.url ?? null);
           },
         });
       }
@@ -85,7 +89,56 @@ export function CollectorListingForm({
     const response = await fetch("/api/listings/images", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ productId, imageId }) });
     const body = await response.json() as { error?: string };
     if (!response.ok) { setError(body.error || "The photo could not be removed."); return; }
-    setImages((current) => current.filter((image) => image.id !== imageId));
+    setImages((current) => {
+      const removed = current.find((image) => image.id === imageId);
+      const next = current.filter((image) => image.id !== imageId);
+      setPrimaryImageUrl((primary) =>
+        removed?.url === primary ? next[0]?.url ?? null : primary,
+      );
+      return next;
+    });
+  }
+
+  async function removeLegacyImage() {
+    if (!productId) return;
+    setError("");
+    const response = await fetch("/api/listings/images", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ productId, removeLegacyPrimary: true }),
+    });
+    const body = await response.json() as { error?: string };
+    if (!response.ok) {
+      const message = body.error || "The photo could not be removed.";
+      setError(message);
+      throw new Error(message);
+    }
+    setPrimaryImageUrl(images[0]?.url ?? null);
+  }
+
+  async function reorderImages(imageIds: string[]) {
+    if (!productId) return;
+    setError("");
+    const response = await fetch("/api/listings/images", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ productId, imageIds }),
+    });
+    const body = await response.json() as { error?: string };
+    if (!response.ok) {
+      const message = body.error || "The photo order could not be saved.";
+      setError(message);
+      throw new Error(message);
+    }
+    setImages((current) => {
+      const byId = new Map(current.map((image) => [image.id, image]));
+      const next = imageIds.map((id, index) => ({
+        ...byId.get(id)!,
+        sortOrder: index,
+      }));
+      setPrimaryImageUrl(next[0]?.url ?? null);
+      return next;
+    });
   }
 
   async function startOnboarding() {
@@ -105,7 +158,7 @@ export function CollectorListingForm({
     <section><h2>Price and availability</h2><div className="form-row"><label>Price (USD)<input name="price" inputMode="decimal" required defaultValue={product.priceCents == null ? "" : (Number(product.priceCents) / 100).toFixed(2)}/></label><label>Quantity<input name="quantity" type="number" min={1} max={100} required defaultValue={String(product.inventoryQuantity ?? 1)}/></label></div></section>
     <section><h2>Packaged shipment</h2><p>Enter the final box size and packed weight. Model Car Center uses these values to show the buyer 2–3 carrier services.</p><div className="parcel-grid"><label>Length (in)<input name="packageLength" inputMode="decimal" required defaultValue={String(product.packageLength ?? "12")}/></label><label>Width (in)<input name="packageWidth" inputMode="decimal" required defaultValue={String(product.packageWidth ?? "9")}/></label><label>Height (in)<input name="packageHeight" inputMode="decimal" required defaultValue={String(product.packageHeight ?? "6")}/></label><label>Weight (lb)<input name="packageWeight" inputMode="decimal" required defaultValue={String(product.packageWeight ?? "2")}/></label></div></section>
     <section><h2>Seller and ship-from details</h2><p>Your protected address is used only to calculate carrier rates and create labels.</p><label>Seller display name<input name="sellerDisplayName" required maxLength={120} defaultValue={String(seller?.storeName ?? displayName)}/></label><label>Street address<input name="shippingOriginStreet1" required maxLength={200} defaultValue={String(seller?.shippingOriginStreet1 ?? "")}/></label><label>Apartment, suite, or unit<input name="shippingOriginStreet2" maxLength={200} defaultValue={String(seller?.shippingOriginStreet2 ?? "")}/></label><div className="form-row"><label>City<input name="shippingOriginCity" required maxLength={120} defaultValue={String(seller?.shippingOriginCity ?? "")}/></label><label>State or region<input name="shippingOriginRegion" required maxLength={80} defaultValue={String(seller?.shippingOriginRegion ?? "")}/></label></div><div className="form-row"><label>Postal code<input name="shippingOriginPostalCode" required maxLength={20} defaultValue={String(seller?.shippingOriginPostalCode ?? "")}/></label><label>Country code<input name="shippingOriginCountry" required maxLength={2} defaultValue={String(seller?.shippingOriginCountry ?? "US")}/></label></div><label>Carrier contact phone<input name="shippingOriginPhone" type="tel" required maxLength={50} defaultValue={String(seller?.shippingOriginPhone ?? "")}/></label><label>Short seller description<textarea name="sellerDescription" maxLength={1000} defaultValue={String(seller?.description ?? "")}/></label></section>
-    <section><h2>Photos</h2><p>Upload 4–8 original JPEG, PNG, or WebP photos, 10 MB each. Do not reuse another seller’s photos.</p>{images.length > 0 && <div className="listing-images">{images.map((image) => <div key={image.id}><Image src={image.url} alt={image.alt} width={220} height={180} unoptimized/><button type="button" onClick={() => void removeImage(image.id)}>Remove</button></div>)}</div>}<label className="file-input">Add photos<input type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={(event) => setFiles([...event.target.files ?? []].slice(0, 8 - images.length))}/></label>{files.length > 0 && <p>{files.length} photo{files.length === 1 ? "" : "s"} ready to upload with this draft.</p>}<RequiredPhotoChecklist product={product}/></section>
+    <section><h2>Photos</h2><p>Upload 4–8 original photos. Do not reuse another seller’s photos.</p><ProductImageFields images={images} primaryImageUrl={primaryImageUrl} files={files} disabled={busy} onFilesChange={setFiles} onRemove={productId ? removeImage : undefined} onRemoveLegacy={productId ? removeLegacyImage : undefined} onReorder={productId ? reorderImages : undefined}/><RequiredPhotoChecklist product={product}/></section>
     <section className="listing-submit"><div><h2>Payouts and review</h2><p>{stripeReady ? "Stripe payouts are ready. Submitted listings are reviewed before going live." : "You can keep drafting now. Complete secure Stripe-hosted payout onboarding before submission."}</p><label className="consent-check"><input type="checkbox" checked={acceptedSellerTerms} onChange={(event) => setAcceptedSellerTerms(event.target.checked)}/><span>I agree to the current <Link href="/seller-terms">Seller Terms</Link>, including the marketplace fee, fulfillment rules, and return obligations.</span></label>{!stripeReady && <button className="button outline small" type="button" disabled={busy || !acceptedSellerTerms} onClick={() => void startOnboarding()}>Complete Stripe onboarding</button>}</div>{message && <p className="admin-message" role="status">{message}</p>}{error && <p className="form-error" role="alert">{error}</p>}<div className="row-actions"><button className="button outline" type="submit" value="save" disabled={busy}>{busy ? "Saving…" : "Save draft"}</button><button className="button dark" type="submit" value="submit" disabled={busy || !stripeReady || !acceptedSellerTerms}>{busy ? "Saving…" : "Submit for review"}</button></div></section>
   </form><p><Link className="text-link" href="/account?view=listings">Back to My Listings</Link></p></div>;
 }

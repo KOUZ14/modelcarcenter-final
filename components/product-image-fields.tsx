@@ -7,6 +7,7 @@ export type EditableProductImage = {
   id: string;
   url: string;
   alt: string;
+  sortOrder?: number;
 };
 
 export function ProductImageFields({
@@ -16,6 +17,8 @@ export function ProductImageFields({
   disabled = false,
   onFilesChange,
   onRemove,
+  onRemoveLegacy,
+  onReorder,
 }: {
   images: EditableProductImage[];
   primaryImageUrl?: string | null;
@@ -23,13 +26,16 @@ export function ProductImageFields({
   disabled?: boolean;
   onFilesChange(files: File[]): void;
   onRemove?(imageId: string): Promise<void>;
+  onRemoveLegacy?(): Promise<void>;
+  onReorder?(imageIds: string[]): Promise<void>;
 }) {
   const [removingId, setRemovingId] = useState("");
+  const [reordering, setReordering] = useState(false);
   const legacyPrimary =
     primaryImageUrl && !images.some((image) => image.url === primaryImageUrl)
       ? primaryImageUrl
       : null;
-  const available = Math.max(0, 8 - images.length);
+  const available = Math.max(0, 8 - images.length - files.length);
 
   async function remove(imageId: string) {
     if (!onRemove) return;
@@ -41,19 +47,44 @@ export function ProductImageFields({
     }
   }
 
+  async function removeLegacy() {
+    if (!onRemoveLegacy) return;
+    setRemovingId("legacy-primary");
+    try {
+      await onRemoveLegacy();
+    } finally {
+      setRemovingId("");
+    }
+  }
+
+  async function moveSavedPhoto(index: number, offset: -1 | 1) {
+    if (!onReorder) return;
+    const next = moveItem(images, index, index + offset);
+    setReordering(true);
+    try {
+      await onReorder(next.map((image) => image.id));
+    } finally {
+      setReordering(false);
+    }
+  }
+
+  function moveSelectedPhoto(index: number, offset: -1 | 1) {
+    onFilesChange(moveItem(files, index, index + offset));
+  }
+
   return (
     <div className="product-photo-fields">
       <div>
         <b>Product photos</b>
         <p>
-          Upload up to 8 JPEG, PNG, or WebP photos, 10 MB each. The first new
-          photo will be the primary image.
+          Upload up to 8 JPEG, PNG, or WebP photos, 10 MB each. The first photo
+          is the primary image. Use the arrow controls to set the display order.
         </p>
       </div>
       {(images.length > 0 || legacyPrimary || files.length > 0) && (
         <div className="listing-images">
           {legacyPrimary && (
-            <div>
+            <div className="listing-image-card">
               <Image
                 src={legacyPrimary}
                 alt="Current product image"
@@ -61,11 +92,22 @@ export function ProductImageFields({
                 height={180}
                 unoptimized
               />
-              <span>Current</span>
+              <span className="listing-image-badge">Current primary</span>
+              {onRemoveLegacy && (
+                <div className="listing-image-actions">
+                  <button
+                    type="button"
+                    disabled={disabled || Boolean(removingId) || reordering}
+                    onClick={() => void removeLegacy()}
+                  >
+                    {removingId === "legacy-primary" ? "Removing…" : "Remove"}
+                  </button>
+                </div>
+              )}
             </div>
           )}
-          {images.map((image) => (
-            <div key={image.id}>
+          {images.map((image, index) => (
+            <div className="listing-image-card" key={image.id}>
               <Image
                 src={image.url}
                 alt={image.alt}
@@ -73,22 +115,72 @@ export function ProductImageFields({
                 height={180}
                 unoptimized
               />
-              {onRemove && (
-                <button
-                  type="button"
-                  disabled={disabled || Boolean(removingId)}
-                  onClick={() => void remove(image.id)}
-                >
-                  {removingId === image.id ? "Removing…" : "Remove"}
-                </button>
+              <span className="listing-image-badge">
+                {index === 0 ? "Primary" : `Photo ${index + 1}`}
+              </span>
+              {(onRemove || onReorder) && (
+                <div className="listing-image-actions">
+                  {onReorder && (
+                    <>
+                      <button
+                        type="button"
+                        aria-label={`Move photo ${index + 1} earlier`}
+                        title="Move earlier"
+                        disabled={
+                          disabled ||
+                          Boolean(removingId) ||
+                          reordering ||
+                          index === 0
+                        }
+                        onClick={() => void moveSavedPhoto(index, -1)}
+                      >
+                        ←
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Move photo ${index + 1} later`}
+                        title="Move later"
+                        disabled={
+                          disabled ||
+                          Boolean(removingId) ||
+                          reordering ||
+                          index === images.length - 1
+                        }
+                        onClick={() => void moveSavedPhoto(index, 1)}
+                      >
+                        →
+                      </button>
+                    </>
+                  )}
+                  {onRemove && (
+                    <button
+                      type="button"
+                      disabled={
+                        disabled || Boolean(removingId) || reordering
+                      }
+                      onClick={() => void remove(image.id)}
+                    >
+                      {removingId === image.id ? "Removing…" : "Remove"}
+                    </button>
+                  )}
+                </div>
               )}
             </div>
           ))}
           {files.map((file, index) => (
             <SelectedImagePreview
-              key={`${file.name}-${file.size}-${file.lastModified}`}
+              key={`${file.name}-${file.size}-${file.lastModified}-${index}`}
               file={file}
               index={index}
+              isPrimary={index === 0 && images.length === 0}
+              disabled={disabled || Boolean(removingId) || reordering}
+              onMoveEarlier={() => moveSelectedPhoto(index, -1)}
+              onMoveLater={() => moveSelectedPhoto(index, 1)}
+              onRemove={() =>
+                onFilesChange(files.filter((_, fileIndex) => fileIndex !== index))
+              }
+              canMoveEarlier={index > 0}
+              canMoveLater={index < files.length - 1}
             />
           ))}
         </div>
@@ -100,28 +192,56 @@ export function ProductImageFields({
           accept="image/jpeg,image/png,image/webp"
           multiple
           disabled={disabled || available === 0}
-          onChange={(event) =>
-            onFilesChange(
-              Array.from(event.target.files ?? []).slice(0, available),
-            )
-          }
+          onChange={(event) => {
+            const selected = Array.from(event.target.files ?? []).slice(
+              0,
+              available,
+            );
+            onFilesChange([...files, ...selected]);
+            event.currentTarget.value = "";
+          }}
         />
       </label>
       {files.length > 0 && (
         <p className="form-note">
           {files.length} photo{files.length === 1 ? "" : "s"} ready to upload
-          when you save.
+          in this order when you save.
+        </p>
+      )}
+      {(removingId || reordering) && (
+        <p className="form-note" role="status">
+          {reordering ? "Saving photo order…" : "Removing photo…"}
         </p>
       )}
     </div>
   );
 }
 
-function SelectedImagePreview({ file, index }: { file: File; index: number }) {
+function SelectedImagePreview({
+  file,
+  index,
+  isPrimary,
+  disabled,
+  canMoveEarlier,
+  canMoveLater,
+  onMoveEarlier,
+  onMoveLater,
+  onRemove,
+}: {
+  file: File;
+  index: number;
+  isPrimary: boolean;
+  disabled: boolean;
+  canMoveEarlier: boolean;
+  canMoveLater: boolean;
+  onMoveEarlier(): void;
+  onMoveLater(): void;
+  onRemove(): void;
+}) {
   const [url] = useState(() => URL.createObjectURL(file));
   useEffect(() => () => URL.revokeObjectURL(url), [url]);
   return (
-    <div>
+    <div className="listing-image-card">
       <Image
         src={url}
         alt={`Selected photo ${index + 1}`}
@@ -129,7 +249,40 @@ function SelectedImagePreview({ file, index }: { file: File; index: number }) {
         height={180}
         unoptimized
       />
-      <span>Ready to upload</span>
+      <span className="listing-image-badge">
+        {isPrimary ? "New primary" : `New photo ${index + 1}`}
+      </span>
+      <div className="listing-image-actions">
+        <button
+          type="button"
+          aria-label={`Move selected photo ${index + 1} earlier`}
+          title="Move earlier"
+          disabled={disabled || !canMoveEarlier}
+          onClick={onMoveEarlier}
+        >
+          ←
+        </button>
+        <button
+          type="button"
+          aria-label={`Move selected photo ${index + 1} later`}
+          title="Move later"
+          disabled={disabled || !canMoveLater}
+          onClick={onMoveLater}
+        >
+          →
+        </button>
+        <button type="button" disabled={disabled} onClick={onRemove}>
+          Remove
+        </button>
+      </div>
     </div>
   );
+}
+
+function moveItem<T>(items: T[], from: number, to: number) {
+  if (to < 0 || to >= items.length || from === to) return items;
+  const next = [...items];
+  const [item] = next.splice(from, 1);
+  next.splice(to, 0, item);
+  return next;
 }

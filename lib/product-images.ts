@@ -5,6 +5,7 @@ import { productImages, products } from "@/db/schema";
 import {
   detectListingImageType,
   validateListingImageBatch,
+  validateListingImageOrder,
 } from "@/lib/listing-images";
 import { ValidationError } from "@/lib/validation";
 
@@ -163,4 +164,93 @@ export async function removeProductImage(input: {
         ),
       );
   }
+}
+
+export async function removeLegacyPrimaryProductImage(input: {
+  product: Product;
+}) {
+  if (!input.product.primaryImageUrl) return;
+  const matchingImage = await getDb()
+    .select({ id: productImages.id })
+    .from(productImages)
+    .where(
+      and(
+        eq(productImages.productId, input.product.id),
+        eq(productImages.url, input.product.primaryImageUrl),
+      ),
+    )
+    .limit(1);
+  if (matchingImage[0]) {
+    await removeProductImage({
+      product: input.product,
+      imageId: matchingImage[0].id,
+    });
+    return;
+  }
+  const nextImage = await getDb()
+    .select({ url: productImages.url })
+    .from(productImages)
+    .where(eq(productImages.productId, input.product.id))
+    .orderBy(asc(productImages.sortOrder))
+    .limit(1);
+  await getDb()
+    .update(products)
+    .set({
+      primaryImageUrl: nextImage[0]?.url ?? null,
+      updatedAt: new Date().toISOString(),
+    })
+    .where(
+      and(
+        eq(products.id, input.product.id),
+        eq(products.sellerId, input.product.sellerId),
+      ),
+    );
+}
+
+export async function reorderProductImages(input: {
+  product: Product;
+  imageIds: string[];
+}) {
+  const currentImages = await getDb()
+    .select()
+    .from(productImages)
+    .where(eq(productImages.productId, input.product.id))
+    .orderBy(asc(productImages.sortOrder));
+  const orderError = validateListingImageOrder(
+    currentImages.map((image) => image.id),
+    input.imageIds,
+  );
+  if (orderError) throw new ValidationError(orderError);
+
+  const imagesById = new Map(currentImages.map((image) => [image.id, image]));
+  for (let index = 0; index < input.imageIds.length; index += 1) {
+    await getDb()
+      .update(productImages)
+      .set({ sortOrder: index })
+      .where(
+        and(
+          eq(productImages.id, input.imageIds[index]),
+          eq(productImages.productId, input.product.id),
+        ),
+      );
+  }
+  const orderedImages = input.imageIds.map((id) => imagesById.get(id)!);
+  await getDb()
+    .update(products)
+    .set({
+      primaryImageUrl: orderedImages[0]?.url ?? null,
+      updatedAt: new Date().toISOString(),
+    })
+    .where(
+      and(
+        eq(products.id, input.product.id),
+        eq(products.sellerId, input.product.sellerId),
+      ),
+    );
+  return orderedImages.map((image, index) => ({
+    id: image.id,
+    url: image.url,
+    alt: image.alt,
+    sortOrder: index,
+  }));
 }

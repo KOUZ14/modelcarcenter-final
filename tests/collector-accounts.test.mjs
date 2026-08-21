@@ -17,6 +17,7 @@ import {
   detectListingImageType,
   MAX_LISTING_IMAGE_BYTES,
   validateListingImageBatch,
+  validateListingImageOrder,
 } from "../lib/listing-images.ts";
 import {
   collectorAuthPolicy,
@@ -330,6 +331,29 @@ test("listing image validation enforces count, size, declared MIME, and file sig
       "image/jpeg",
     ),
     null,
+  );
+});
+
+test("listing photo order accepts every saved photo exactly once", () => {
+  assert.equal(
+    validateListingImageOrder(["front", "rear", "side"], [
+      "side",
+      "front",
+      "rear",
+    ]),
+    null,
+  );
+  assert.match(
+    validateListingImageOrder(["front", "rear"], ["front"]),
+    /every saved photo/,
+  );
+  assert.match(
+    validateListingImageOrder(["front", "rear"], ["front", "front"]),
+    /only once/,
+  );
+  assert.match(
+    validateListingImageOrder(["front", "rear"], ["front", "other"]),
+    /not part of this listing/,
   );
 });
 

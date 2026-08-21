@@ -4,7 +4,9 @@ import { products } from "@/db/schema";
 import { requireAdminApi } from "@/lib/admin-auth";
 import { routeError } from "@/lib/http";
 import {
+  removeLegacyPrimaryProductImage,
   removeProductImage,
+  reorderProductImages,
   uploadProductImages,
 } from "@/lib/product-images";
 import { requiredString, ValidationError } from "@/lib/validation";
@@ -48,10 +50,39 @@ export async function DELETE(request: Request) {
   try {
     const body = (await request.json()) as Record<string, unknown>;
     const productId = requiredString(body.productId, "productId", 100);
-    const imageId = requiredString(body.imageId, "imageId", 100);
-    await removeProductImage({ product: await getProduct(productId), imageId });
+    const product = await getProduct(productId);
+    if (body.removeLegacyPrimary === true) {
+      await removeLegacyPrimaryProductImage({ product });
+    } else {
+      await removeProductImage({
+        product,
+        imageId: requiredString(body.imageId, "imageId", 100),
+      });
+    }
     return Response.json({ ok: true });
   } catch (error) {
     return routeError(error, "The photo could not be removed.");
+  }
+}
+
+export async function PUT(request: Request) {
+  const identity = await requireAdminApi();
+  if (identity instanceof Response) return identity;
+  try {
+    const body = (await request.json()) as Record<string, unknown>;
+    const productId = requiredString(body.productId, "productId", 100);
+    if (!Array.isArray(body.imageIds)) {
+      throw new ValidationError("Photo order must be a list.");
+    }
+    const imageIds = body.imageIds.map((id) =>
+      requiredString(id, "imageId", 100),
+    );
+    const images = await reorderProductImages({
+      product: await getProduct(productId),
+      imageIds,
+    });
+    return Response.json({ ok: true, images });
+  } catch (error) {
+    return routeError(error, "The photo order could not be saved.");
   }
 }

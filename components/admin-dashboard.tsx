@@ -901,6 +901,9 @@ function ProductEditor({
   const [productId, setProductId] = useState(product.id);
   const [files, setFiles] = useState<File[]>([]);
   const [images, setImages] = useState(product.images ?? []);
+  const [primaryImageUrl, setPrimaryImageUrl] = useState(
+    product.primaryImageUrl ?? null,
+  );
   const [primaryUploadFinished, setPrimaryUploadFinished] = useState(false);
   const [imageError, setImageError] = useState("");
   const [availabilityType, setAvailabilityType] = useState<
@@ -931,7 +934,10 @@ function ProductEditor({
             nextImages = [...nextImages, ...uploaded];
             setImages(nextImages);
             setFiles(files.slice(processedCount));
-            if (processedCount === 1) setPrimaryUploadFinished(true);
+            if (processedCount === 1) {
+              setPrimaryUploadFinished(true);
+              setPrimaryImageUrl(uploaded[0]?.url ?? null);
+            }
           },
         });
         window.location.reload();
@@ -960,7 +966,54 @@ function ProductEditor({
       setImageError(message);
       throw new Error(message);
     }
-    setImages((current) => current.filter((image) => image.id !== imageId));
+    setImages((current) => {
+      const removed = current.find((image) => image.id === imageId);
+      const next = current.filter((image) => image.id !== imageId);
+      setPrimaryImageUrl((primary) =>
+        removed?.url === primary ? next[0]?.url ?? null : primary,
+      );
+      return next;
+    });
+  }
+  async function removeLegacyImage() {
+    if (!productId) return;
+    setImageError("");
+    const response = await fetch("/api/admin/images", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ productId, removeLegacyPrimary: true }),
+    });
+    const body = (await response.json()) as { error?: string };
+    if (!response.ok) {
+      const message = body.error || "The photo could not be removed.";
+      setImageError(message);
+      throw new Error(message);
+    }
+    setPrimaryImageUrl(images[0]?.url ?? null);
+  }
+  async function reorderImages(imageIds: string[]) {
+    if (!productId) return;
+    setImageError("");
+    const response = await fetch("/api/admin/images", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ productId, imageIds }),
+    });
+    const body = (await response.json()) as { error?: string };
+    if (!response.ok) {
+      const message = body.error || "The photo order could not be saved.";
+      setImageError(message);
+      throw new Error(message);
+    }
+    setImages((current) => {
+      const byId = new Map(current.map((image) => [image.id, image]));
+      const next = imageIds.map((id, index) => ({
+        ...byId.get(id)!,
+        sortOrder: index,
+      }));
+      setPrimaryImageUrl(next[0]?.url ?? null);
+      return next;
+    });
   }
   return (
     <section className="admin-panel">
@@ -1093,11 +1146,13 @@ function ProductEditor({
         </fieldset>
         <ProductImageFields
           images={images}
-          primaryImageUrl={product.primaryImageUrl}
+          primaryImageUrl={primaryImageUrl}
           files={files}
           disabled={busy}
           onFilesChange={setFiles}
           onRemove={productId ? removeImage : undefined}
+          onRemoveLegacy={productId ? removeLegacyImage : undefined}
+          onReorder={productId ? reorderImages : undefined}
         />
         <RequiredPhotoChecklist product={product} />
         <label>
