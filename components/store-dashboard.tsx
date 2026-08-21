@@ -12,6 +12,10 @@ import {
   CollectibleListingFields,
   RequiredPhotoChecklist,
 } from "@/components/collectible-listing-fields";
+import {
+  ShipmentTimeline,
+  type ShipmentTimelineData,
+} from "@/components/shipment-timeline";
 
 type Store = {
   id: string;
@@ -127,34 +131,8 @@ type StoreOrder = {
   items: OrderItem[];
 };
 
-type TrackingEvent = {
-  id: string;
-  status: string;
-  statusDetails: string;
-  statusDate: string;
-  location: string;
-};
-
-type Shipment = {
-  id: string;
-  carrier: string;
-  serviceLevel: string;
+type Shipment = ShipmentTimelineData & {
   rateAmountCents: number;
-  currency: string;
-  parcelLength: string;
-  parcelWidth: string;
-  parcelHeight: string;
-  parcelWeight: string;
-  declaredValueCents: number;
-  insuranceRequired: boolean;
-  signatureRequired: boolean;
-  trackingNumber: string;
-  trackingUrl: string | null;
-  status: string;
-  statusDetails: string;
-  eta: string | null;
-  combinedOrderIds: string[];
-  events: TrackingEvent[];
 };
 
 type Analytics = {
@@ -1023,17 +1001,19 @@ function ShipmentDetails({ shipment, order }: { shipment: Shipment; order: Store
     }
   }
   return (
-    <section className="shipment-details">
-      <p><b>Tracking</b><br />{shipment.carrier} · {shipment.trackingNumber}</p>
-      <p><span className={`status ${shipment.status}`}>{shipment.status.replaceAll("_", " ")}</span> {shipment.serviceLevel}</p>
-      {shipment.statusDetails && <p>{shipment.statusDetails}</p>}
-      {shipment.combinedOrderIds.length > 1 && <p><b>Combined shipment:</b> {shipment.combinedOrderIds.length} orders share this label.</p>}
-      <p>{shipment.parcelLength} × {shipment.parcelWidth} × {shipment.parcelHeight} in · {shipment.parcelWeight} lb<br />{shipment.insuranceRequired ? `Insured for ${formatMoney(shipment.declaredValueCents)}` : "No added insurance"} · {shipment.signatureRequired ? "Signature required" : "No signature"}</p>
-      <div className="row-actions"><a className="button dark small" href={`/api/shipping/label?shipment_id=${encodeURIComponent(shipment.id)}`} target="_blank" rel="noreferrer">Print 4×6 label</a>{shipment.trackingUrl && <a className="button outline small" href={shipment.trackingUrl} target="_blank" rel="noreferrer">Carrier tracking</a>}<button className="button outline small" disabled={busy} onClick={() => void sync()}>{busy ? "Refreshing…" : "Refresh events"}</button></div>
-      {shipment.events.length > 0 && <ol className="tracking-events">{shipment.events.slice(0, 5).map((event) => <li key={event.id}><b>{event.status.replaceAll("_", " ")}</b><span>{event.statusDetails || "Carrier update"}</span><small>{dateTime(event.statusDate)}{formatTrackingLocation(event.location) ? ` · ${formatTrackingLocation(event.location)}` : ""}</small></li>)}</ol>}
+    <>
+      <ShipmentTimeline
+        shipment={shipment}
+        actions={
+          <>
+            <a className="button dark small" href={`/api/shipping/label?shipment_id=${encodeURIComponent(shipment.id)}`} target="_blank" rel="noreferrer">Print 4×6 label</a>
+            <button className="button outline small" disabled={busy} onClick={() => void sync()}>{busy ? "Refreshing…" : "Refresh events"}</button>
+          </>
+        }
+        note={order.fulfillmentStatus === "processing" ? <p className="form-note">A label is ready, but handling remains open until the carrier records the package in transit.</p> : null}
+      />
       {error && <p className="form-error" role="alert">{error}</p>}
-      {order.fulfillmentStatus === "processing" && <p className="form-note">A label is ready, but handling remains open until the carrier records the package in transit.</p>}
-    </section>
+    </>
   );
 }
 
@@ -1161,22 +1141,6 @@ function compatibleOrdersFor(order: StoreOrder, rows: StoreOrder[]) {
       candidate.shippingAddress === order.shippingAddress &&
       candidate.currency.toLowerCase() === order.currency.toLowerCase(),
   );
-}
-
-function formatTrackingLocation(value: string) {
-  try {
-    const location = JSON.parse(value) as {
-      city?: string;
-      state?: string;
-      zip?: string;
-      country?: string;
-    };
-    return [location.city, location.state, location.zip, location.country]
-      .filter(Boolean)
-      .join(", ");
-  } catch {
-    return "";
-  }
 }
 
 function dateTime(value: string) {

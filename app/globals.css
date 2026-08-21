@@ -748,10 +748,24 @@ footer { padding-top: 70px; color: white; background: var(--ink); }
 .manual-tracking { padding-top: 8px; border-top: 1px solid var(--line); }
 .manual-tracking summary { cursor: pointer; color: var(--muted); font-size: 12px; }
 .manual-tracking form { margin-top: 12px; }
-.shipment-details { display: grid; gap: 11px; margin-top: 20px; padding: 17px; background: #f5f3ee; }
+.shipment-details { display: grid; gap: 15px; margin-top: 20px; padding: 17px; background: #f5f3ee; }
 .shipment-details p { margin: 0; }
-.tracking-events { display: grid; gap: 0; margin: 4px 0 0; padding: 0; list-style: none; border-top: 1px solid var(--line); }
-.tracking-events li { display: grid; gap: 3px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.shipment-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.shipment-heading .eyebrow { margin-bottom: 5px; }
+.shipment-heading h4 { margin: 0; font-size: 17px; }
+.shipment-tracking-number { margin-top: 4px !important; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; overflow-wrap: anywhere; }
+.shipment-status-detail, .shipment-parcel, .shipment-combined { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.shipment-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; border: solid var(--line); border-width: 1px 0 0 1px; }
+.shipment-facts > div { display: grid; gap: 5px; min-width: 0; padding: 11px; border: solid var(--line); border-width: 0 1px 1px 0; }
+.shipment-facts dt { color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.shipment-facts dd { margin: 0; font-size: 12px; font-weight: 700; }
+.tracking-timeline-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding-top: 2px; }
+.tracking-timeline-heading h4 { margin: 0; font-size: 14px; }
+.tracking-timeline-heading span { color: var(--muted); font-size: 11px; }
+.tracking-events { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+.tracking-events li { position: relative; display: grid; gap: 3px; padding: 0 0 18px 24px; }
+.tracking-events li:not(:last-child)::before { position: absolute; top: 9px; bottom: -1px; left: 5px; width: 1px; background: #c9c5bc; content: ""; }
+.tracking-events li::after { position: absolute; top: 4px; left: 1px; width: 9px; height: 9px; background: var(--ink); border: 2px solid #f5f3ee; border-radius: 50%; content: ""; }
 .tracking-events li b { font-size: 11px; text-transform: uppercase; }
 .tracking-events li span, .tracking-events li small { color: var(--muted); }
 .handling-badge { display: inline-block; margin: 3px; padding: 5px 8px; font-size: 10px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; background: #e8e5dc; }
@@ -797,7 +811,7 @@ footer { padding-top: 70px; color: white; background: var(--ink); }
   .store-sidebar nav { grid-template-columns: repeat(5, minmax(100px, 1fr)); margin: 0; overflow-x: auto; }
   .store-main { padding: 24px 15px 60px; }
   .store-page-heading, .store-order-header { align-items: flex-start; flex-direction: column; }
-  .store-metrics, .store-order-summary, .store-order-body, .store-inventory-tools, .parcel-grid { grid-template-columns: 1fr; }
+  .store-metrics, .store-order-summary, .store-order-body, .store-inventory-tools, .parcel-grid, .shipment-facts { grid-template-columns: 1fr; }
   .store-editor-backdrop { padding: 0; }
   .store-editor { max-height: 100vh; min-height: 100vh; padding: 22px 16px; }
 }

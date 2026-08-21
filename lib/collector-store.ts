@@ -10,6 +10,9 @@ import {
   products,
   sellerFeedback,
   sellers,
+  shipmentOrders,
+  shipments,
+  trackingEvents,
   wantedRequests,
   wishlistItems,
 } from "@/db/schema";
@@ -360,7 +363,7 @@ export async function getGarageData(userId: string) {
     db.select().from(sellers).where(eq(sellers.ownerUserId, userId)).limit(1),
   ]);
   const ids = orderRows.map((order) => order.id);
-  const [items, feedbackRows] = ids.length
+  const [items, feedbackRows, shipmentLinks] = ids.length
     ? await Promise.all([
         db.select().from(orderItems).where(inArray(orderItems.orderId, ids)),
         db
@@ -372,8 +375,26 @@ export async function getGarageData(userId: string) {
           })
           .from(sellerFeedback)
           .where(inArray(sellerFeedback.orderId, ids)),
+        db
+          .select({
+            orderId: shipmentOrders.orderId,
+            shipment: shipments,
+          })
+          .from(shipmentOrders)
+          .innerJoin(shipments, eq(shipmentOrders.shipmentId, shipments.id))
+          .where(inArray(shipmentOrders.orderId, ids)),
       ])
-    : [[], []];
+    : [[], [], []];
+  const shipmentIds = [
+    ...new Set(shipmentLinks.map((link) => link.shipment.id)),
+  ];
+  const shipmentEvents = shipmentIds.length
+    ? await db
+        .select()
+        .from(trackingEvents)
+        .where(inArray(trackingEvents.shipmentId, shipmentIds))
+        .orderBy(desc(trackingEvents.statusDate))
+    : [];
   const seller = sellerRows[0] ?? null;
   const listingRows = seller
     ? await db
@@ -431,6 +452,11 @@ export async function getGarageData(userId: string) {
       items: items.filter((item) => item.orderId === order.id),
       feedback:
         feedbackRows.find((feedback) => feedback.orderId === order.id) ?? null,
+      shipment: shipmentForBuyerOrder(
+        order.id,
+        shipmentLinks,
+        shipmentEvents,
+      ),
     })),
     hunts: huntRows,
     seller,
@@ -439,6 +465,23 @@ export async function getGarageData(userId: string) {
       ...order,
       items: saleItems.filter((item) => item.orderId === order.id),
     })),
+  };
+}
+
+function shipmentForBuyerOrder(
+  orderId: string,
+  links: Array<{ orderId: string; shipment: typeof shipments.$inferSelect }>,
+  events: Array<typeof trackingEvents.$inferSelect>,
+) {
+  const shipment = links.find((link) => link.orderId === orderId)?.shipment;
+  if (!shipment) return null;
+  const combinedOrderIds = links
+    .filter((link) => link.shipment.id === shipment.id)
+    .map((link) => link.orderId);
+  return {
+    ...shipment,
+    combinedOrderIds,
+    events: events.filter((event) => event.shipmentId === shipment.id),
   };
 }
 

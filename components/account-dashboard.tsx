@@ -4,11 +4,18 @@ import Image from "next/image";
 import Link from "next/link";
 import { FormEvent, useState } from "react";
 import { formatMoney } from "@/lib/format";
+import {
+  ShipmentTimeline,
+  type ShipmentTimelineData,
+} from "@/components/shipment-timeline";
 
 type GarageData = {
   wishlist: string[];
   orders: Array<
-    Record<string, unknown> & { items: Array<Record<string, unknown>> }
+    Record<string, unknown> & {
+      items: Array<Record<string, unknown>>;
+      shipment: ShipmentTimelineData | null;
+    }
   >;
   hunts: Array<Record<string, unknown>>;
   seller: (Record<string, unknown> & { id: string }) | null;
@@ -371,12 +378,13 @@ function Orders({
               </span>{" "}
               · {formatMoney(Number(order.totalCents), String(order.currency))}
             </p>
-            {Boolean(order.trackingNumber) && (
+            {Boolean(order.trackingNumber) && !order.shipment && (
               <p>
                 Tracking: {String(order.carrier)} ·{" "}
                 {String(order.trackingNumber)}
               </p>
             )}
+            {order.shipment && <ShipmentTimeline shipment={order.shipment} />}
             <Link className="button outline small" href={`/resolution?order=${String(order.id)}`}>
               Get help with this order
             </Link>

@@ -348,3 +348,31 @@ test("the account migration is additive and detaches retained records on deletio
     /sellers` ADD `owner_user_id` text REFERENCES user\(id\) ON DELETE SET NULL/i,
   );
 });
+
+test("buyer-owned orders surface the protected shipment timeline in My Garage", async () => {
+  const [collectorStore, accountDashboard, shipmentTimeline] = await Promise.all([
+    readFile(new URL("../lib/collector-store.ts", import.meta.url), "utf8"),
+    readFile(
+      new URL("../components/account-dashboard.tsx", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../components/shipment-timeline.tsx", import.meta.url),
+      "utf8",
+    ),
+  ]);
+
+  assert.match(collectorStore, /eq\(orders\.buyerUserId, userId\)/);
+  assert.match(collectorStore, /innerJoin\(shipments,/);
+  assert.match(collectorStore, /shipmentForBuyerOrder/);
+  assert.match(
+    accountDashboard,
+    /<ShipmentTimeline shipment=\{order\.shipment\}/,
+  );
+  assert.match(shipmentTimeline, /Estimated delivery/);
+  assert.match(shipmentTimeline, /Package state/);
+  assert.match(shipmentTimeline, /Insurance/);
+  assert.match(shipmentTimeline, /Signature/);
+  assert.match(shipmentTimeline, /Tracking timeline/);
+  assert.doesNotMatch(accountDashboard, /api\/shipping\/label/);
+});
