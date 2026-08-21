@@ -686,6 +686,7 @@ function Sales({
                 ? "not recorded for this order"
                 : formatMoney(Number(sale.sellerProceedsCents), String(sale.currency))}
             </p>
+            <p><b>Payout:</b> {collectorPayoutLabel(sale)}</p>
             <p>
               <span className={`status ${String(sale.fulfillmentStatus)}`}>
                 {String(sale.fulfillmentStatus)}
@@ -864,6 +865,21 @@ function huntMessage(status: string) {
     )[status] ?? ""
   );
 }
+function collectorPayoutLabel(sale: GarageData["sales"][number]) {
+  if (sale.paymentFlow === "destination") return "Legacy Stripe payout schedule";
+  if (sale.sellerTransferStatus === "transferred")
+    return sale.sellerTransferredAt
+      ? `Released to Stripe ${date(String(sale.sellerTransferredAt))}`
+      : "Released to Stripe";
+  if (sale.sellerTransferStatus === "processing") return "Release processing";
+  if (sale.sellerTransferStatus === "failed") return "Release will be retried";
+  if (sale.sellerTransferStatus === "cancelled") return "Cancelled";
+  if (sale.sellerTransferStatus === "reversed") return "Reversed for refund";
+  return sale.payoutEligibleAt
+    ? `Held through ${date(String(sale.payoutEligibleAt))}`
+    : "Held until three days after delivery";
+}
+
 function date(value: string) {
   return new Intl.DateTimeFormat("en-US", { dateStyle: "medium" }).format(
     new Date(value),

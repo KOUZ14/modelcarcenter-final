@@ -25,6 +25,8 @@ import { canClaimProfessionalStore } from "./account-rules";
 import { buildStoreAnalytics } from "./store-rules";
 import { determineMarketplaceFee } from "./fees";
 import { parseParcel } from "./shipping-rules";
+import { registerShippoTracking } from "./shippo";
+import { recordOrderTrackingUpdate } from "./shipping";
 import {
   notifyRestockSubscribers,
   parseProductAvailability,
@@ -142,6 +144,10 @@ export async function getStoreDashboardData(userId: string) {
         platformFeeCents: orders.platformFeeCents,
         paymentProcessingFeeCents: orders.paymentProcessingFeeCents,
         sellerProceedsCents: orders.sellerProceedsCents,
+        paymentFlow: orders.paymentFlow,
+        sellerTransferStatus: orders.sellerTransferStatus,
+        sellerTransferAmountCents: orders.sellerTransferAmountCents,
+        sellerTransferReversedCents: orders.sellerTransferReversedCents,
         totalCents: orders.totalCents,
         refundedAmountCents: orders.refundedAmountCents,
         paymentStatus: orders.paymentStatus,
@@ -152,6 +158,10 @@ export async function getStoreDashboardData(userId: string) {
         paidAt: orders.paidAt,
         shipByAt: orders.shipByAt,
         shippedAt: orders.shippedAt,
+        deliveredAt: orders.deliveredAt,
+        refundRequestDeadline: orders.refundRequestDeadline,
+        payoutEligibleAt: orders.payoutEligibleAt,
+        sellerTransferredAt: orders.sellerTransferredAt,
       })
       .from(orders)
       .where(eq(orders.sellerId, store.id))
@@ -541,6 +551,10 @@ export async function shipOwnedStoreOrder(
     throw new ValidationError(
       "This store is suspended. Contact Model Car Center support.",
     );
+  if (!config.shippoApiKey)
+    throw new ValidationError(
+      "Carrier tracking is unavailable. Contact Model Car Center support before shipping.",
+    );
   const fulfillmentService = cleanText(payload.fulfillmentService, 150) || null;
   const fulfillmentEstimatedDays =
     cleanText(payload.fulfillmentEstimatedDays, 10)
@@ -569,6 +583,11 @@ export async function shipOwnedStoreOrder(
         "Use the buyer-selected service or attest to an equal/faster transit time; shipping downgrades are not allowed.",
       );
   }
+  const tracking = await registerShippoTracking(
+    carrier,
+    trackingNumber,
+    `MCC ${row.order.orderNumber}`,
+  );
   await getDb()
     .update(orders)
     .set({
@@ -583,6 +602,7 @@ export async function shipOwnedStoreOrder(
     .where(
       and(eq(orders.id, orderId), eq(orders.sellerId, row.seller.id)),
     );
+  await recordOrderTrackingUpdate([orderId], tracking);
   const email = await sendShipmentEmail({
     buyerEmail: row.order.buyerEmail,
     orderNumber: row.order.orderNumber,

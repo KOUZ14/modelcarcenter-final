@@ -45,6 +45,8 @@ import {
   createFullRefund,
   retrieveStripeAccount,
 } from "@/lib/stripe";
+import { registerShippoTracking } from "@/lib/shippo";
+import { recordOrderTrackingUpdate } from "@/lib/shipping";
 import {
   assertCollectibleListingReady,
   cleanText,
@@ -911,6 +913,15 @@ async function shipOrder(payload: Record<string, unknown>) {
   const order = rows[0];
   if (!order || order.paymentStatus !== "paid")
     throw new ValidationError("Only paid orders can be marked shipped.");
+  if (!config.shippoApiKey)
+    throw new ValidationError(
+      "Carrier tracking is unavailable. Configure Shippo before shipping.",
+    );
+  const tracking = await registerShippoTracking(
+    carrier,
+    trackingNumber,
+    `MCC ${order.orderNumber}`,
+  );
   await db
     .update(orders)
     .set({
@@ -921,6 +932,7 @@ async function shipOrder(payload: Record<string, unknown>) {
       updatedAt: new Date().toISOString(),
     })
     .where(eq(orders.id, orderId));
+  await recordOrderTrackingUpdate([orderId], tracking);
   const email = await sendShipmentEmail({
     buyerEmail: order.buyerEmail,
     orderNumber: order.orderNumber,
@@ -952,6 +964,13 @@ async function refundOrder(payload: Record<string, unknown>) {
     orderId,
     paymentIntentId: order.stripePaymentIntentId,
     chargeId: order.stripeChargeId,
+    paymentFlow: order.paymentFlow,
+    stripeTransferId: order.stripeTransferId,
+    totalCents: order.totalCents,
+    refundedAmountCents: order.refundedAmountCents,
+    sellerTransferAmountCents: order.sellerTransferAmountCents,
+    sellerTransferReversedCents: order.sellerTransferReversedCents,
+    sellerProceedsCents: order.sellerProceedsCents,
   });
   if (refund.status !== "succeeded")
     return { refundId: refund.id, refundStatus: refund.status, pending: true };
@@ -959,9 +978,24 @@ async function refundOrder(payload: Record<string, unknown>) {
   const statements = [
     d1
       .prepare(
-        `UPDATE orders SET payment_status = 'refunded', refunded_amount_cents = total_cents, stripe_refund_id = ?, fulfillment_status = 'cancelled', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND payment_status IN ('paid', 'partially_refunded')`,
+        `UPDATE orders SET payment_status = 'refunded', refunded_amount_cents = total_cents,
+          stripe_refund_id = ?, fulfillment_status = 'cancelled',
+          seller_transfer_reversed_cents = CASE WHEN payment_flow = 'separate'
+            THEN MAX(seller_transfer_reversed_cents, ?) ELSE seller_transfer_reversed_cents END,
+          seller_transfer_status = CASE
+            WHEN payment_flow = 'separate' AND stripe_transfer_id IS NULL THEN 'cancelled'
+            WHEN payment_flow = 'separate' AND stripe_transfer_id IS NOT NULL
+              AND ? >= seller_transfer_amount_cents THEN 'reversed'
+            ELSE seller_transfer_status END,
+          updated_at = CURRENT_TIMESTAMP
+          WHERE id = ? AND payment_status IN ('paid', 'partially_refunded')`,
       )
-      .bind(refund.id, orderId),
+      .bind(
+        refund.id,
+        refund.sellerTransferReversedCents,
+        refund.sellerTransferReversedCents,
+        orderId,
+      ),
   ];
   const restockedProductIds: string[] = [];
   if (restock) {

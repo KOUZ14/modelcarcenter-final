@@ -29,6 +29,10 @@ import {
   shippingAddressKey,
 } from "./shipping-rules";
 import { cleanText, ValidationError } from "./validation";
+import {
+  addCalendarDays,
+  REFUND_REQUEST_DAYS_AFTER_DELIVERY,
+} from "./protection";
 
 const MAX_COMBINED_ORDERS = 10;
 
@@ -350,7 +354,26 @@ export async function processShippoTrackingWebhook(payload: unknown) {
           )
           .limit(1)
       : [];
-  if (!rows[0]) return { ignored: true };
+  if (!rows[0]) {
+    const directOrders =
+      data.carrier && data.tracking_number
+        ? await db
+            .select({ id: orders.id })
+            .from(orders)
+            .where(
+              and(
+                sql`lower(${orders.carrier}) = ${data.carrier.toLowerCase()}`,
+                eq(orders.trackingNumber, data.tracking_number),
+              ),
+            )
+        : [];
+    if (!directOrders.length) return { ignored: true };
+    await recordOrderTrackingUpdate(
+      directOrders.map((order) => order.id),
+      data,
+    );
+    return { updated: true, orderIds: directOrders.map((order) => order.id) };
+  }
   await recordTrackingUpdate(rows[0], data, "webhook");
   return { updated: true, shipmentId: rows[0].id };
 }
@@ -392,6 +415,11 @@ async function recordTrackingUpdate(
   if (!latest) return;
   const nextStatus = mapShippoTrackingStatus(latest.status);
   const now = new Date().toISOString();
+  const eventAt = validDate(latest.status_date) ?? now;
+  const deliveryDeadline =
+    nextStatus === "delivered"
+      ? addCalendarDays(eventAt, REFUND_REQUEST_DAYS_AFTER_DELIVERY)
+      : null;
   const startedTransit =
     nextStatus === "in_transit" &&
     !["in_transit", "delivered"].includes(shipment.status);
@@ -409,7 +437,7 @@ async function recordTrackingUpdate(
           : shipment.shippedAt,
       deliveredAt:
         nextStatus === "delivered" && !shipment.deliveredAt
-          ? validDate(latest.status_date) ?? now
+          ? eventAt
           : shipment.deliveredAt,
       updatedAt: now,
     })
@@ -420,16 +448,13 @@ async function recordTrackingUpdate(
     .where(eq(shipmentOrders.shipmentId, shipment.id));
   const orderIds = links.map((link) => link.orderId);
   if (!orderIds.length) return;
-  if (["in_transit", "delivered"].includes(nextStatus)) {
-    await db
-      .update(orders)
-      .set({
-        fulfillmentStatus: nextStatus === "delivered" ? "delivered" : "shipped",
-        shippedAt: sql`COALESCE(${orders.shippedAt}, ${validDate(latest.status_date) ?? now})`,
-        updatedAt: now,
-      })
-      .where(inArray(orders.id, orderIds));
-  }
+  await applyOrderTrackingStatus({
+    orderIds,
+    nextStatus,
+    eventAt,
+    now,
+    deliveryDeadline,
+  });
   if (startedTransit) {
     const relatedOrders = await db
       .select({
@@ -448,6 +473,60 @@ async function recordTrackingUpdate(
       ),
     );
   }
+}
+
+export async function recordOrderTrackingUpdate(
+  orderIds: string[],
+  tracking: ShippoTracking,
+) {
+  const history = tracking.tracking_history ?? [];
+  const latest = tracking.tracking_status ?? history.at(-1);
+  if (!latest || !orderIds.length) return;
+  const nextStatus = mapShippoTrackingStatus(latest.status);
+  const now = new Date().toISOString();
+  const eventAt = validDate(latest.status_date) ?? now;
+  const deliveryDeadline =
+    nextStatus === "delivered"
+      ? addCalendarDays(eventAt, REFUND_REQUEST_DAYS_AFTER_DELIVERY)
+      : null;
+  await applyOrderTrackingStatus({
+    orderIds,
+    nextStatus,
+    eventAt,
+    now,
+    deliveryDeadline,
+  });
+}
+
+async function applyOrderTrackingStatus(input: {
+  orderIds: string[];
+  nextStatus: ReturnType<typeof mapShippoTrackingStatus>;
+  eventAt: string;
+  now: string;
+  deliveryDeadline: string | null;
+}) {
+  if (!["in_transit", "delivered"].includes(input.nextStatus)) return;
+  await getDb()
+    .update(orders)
+    .set({
+      fulfillmentStatus:
+        input.nextStatus === "delivered" ? "delivered" : "shipped",
+      shippedAt: sql`COALESCE(${orders.shippedAt}, ${input.eventAt})`,
+      deliveredAt:
+        input.nextStatus === "delivered"
+          ? sql`COALESCE(${orders.deliveredAt}, ${input.eventAt})`
+          : orders.deliveredAt,
+      refundRequestDeadline:
+        input.nextStatus === "delivered"
+          ? sql`COALESCE(${orders.refundRequestDeadline}, ${input.deliveryDeadline})`
+          : orders.refundRequestDeadline,
+      payoutEligibleAt:
+        input.nextStatus === "delivered"
+          ? sql`COALESCE(${orders.payoutEligibleAt}, ${input.deliveryDeadline})`
+          : orders.payoutEligibleAt,
+      updatedAt: input.now,
+    })
+    .where(inArray(orders.id, input.orderIds));
 }
 
 async function loadOwnedOrders(userId: string, orderIds: string[]) {

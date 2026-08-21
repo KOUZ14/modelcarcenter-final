@@ -1,5 +1,6 @@
 export const PROTECTION_REPORT_DAYS_AFTER_SHIPMENT = 30;
 export const PROTECTION_REPORT_DAYS_AFTER_PAYMENT = 45;
+export const REFUND_REQUEST_DAYS_AFTER_DELIVERY = 3;
 export const SELLER_RESPONSE_DAYS = 3;
 export const BUYER_EVIDENCE_DAYS = 5;
 export const BUYER_ESCALATION_DAYS = 3;
@@ -35,7 +36,16 @@ export function reportDeadlineForOrder(order: {
   paidAt?: string | null;
   createdAt: string;
   shippedAt?: string | null;
+  deliveredAt?: string | null;
+  refundRequestDeadline?: string | null;
 }) {
+  if (order.refundRequestDeadline) return order.refundRequestDeadline;
+  if (order.deliveredAt) {
+    return addCalendarDays(
+      order.deliveredAt,
+      REFUND_REQUEST_DAYS_AFTER_DELIVERY,
+    );
+  }
   const startsAt = order.shippedAt ?? order.paidAt ?? order.createdAt;
   return addCalendarDays(
     startsAt,
@@ -53,6 +63,8 @@ export function canReportOrderProblem(
     paidAt?: string | null;
     createdAt: string;
     shippedAt?: string | null;
+    deliveredAt?: string | null;
+    refundRequestDeadline?: string | null;
   },
   now = new Date(),
 ) {
@@ -118,4 +130,3 @@ export function protectionReasonLabel(reason: string) {
   };
   return labels[reason] ?? reason.replaceAll("_", " ");
 }
-

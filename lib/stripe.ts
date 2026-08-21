@@ -64,6 +64,10 @@ export type CheckoutSessionInput = {
   policyVersion: string;
 };
 
+export function stripeTransferGroup(reservationId: string) {
+  return `MCC_${reservationId}`;
+}
+
 export function buildCheckoutSessionBody(input: CheckoutSessionInput) {
   const body = new URLSearchParams({
     mode: "payment",
@@ -77,8 +81,11 @@ export function buildCheckoutSessionBody(input: CheckoutSessionInput) {
     "metadata[marketplace_fee_bps]": String(input.marketplaceFeeBps),
     "metadata[policy_version]": input.policyVersion,
     "metadata[policy_accepted_at]": new Date().toISOString(),
-    "payment_intent_data[application_fee_amount]": String(input.platformFeeCents),
-    "payment_intent_data[transfer_data][destination]": input.sellerStripeAccountId,
+    "metadata[payment_flow]": "separate",
+    "payment_intent_data[transfer_group]": stripeTransferGroup(input.reservationId),
+    "payment_intent_data[metadata][payment_flow]": "separate",
+    "payment_intent_data[metadata][seller_id]": input.sellerId,
+    "payment_intent_data[metadata][seller_stripe_account_id]": input.sellerStripeAccountId,
     "payment_intent_data[metadata][reservation_id]": input.reservationId,
     "automatic_tax[enabled]": config.automaticTax ? "true" : "false",
   });
@@ -178,6 +185,13 @@ export async function createOrderRefund(input: {
   chargeId?: string | null;
   amountCents?: number;
   idempotencyKey?: string;
+  paymentFlow?: "destination" | "separate";
+  stripeTransferId?: string | null;
+  totalCents?: number;
+  refundedAmountCents?: number;
+  sellerTransferAmountCents?: number;
+  sellerTransferReversedCents?: number;
+  sellerProceedsCents?: number | null;
 }) {
   let chargeId = input.chargeId;
   if (!chargeId) {
@@ -189,26 +203,155 @@ export async function createOrderRefund(input: {
   if (!chargeId) throw new Error("Stripe charge is unavailable for this order.");
   const body = new URLSearchParams({
     charge: chargeId,
-    reverse_transfer: "true",
-    refund_application_fee: "true",
     "metadata[order_id]": input.orderId,
   });
+  if (input.paymentFlow !== "separate") {
+    body.set("reverse_transfer", "true");
+    body.set("refund_application_fee", "true");
+  }
   if (input.amountCents != null) body.set("amount", String(input.amountCents));
-  return stripeRequest<{ id: string; status: string }>("/v1/refunds", {
+  const refund = await stripeRequest<{ id: string; status: string }>("/v1/refunds", {
     method: "POST",
     body,
     idempotencyKey:
       input.idempotencyKey ??
       `${input.amountCents == null ? "full" : `partial-${input.amountCents}`}-refund-${input.orderId}`,
   });
+  let sellerTransferReversedCents = input.sellerTransferReversedCents ?? 0;
+  if (
+    input.paymentFlow === "separate" &&
+    refund.status === "succeeded" &&
+    input.stripeTransferId &&
+    input.totalCents &&
+    input.sellerTransferAmountCents
+  ) {
+    const refundedAfter = Math.min(
+      input.totalCents,
+      (input.refundedAmountCents ?? 0) +
+        (input.amountCents ?? input.totalCents - (input.refundedAmountCents ?? 0)),
+    );
+    const targetReversedCents = sellerTransferReversalTarget({
+      totalCents: input.totalCents,
+      refundedAmountCents: refundedAfter,
+      sellerTransferAmountCents: input.sellerTransferAmountCents,
+      sellerProceedsCents:
+        input.sellerProceedsCents ?? input.sellerTransferAmountCents,
+    });
+    const amountToReverse = Math.max(
+      0,
+      targetReversedCents - sellerTransferReversedCents,
+    );
+    if (amountToReverse > 0) {
+      await reverseSellerTransfer({
+        transferId: input.stripeTransferId,
+        orderId: input.orderId,
+        amountCents: amountToReverse,
+        targetReversedCents,
+      });
+      sellerTransferReversedCents = targetReversedCents;
+    }
+  }
+  return { ...refund, sellerTransferReversedCents };
 }
 
 export async function createFullRefund(input: {
   orderId: string;
   paymentIntentId: string;
   chargeId?: string | null;
+  paymentFlow?: "destination" | "separate";
+  stripeTransferId?: string | null;
+  totalCents?: number;
+  refundedAmountCents?: number;
+  sellerTransferAmountCents?: number;
+  sellerTransferReversedCents?: number;
+  sellerProceedsCents?: number | null;
 }) {
   return createOrderRefund(input);
+}
+
+export function sellerTransferReversalTarget(input: {
+  totalCents: number;
+  refundedAmountCents: number;
+  sellerTransferAmountCents: number;
+  sellerProceedsCents?: number;
+}) {
+  if (input.totalCents < 1 || input.sellerTransferAmountCents < 1) return 0;
+  const netSellerProceeds = sellerProceedsAfterRefund({
+    totalCents: input.totalCents,
+    refundedAmountCents: input.refundedAmountCents,
+    sellerProceedsCents:
+      input.sellerProceedsCents ?? input.sellerTransferAmountCents,
+  });
+  return Math.min(
+    input.sellerTransferAmountCents,
+    Math.max(0, input.sellerTransferAmountCents - netSellerProceeds),
+  );
+}
+
+export function sellerProceedsAfterRefund(input: {
+  totalCents: number;
+  refundedAmountCents: number;
+  sellerProceedsCents: number;
+}) {
+  if (input.totalCents < 1 || input.sellerProceedsCents < 1) return 0;
+  const remaining = Math.max(
+    0,
+    input.totalCents - Math.max(0, input.refundedAmountCents),
+  );
+  return Math.min(
+    input.sellerProceedsCents,
+    Math.round((input.sellerProceedsCents * remaining) / input.totalCents),
+  );
+}
+
+export async function createSellerTransfer(input: {
+  orderId: string;
+  orderNumber: string;
+  sellerId: string;
+  sellerStripeAccountId: string;
+  chargeId: string;
+  transferGroup: string;
+  amountCents: number;
+  currency: string;
+}) {
+  const body = new URLSearchParams({
+    amount: String(input.amountCents),
+    currency: input.currency.toLowerCase(),
+    destination: input.sellerStripeAccountId,
+    source_transaction: input.chargeId,
+    transfer_group: input.transferGroup,
+    "metadata[order_id]": input.orderId,
+    "metadata[order_number]": input.orderNumber,
+    "metadata[seller_id]": input.sellerId,
+  });
+  return stripeRequest<{ id: string; amount: number; amount_reversed: number }>(
+    "/v1/transfers",
+    {
+      method: "POST",
+      body,
+      idempotencyKey: `seller-transfer-${input.orderId}`,
+    },
+  );
+}
+
+export async function reverseSellerTransfer(input: {
+  transferId: string;
+  orderId: string;
+  amountCents: number;
+  targetReversedCents: number;
+}) {
+  const body = new URLSearchParams({
+    amount: String(input.amountCents),
+    "metadata[order_id]": input.orderId,
+  });
+  return stripeRequest<{ id: string; amount: number }>(
+    `/v1/transfers/${encodeURIComponent(input.transferId)}/reversals`,
+    {
+      method: "POST",
+      body,
+      idempotencyKey: `seller-transfer-reversal-${input.orderId}-${input.targetReversedCents}`,
+    },
+  );
 }
 
 export async function verifyStripeWebhook(rawBody: string, signatureHeader: string, secret = config.stripeWebhookSecret) {

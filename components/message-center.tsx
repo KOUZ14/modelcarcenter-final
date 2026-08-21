@@ -229,7 +229,7 @@ export function MessageCenter({
                   rows={4}
                   value={draft}
                   maxLength={MAX_MESSAGE_LENGTH}
-                  placeholder="Ask about condition, photos, provenance, or shipping…"
+                  placeholder="Ask about condition, photos, or shipping…"
                   onChange={(event) => setDraft(event.target.value)}
                   onKeyDown={submitShortcut}
                   required

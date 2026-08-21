@@ -588,6 +588,34 @@ export const orders = sqliteTable(
     stripePaymentIntentId: text("stripe_payment_intent_id"),
     stripeChargeId: text("stripe_charge_id"),
     stripeRefundId: text("stripe_refund_id"),
+    paymentFlow: text("payment_flow", {
+      enum: ["destination", "separate"],
+    })
+      .notNull()
+      .default("destination"),
+    stripeTransferGroup: text("stripe_transfer_group"),
+    stripeTransferId: text("stripe_transfer_id"),
+    sellerTransferStatus: text("seller_transfer_status", {
+      enum: [
+        "pending",
+        "processing",
+        "transferred",
+        "failed",
+        "cancelled",
+        "reversed",
+      ],
+    })
+      .notNull()
+      .default("transferred"),
+    sellerTransferAmountCents: integer("seller_transfer_amount_cents")
+      .notNull()
+      .default(0),
+    sellerTransferReversedCents: integer("seller_transfer_reversed_cents")
+      .notNull()
+      .default(0),
+    sellerTransferProcessingAt: text("seller_transfer_processing_at"),
+    sellerTransferredAt: text("seller_transferred_at"),
+    sellerTransferLastError: text("seller_transfer_last_error"),
     buyerEmail: text("buyer_email").notNull(),
     currency: text("currency").notNull(),
     subtotalCents: integer("subtotal_cents").notNull(),
@@ -632,6 +660,9 @@ export const orders = sqliteTable(
     paidAt: text("paid_at"),
     shipByAt: text("ship_by_at"),
     shippedAt: text("shipped_at"),
+    deliveredAt: text("delivered_at"),
+    refundRequestDeadline: text("refund_request_deadline"),
+    payoutEligibleAt: text("payout_eligible_at"),
     updatedAt: text("updated_at")
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),
@@ -641,14 +672,22 @@ export const orders = sqliteTable(
     uniqueIndex("orders_checkout_session_unique").on(
       table.stripeCheckoutSessionId,
     ),
+    uniqueIndex("orders_stripe_transfer_unique").on(table.stripeTransferId),
     index("orders_status_idx").on(table.paymentStatus, table.fulfillmentStatus),
+    index("orders_transfer_release_idx").on(
+      table.paymentFlow,
+      table.sellerTransferStatus,
+      table.payoutEligibleAt,
+    ),
     index("orders_buyer_user_idx").on(table.buyerUserId, table.createdAt),
     check(
       "orders_money_nonnegative",
       sql`
       ${table.subtotalCents} >= 0 AND ${table.shippingCents} >= 0 AND
       ${table.platformFeeCents} >= 0 AND ${table.taxCents} >= 0 AND ${table.totalCents} >= 0 AND
-      ${table.refundedAmountCents} >= 0 AND ${table.refundedAmountCents} <= ${table.totalCents}
+      ${table.refundedAmountCents} >= 0 AND ${table.refundedAmountCents} <= ${table.totalCents} AND
+      ${table.sellerTransferAmountCents} >= 0 AND ${table.sellerTransferReversedCents} >= 0 AND
+      ${table.sellerTransferReversedCents} <= ${table.sellerTransferAmountCents}
     `,
     ),
   ],

@@ -393,7 +393,7 @@ export function HomeMarketplace() {
             <p className="eyebrow">Browse the makers you know</p>
             <h2>Popular model brands</h2>
           </div>
-          <p>From museum-grade 1:18 pieces to the newest 1:64 releases.</p>
+          <p>From detailed 1:18 pieces to the newest 1:64 releases.</p>
         </div>
         <div className="brand-grid">
           {makers.map((maker) => (
@@ -465,7 +465,7 @@ export function HomeMarketplace() {
         <div className="shell community-inner">
           <div>
             <p className="eyebrow">The collection is just getting started</p>
-            <h2>Join the center of model-car collecting.</h2>
+            <h2>Join the center of model car collecting.</h2>
             <p>
               Get new inventory, seller announcements, and Model Hunt updates.
             </p>

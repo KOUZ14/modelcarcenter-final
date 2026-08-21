@@ -9,6 +9,7 @@ fi
 
 worker="${SITES_PROJECT_ROOT}/dist/server/index.js"
 hosting="${SITES_PROJECT_ROOT}/dist/.openai/hosting.json"
+loader="./scripts/cloudflare-validation-loader.mjs"
 
 [[ -f "${worker}" ]] || {
   echo "Missing Sites Worker entry: dist/server/index.js" >&2
@@ -19,7 +20,7 @@ hosting="${SITES_PROJECT_ROOT}/dist/.openai/hosting.json"
   exit 66
 }
 
-node --experimental-loader "${script_dir}/cloudflare-validation-loader.mjs" --input-type=module - "${worker}" "${hosting}" <<'NODE'
+node --experimental-loader "${loader}" --input-type=module - "${worker}" "${hosting}" <<'NODE'
 import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 

@@ -2,6 +2,7 @@
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
 import { processResolutionNotifications } from "../lib/resolution-notifications";
+import { processEligibleSellerTransfers } from "../lib/seller-transfers";
 
 interface Env {
   ASSETS: Fetcher;
@@ -54,11 +55,12 @@ const worker = {
     env: Env,
     ctx: ExecutionContext,
   ): Promise<void> {
+    const now = new Date(controller.scheduledTime);
     ctx.waitUntil(
-      processResolutionNotifications({
-        database: env.DB,
-        now: new Date(controller.scheduledTime),
-      }),
+      Promise.all([
+        processResolutionNotifications({ database: env.DB, now }),
+        processEligibleSellerTransfers({ database: env.DB, now }),
+      ]).then(() => undefined),
     );
   },
 };

@@ -84,6 +84,8 @@ export async function getResolutionCenterData(userId: string) {
       createdAt: orders.createdAt,
       paidAt: orders.paidAt,
       shippedAt: orders.shippedAt,
+      deliveredAt: orders.deliveredAt,
+      refundRequestDeadline: orders.refundRequestDeadline,
     })
     .from(orders)
     .innerJoin(sellers, eq(orders.sellerId, sellers.id))
@@ -728,6 +730,14 @@ export async function issueResolutionRefund(
     chargeId: access.order.stripeChargeId,
     amountCents,
     idempotencyKey: `resolution-${caseId}-${access.order.refundedAmountCents}-${amountCents}`,
+    paymentFlow: access.order.paymentFlow,
+    stripeTransferId: access.order.stripeTransferId,
+    totalCents: access.order.totalCents,
+    refundedAmountCents: access.order.refundedAmountCents,
+    sellerTransferAmountCents: access.order.sellerTransferAmountCents,
+    sellerTransferReversedCents:
+      access.order.sellerTransferReversedCents,
+    sellerProceedsCents: access.order.sellerProceedsCents,
   });
   const succeeded = refund.status === "succeeded";
   const newRefundedAmount = Math.min(
@@ -792,12 +802,23 @@ export async function issueResolutionRefund(
       d1
         .prepare(
           `UPDATE orders SET refunded_amount_cents = ?, payment_status = ?,
-          stripe_refund_id = ?, updated_at = ? WHERE id = ?`,
+          stripe_refund_id = ?,
+          seller_transfer_reversed_cents = CASE WHEN payment_flow = 'separate'
+            THEN MAX(seller_transfer_reversed_cents, ?) ELSE seller_transfer_reversed_cents END,
+          seller_transfer_status = CASE
+            WHEN payment_flow = 'separate' AND stripe_transfer_id IS NULL AND ? = 1 THEN 'cancelled'
+            WHEN payment_flow = 'separate' AND stripe_transfer_id IS NOT NULL
+              AND ? >= seller_transfer_amount_cents THEN 'reversed'
+            ELSE seller_transfer_status END,
+          updated_at = ? WHERE id = ?`,
         )
         .bind(
           newRefundedAmount,
           full ? "refunded" : "partially_refunded",
           refund.id,
+          refund.sellerTransferReversedCents,
+          full ? 1 : 0,
+          refund.sellerTransferReversedCents,
           now,
           access.order.id,
         ),
@@ -953,6 +974,14 @@ export async function decideAdminResolutionCase(
     chargeId: row.order.stripeChargeId,
     amountCents,
     idempotencyKey: `admin-resolution-${caseId}-${row.order.refundedAmountCents}-${amountCents}`,
+    paymentFlow: row.order.paymentFlow,
+    stripeTransferId: row.order.stripeTransferId,
+    totalCents: row.order.totalCents,
+    refundedAmountCents: row.order.refundedAmountCents,
+    sellerTransferAmountCents: row.order.sellerTransferAmountCents,
+    sellerTransferReversedCents:
+      row.order.sellerTransferReversedCents,
+    sellerProceedsCents: row.order.sellerProceedsCents,
   });
   const succeeded = refund.status === "succeeded";
   const newRefundedAmount = Math.min(
@@ -1019,12 +1048,23 @@ export async function decideAdminResolutionCase(
       d1
         .prepare(
           `UPDATE orders SET refunded_amount_cents = ?, payment_status = ?,
-          stripe_refund_id = ?, updated_at = ? WHERE id = ?`,
+          stripe_refund_id = ?,
+          seller_transfer_reversed_cents = CASE WHEN payment_flow = 'separate'
+            THEN MAX(seller_transfer_reversed_cents, ?) ELSE seller_transfer_reversed_cents END,
+          seller_transfer_status = CASE
+            WHEN payment_flow = 'separate' AND stripe_transfer_id IS NULL AND ? = 1 THEN 'cancelled'
+            WHEN payment_flow = 'separate' AND stripe_transfer_id IS NOT NULL
+              AND ? >= seller_transfer_amount_cents THEN 'reversed'
+            ELSE seller_transfer_status END,
+          updated_at = ? WHERE id = ?`,
         )
         .bind(
           newRefundedAmount,
           full ? "refunded" : "partially_refunded",
           refund.id,
+          refund.sellerTransferReversedCents,
+          full ? 1 : 0,
+          refund.sellerTransferReversedCents,
           now,
           row.order.id,
         ),

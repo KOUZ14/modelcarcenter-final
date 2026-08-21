@@ -16,7 +16,8 @@ export default function ProtectionPage() {
 
     <h2>2. Enforced deadlines</h2>
     <div className="legal-table-wrap"><table><thead><tr><th>Step</th><th>Deadline</th><th>What happens</th></tr></thead><tbody>
-      <tr><td>Buyer opens a case</td><td>Within 30 calendar days after the seller marks the order shipped; if unshipped, within 45 calendar days after payment</td><td>The system blocks a new case after the window, unless applicable law requires otherwise.</td></tr>
+      <tr><td>Buyer opens a case after delivery</td><td>Within 3 calendar days after carrier-confirmed delivery</td><td>The system blocks a new delivered-order case after the window, unless applicable law requires otherwise.</td></tr>
+      <tr><td>Buyer reports non-delivery</td><td>Within 30 calendar days after shipment; if unshipped, within 45 calendar days after payment</td><td>This fallback remains available because a delivery-based deadline cannot apply to an undelivered order.</td></tr>
       <tr><td>Buyer supplies evidence</td><td>Within 5 calendar days after opening</td><td>Clear photos or PDFs should show the model, packaging, shipping label, and claimed problem.</td></tr>
       <tr><td>Seller responds</td><td>Within 3 calendar days after opening</td><td>After the deadline, the buyer may escalate for platform review.</td></tr>
       <tr><td>Buyer reviews a seller response</td><td>Within 3 calendar days after the response</td><td>The buyer may accept/close, continue with an authorized return, or escalate.</td></tr>
@@ -39,6 +40,7 @@ export default function ProtectionPage() {
       <li>Respond in the case within three calendar days. Address the reported facts and upload relevant evidence rather than moving the dispute off-platform.</li>
       <li>For a covered return, issue an RMA, clear packing instructions, and a prepaid PDF or image label. The seller bears reasonable authorized return shipping for covered listing, authenticity, wrong-item, missing-item, or transit-damage problems.</li>
       <li>Issue an approved partial or full refund through the case to the original payment method. Do not condition a required refund on store credit or an off-platform agreement.</li>
+      <li>Seller proceeds are held until three calendar days after carrier-confirmed delivery. A case opened on time pauses release until it reaches a final outcome.</li>
     </ul>
 
     <h2>5. Remedies and return handling</h2>
@@ -61,4 +63,3 @@ export default function ProtectionPage() {
     <p>Case evidence and return labels are access-controlled to the authenticated buyer, authenticated seller, and authorized Model Car Center reviewers. They are not public listing media. Transaction and case records may be retained for fraud prevention, legal compliance, accounting, and dispute handling under the Privacy Policy.</p>
   </PolicyPage>;
 }
-

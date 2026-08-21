@@ -168,6 +168,21 @@ export async function retrieveShippoTracking(
   );
 }
 
+export async function registerShippoTracking(
+  carrier: string,
+  trackingNumber: string,
+  metadata: string,
+) {
+  return shippoRequest<ShippoTracking>("/tracks/", {
+    method: "POST",
+    body: JSON.stringify({
+      carrier: carrier.trim().toLowerCase(),
+      tracking_number: trackingNumber.trim(),
+      metadata: metadata.slice(0, 100),
+    }),
+  });
+}
+
 function normalizeRate(rate: ShippoRateResponse): ShippoRate | null {
   const amount = Number(rate.amount);
   if (!rate.object_id || !Number.isFinite(amount) || amount < 0) return null;

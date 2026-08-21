@@ -38,7 +38,7 @@ export default async function MessagesPage({
             <h1>Collector conversations.</h1>
           </div>
           <p>
-            Ask about condition, provenance, shipping, or anything else you need
+            Ask about condition, shipping, or anything else you need
             before a model joins your collection.
           </p>
         </div>

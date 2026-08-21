@@ -430,12 +430,19 @@ export async function getGarageData(userId: string) {
           platformFeeCents: orders.platformFeeCents,
           paymentProcessingFeeCents: orders.paymentProcessingFeeCents,
           sellerProceedsCents: orders.sellerProceedsCents,
+          paymentFlow: orders.paymentFlow,
+          sellerTransferStatus: orders.sellerTransferStatus,
+          sellerTransferAmountCents: orders.sellerTransferAmountCents,
+          sellerTransferReversedCents: orders.sellerTransferReversedCents,
           totalCents: orders.totalCents,
           paymentStatus: orders.paymentStatus,
           fulfillmentStatus: orders.fulfillmentStatus,
           carrier: orders.carrier,
           trackingNumber: orders.trackingNumber,
           createdAt: orders.createdAt,
+          deliveredAt: orders.deliveredAt,
+          payoutEligibleAt: orders.payoutEligibleAt,
+          sellerTransferredAt: orders.sellerTransferredAt,
         })
         .from(orders)
         .where(

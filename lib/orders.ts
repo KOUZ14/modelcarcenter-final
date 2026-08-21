@@ -12,6 +12,9 @@ import { sendPaidOrderEmails } from "./email";
 import { releaseReservation } from "./inventory";
 import {
   retrieveCheckoutSession,
+  reverseSellerTransfer,
+  sellerTransferReversalTarget,
+  stripeTransferGroup,
   type StripeCheckoutSession,
 } from "./stripe";
 import type { ShippingAddress } from "./types";
@@ -56,6 +59,45 @@ export async function processStripeEvent(event: StripeEvent) {
       amount_refunded?: number;
     };
     const amountRefunded = Math.max(0, charge.amount_refunded ?? charge.amount ?? 0);
+    const matchedOrders = await db
+      .select()
+      .from(orders)
+      .where(
+        charge.id
+          ? eq(orders.stripeChargeId, charge.id)
+          : eq(orders.stripePaymentIntentId, charge.payment_intent ?? ""),
+      )
+      .limit(1);
+    const matchedOrder = matchedOrders[0];
+    let sellerTransferReversedCents =
+      matchedOrder?.sellerTransferReversedCents ?? 0;
+    if (
+      matchedOrder?.paymentFlow === "separate" &&
+      matchedOrder.stripeTransferId &&
+      matchedOrder.sellerTransferAmountCents > 0
+    ) {
+      const targetReversedCents = sellerTransferReversalTarget({
+        totalCents: matchedOrder.totalCents,
+        refundedAmountCents: amountRefunded,
+        sellerTransferAmountCents: matchedOrder.sellerTransferAmountCents,
+        sellerProceedsCents:
+          matchedOrder.sellerProceedsCents ??
+          matchedOrder.sellerTransferAmountCents,
+      });
+      const amountToReverse = Math.max(
+        0,
+        targetReversedCents - matchedOrder.sellerTransferReversedCents,
+      );
+      if (amountToReverse > 0) {
+        await reverseSellerTransfer({
+          transferId: matchedOrder.stripeTransferId,
+          orderId: matchedOrder.id,
+          amountCents: amountToReverse,
+          targetReversedCents,
+        });
+        sellerTransferReversedCents = targetReversedCents;
+      }
+    }
     const d1 = getD1();
     await d1.batch([
       d1.prepare("INSERT INTO stripe_events (id, type) VALUES (?, ?)").bind(event.id, event.type),
@@ -68,17 +110,110 @@ export async function processStripeEvent(event: StripeEvent) {
           WHEN ? > 0 AND ? < total_cents THEN 'partially_refunded'
           ELSE 'refunded'
         END,
+        seller_transfer_reversed_cents = CASE
+          WHEN payment_flow = 'separate' THEN MAX(seller_transfer_reversed_cents, ?)
+          ELSE seller_transfer_reversed_cents
+        END,
+        seller_transfer_status = CASE
+          WHEN payment_flow = 'separate' AND stripe_transfer_id IS NULL AND ? >= total_cents THEN 'cancelled'
+          WHEN payment_flow = 'separate' AND stripe_transfer_id IS NOT NULL AND ? >= seller_transfer_amount_cents THEN 'reversed'
+          ELSE seller_transfer_status
+        END,
         updated_at = CURRENT_TIMESTAMP
         WHERE stripe_charge_id = ? OR stripe_payment_intent_id = ?`).bind(
           amountRefunded,
           amountRefunded,
           amountRefunded,
           amountRefunded,
+          sellerTransferReversedCents,
+          amountRefunded,
+          sellerTransferReversedCents,
           charge.id ?? "",
           charge.payment_intent ?? "",
         ),
     ]);
     return { recorded: true, refundUpdated: true };
+  }
+
+  if (event.type === "transfer.reversed" || event.type === "transfer.updated") {
+    const transfer = event.data.object as {
+      id?: string;
+      amount?: number;
+      amount_reversed?: number;
+      reversed?: boolean;
+      metadata?: { order_id?: string };
+    };
+    const amountReversed = Math.max(0, transfer.amount_reversed ?? 0);
+    const d1 = getD1();
+    await d1.batch([
+      d1
+        .prepare("INSERT INTO stripe_events (id, type) VALUES (?, ?)")
+        .bind(event.id, event.type),
+      d1
+        .prepare(`UPDATE orders SET
+          seller_transfer_reversed_cents = MAX(seller_transfer_reversed_cents, ?),
+          seller_transfer_status = CASE
+            WHEN ? = 1 OR (? > 0 AND ? >= seller_transfer_amount_cents) THEN 'reversed'
+            ELSE seller_transfer_status
+          END,
+          updated_at = CURRENT_TIMESTAMP
+          WHERE stripe_transfer_id = ? OR id = ?`)
+        .bind(
+          amountReversed,
+          transfer.reversed ? 1 : 0,
+          amountReversed,
+          amountReversed,
+          transfer.id ?? "",
+          transfer.metadata?.order_id ?? "",
+        ),
+    ]);
+    return { recorded: true, transferUpdated: true };
+  }
+
+  if (event.type === "refund.updated" || event.type === "refund.failed") {
+    const refund = event.data.object as {
+      id?: string;
+      status?: string;
+      failure_reason?: string | null;
+    };
+    const status =
+      refund.status === "succeeded"
+        ? "succeeded"
+        : refund.status === "failed" || event.type === "refund.failed"
+          ? "failed"
+          : refund.status === "canceled"
+            ? "cancelled"
+            : "pending";
+    const d1 = getD1();
+    const statements = [
+      d1
+        .prepare("INSERT INTO stripe_events (id, type) VALUES (?, ?)")
+        .bind(event.id, event.type),
+      d1
+        .prepare(
+          "UPDATE resolution_refunds SET status = ? WHERE stripe_refund_id = ?",
+        )
+        .bind(status, refund.id ?? ""),
+    ];
+    if (status === "succeeded") {
+      statements.push(
+        d1
+          .prepare(`UPDATE resolution_cases SET status = 'resolved',
+            resolved_at = COALESCE(resolved_at, CURRENT_TIMESTAMP),
+            updated_at = CURRENT_TIMESTAMP
+            WHERE id IN (
+              SELECT case_id FROM resolution_refunds WHERE stripe_refund_id = ?
+            ) AND status = 'under_review'`)
+          .bind(refund.id ?? ""),
+      );
+    }
+    await d1.batch(statements);
+    return {
+      recorded: true,
+      refundStatusUpdated: true,
+      status,
+      failureReason: refund.failure_reason ?? null,
+    };
   }
 
   await recordEvent(event);
@@ -190,6 +325,10 @@ async function finalizePaidCheckout(event: StripeEvent, session: StripeCheckoutS
         : null,
     ),
   );
+  const paymentFlow =
+    session.metadata?.payment_flow === "separate" ? "separate" : "destination";
+  const transferGroup =
+    paymentFlow === "separate" ? stripeTransferGroup(reservationId) : null;
   const shipByAt = addBusinessDays(
     preorderAnchor && preorderAnchor > paidAt ? preorderAnchor : paidAt,
     reservation.handlingTimeBusinessDays,
@@ -212,13 +351,15 @@ async function finalizePaidCheckout(event: StripeEvent, session: StripeCheckoutS
       WHERE id = ? AND status = 'pending'`).bind(reservationId),
     d1.prepare(`INSERT INTO orders
       (id, order_number, seller_id, buyer_user_id, stripe_checkout_session_id, stripe_payment_intent_id, stripe_charge_id,
+       payment_flow, stripe_transfer_group, seller_transfer_status,
        buyer_email, currency, subtotal_cents, shipping_cents, shipping_mode,
        selected_shipping_carrier, selected_shipping_service, selected_shipping_service_token,
        selected_shipping_estimated_days, marketplace_fee_bps, platform_fee_cents,
        payment_processing_fee_cents, seller_proceeds_cents, tax_cents, total_cents,
        payment_status, fulfillment_status, buyer_name, shipping_address, paid_at, ship_by_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'paid', 'unfulfilled', ?, ?, ?, ?)`)
-      .bind(orderId, orderNumber, reservation.sellerId, reservation.buyerUserId, session.id, intent, charge, buyerEmail,
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'paid', 'unfulfilled', ?, ?, ?, ?)`)
+      .bind(orderId, orderNumber, reservation.sellerId, reservation.buyerUserId, session.id, intent, charge,
+        paymentFlow, transferGroup, paymentFlow === "separate" ? "pending" : "transferred", buyerEmail,
         session.currency ?? reservation.currency, reservation.subtotalCents, reservation.shippingCents,
         reservation.shippingMode, reservation.selectedShippingCarrier,
         reservation.selectedShippingService, reservation.selectedShippingServiceToken,

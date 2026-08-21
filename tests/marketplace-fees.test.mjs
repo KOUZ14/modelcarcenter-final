@@ -118,7 +118,7 @@ test("fee configuration parses safe values, defaults only when absent, and rejec
   assert.throws(() => parseFeeBasisPoints("10001", 850), /between 0 and 10000/);
 });
 
-test("Stripe Checkout receives the server-calculated application fee", () => {
+test("Stripe Checkout keeps funds on-platform for a later seller transfer", () => {
   const body = buildCheckoutSessionBody({
     reservationId: "reservation-1",
     sellerId: "seller-1",
@@ -139,9 +139,15 @@ test("Stripe Checkout receives the server-calculated application fee", () => {
     expiresAt: new Date("2026-08-20T00:00:00.000Z"),
     policyVersion: "2026-08-19",
   });
-  assert.equal(body.get("payment_intent_data[application_fee_amount]"), "1000");
+  assert.equal(body.get("payment_intent_data[application_fee_amount]"), null);
   assert.equal(body.get("metadata[marketplace_fee_bps]"), "500");
-  assert.equal(body.get("payment_intent_data[transfer_data][destination]"), "acct_123");
+  assert.equal(body.get("metadata[payment_flow]"), "separate");
+  assert.equal(body.get("payment_intent_data[transfer_data][destination]"), null);
+  assert.equal(body.get("payment_intent_data[transfer_group]"), "MCC_reservation-1");
+  assert.equal(
+    body.get("payment_intent_data[metadata][seller_stripe_account_id]"),
+    "acct_123",
+  );
 });
 
 test("checkout ignores browser-supplied fee values and historical orders copy the reservation snapshot", async () => {

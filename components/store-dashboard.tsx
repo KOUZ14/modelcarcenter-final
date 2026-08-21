@@ -123,6 +123,10 @@ type StoreOrder = {
   platformFeeCents: number;
   paymentProcessingFeeCents: number | null;
   sellerProceedsCents: number | null;
+  paymentFlow: "destination" | "separate";
+  sellerTransferStatus: string;
+  sellerTransferAmountCents: number;
+  sellerTransferReversedCents: number;
   totalCents: number;
   refundedAmountCents: number;
   paymentStatus: string;
@@ -131,6 +135,9 @@ type StoreOrder = {
   trackingNumber: string | null;
   createdAt: string;
   shipByAt: string | null;
+  deliveredAt: string | null;
+  payoutEligibleAt: string | null;
+  sellerTransferredAt: string | null;
   shipment: Shipment | null;
   items: OrderItem[];
 };
@@ -892,7 +899,7 @@ function Orders({
               <div>
                 <h4>Items</h4>
                 {order.items.map((item) => <p key={item.id}><b>{item.productTitleSnapshot}</b><br /><span>{item.sellerSkuSnapshot} · {item.quantity} × {formatMoney(item.unitPriceCents, order.currency)}</span>{item.availabilityTypeSnapshot === "preorder" && item.releaseDateSnapshot && <><br /><span className="order-preorder-date">Preorder · Expected release {date(item.releaseDateSnapshot)}</span></>}</p>)}
-                <dl className="store-order-totals"><div><dt>Items</dt><dd>{formatMoney(order.subtotalCents, order.currency)}</dd></div><div><dt>Shipping</dt><dd>{formatMoney(order.shippingCents, order.currency)}</dd></div>{order.taxCents > 0 && <div><dt>Tax</dt><dd>{formatMoney(order.taxCents, order.currency)}</dd></div>}<div><dt>Model Car Center fee ({feePercent(order.marketplaceFeeBps)})</dt><dd>−{formatMoney(order.platformFeeCents, order.currency)}</dd></div><div><dt>Payment processing</dt><dd>{order.paymentProcessingFeeCents == null ? "Recorded by Stripe after settlement" : `${formatMoney(order.paymentProcessingFeeCents, order.currency)} paid separately by Model Car Center`}</dd></div><div><dt>Seller proceeds</dt><dd>{order.sellerProceedsCents == null ? "Not recorded for this order" : formatMoney(order.sellerProceedsCents, order.currency)}</dd></div></dl>
+                <dl className="store-order-totals"><div><dt>Items</dt><dd>{formatMoney(order.subtotalCents, order.currency)}</dd></div><div><dt>Shipping</dt><dd>{formatMoney(order.shippingCents, order.currency)}</dd></div>{order.taxCents > 0 && <div><dt>Tax</dt><dd>{formatMoney(order.taxCents, order.currency)}</dd></div>}<div><dt>Model Car Center fee ({feePercent(order.marketplaceFeeBps)})</dt><dd>−{formatMoney(order.platformFeeCents, order.currency)}</dd></div><div><dt>Payment processing</dt><dd>{order.paymentProcessingFeeCents == null ? "Recorded by Stripe after settlement" : `${formatMoney(order.paymentProcessingFeeCents, order.currency)} paid separately by Model Car Center`}</dd></div><div><dt>Seller proceeds</dt><dd>{order.sellerProceedsCents == null ? "Not recorded for this order" : formatMoney(order.sellerProceedsCents, order.currency)}</dd></div><div><dt>Payout</dt><dd>{sellerPayoutLabel(order)}</dd></div></dl>
               </div>
               <div>
                 <h4>Ship to</h4><p><b>{order.buyerName || "Customer"}</b><br />{formatAddress(order.shippingAddress)}</p><p><a href={`mailto:${order.buyerEmail}`}>{order.buyerEmail}</a></p>
@@ -1205,7 +1212,7 @@ function StoreSettings({
         </form>
       </section>
       <section className="store-panel payout-status"><p className="eyebrow">Payout account</p><h3>Stripe Connect</h3><p><span className={`status ${store.stripeChargesEnabled ? "active" : "onboarding"}`}>Charges {store.stripeChargesEnabled ? "enabled" : "pending"}</span> <span className={`status ${store.stripePayoutsEnabled ? "active" : "onboarding"}`}>Payouts {store.stripePayoutsEnabled ? "enabled" : "pending"}</span></p><p>Bank and identity details remain securely hosted by Stripe. Contact Model Car Center if you need a fresh onboarding link.</p></section>
-      <section className="store-panel payout-status"><p className="eyebrow">Selling fees</p><h3>{fee.rateKind === "founding_professional" ? "Founding Seller Rate" : "Professional Store Rate"} — {feePercent(fee.marketplaceFeeBps)} marketplace fee</h3>{fee.foundingPromotionActive && <p>Your promotional rate is active. It automatically becomes the {feePercent(fee.standardMarketplaceFeeBps)} standard professional rate when the six-month period ends.</p>}<p><b>Payment processing is charged separately.</b> Under the current Stripe destination-charge setup, Model Car Center pays Stripe processing fees; recorded order details show those costs separately from your marketplace fee.</p><p>No listing fees. No monthly marketplace subscription for V1.</p></section>
+      <section className="store-panel payout-status"><p className="eyebrow">Selling fees</p><h3>{fee.rateKind === "founding_professional" ? "Founding Seller Rate" : "Professional Store Rate"} — {feePercent(fee.marketplaceFeeBps)} marketplace fee</h3>{fee.foundingPromotionActive && <p>Your promotional rate is active. It automatically becomes the {feePercent(fee.standardMarketplaceFeeBps)} standard professional rate when the six-month period ends.</p>}<p><b>Payment processing is charged separately.</b> Model Car Center holds seller proceeds until three days after carrier-confirmed delivery, then releases them to Stripe if no case is open. Recorded order details show processing costs and payout status separately from your marketplace fee.</p><p>No listing fees. No monthly fees to sell.</p></section>
     </div>
   );
 }
@@ -1274,6 +1281,21 @@ function formatAddress(value: string) {
   } catch {
     return "Shipping address unavailable";
   }
+}
+
+function sellerPayoutLabel(order: StoreOrder) {
+  if (order.paymentFlow === "destination") return "Legacy Stripe payout schedule";
+  if (order.sellerTransferStatus === "transferred")
+    return order.sellerTransferredAt
+      ? `Released to Stripe ${date(order.sellerTransferredAt)}`
+      : "Released to Stripe";
+  if (order.sellerTransferStatus === "processing") return "Release processing";
+  if (order.sellerTransferStatus === "failed") return "Release will be retried";
+  if (order.sellerTransferStatus === "cancelled") return "Cancelled";
+  if (order.sellerTransferStatus === "reversed") return "Reversed for refund";
+  return order.payoutEligibleAt
+    ? `Held through ${date(order.payoutEligibleAt)}`
+    : "Held until three days after delivery";
 }
 
 function date(value: string) {

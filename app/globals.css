@@ -137,12 +137,18 @@ h2 { margin-bottom: 0; font-size: clamp(40px, 4.3vw, 68px); line-height: .98; le
 .community-inner .eyebrow { color: rgba(255,255,255,.72); }
 .community-inner h2 { max-width: 760px; font-size: clamp(42px, 5vw, 72px); }
 .community-inner p:not(.eyebrow) { max-width: 710px; margin: 25px 0 0; color: rgba(255,255,255,.77); line-height: 1.6; }
-.community-inner form { display: grid; grid-template-columns: 1fr auto; padding-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,.8); }
-.community-inner input { height: 56px; color: white; background: transparent; border: 0; outline: none; }
-.community-inner input::placeholder { color: rgba(255,255,255,.7); }
-.community-inner button { display: flex; align-items: center; gap: 16px; padding: 0 0 0 20px; color: white; background: transparent; border: 0; font-weight: 700; }
+.community-inner form { display: grid; grid-template-columns: 1fr auto; column-gap: 12px; row-gap: 14px; }
+.community-inner input { height: 56px; padding: 0 16px; color: white; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.78); outline: none; }
+.community-inner input::placeholder { color: rgba(255,255,255,.76); }
+.community-inner input:focus { background: rgba(255,255,255,.16); border-color: white; }
+.community-inner button { min-height: 56px; display: flex; align-items: center; justify-content: space-between; gap: 22px; padding: 0 20px; color: var(--accent); background: white; border: 1px solid white; font-weight: 800; cursor: pointer; }
+.community-inner button:hover { background: transparent; color: white; }
+.community-inner button:disabled { opacity: .65; cursor: wait; }
 .community-inner button svg { width: 19px; }
-.joined { display: flex; align-items: center; gap: 12px; font-size: 18px; font-weight: 700; }
+.joined { min-height: 84px; display: flex; align-items: center; gap: 14px; padding: 20px; color: var(--accent); background: white; font-size: 18px; }
+.joined > svg { flex: 0 0 auto; width: 24px; height: 24px; }
+.joined span { display: grid; gap: 4px; }
+.joined small { color: #6b1e32; font-size: 12px; font-weight: 500; line-height: 1.45; }
 
 footer { padding-top: 70px; color: white; background: var(--ink); }
 .footer-top { display: flex; align-items: center; justify-content: space-between; padding-bottom: 50px; border-bottom: 1px solid #303031; }
@@ -201,7 +207,7 @@ footer { padding-top: 70px; color: white; background: var(--ink); }
   .seller-image { padding: 30px; }
   .seller-image b { font-size: 38px; }
   .community-inner form { grid-template-columns: 1fr; }
-  .community-inner button { min-height: 48px; justify-content: space-between; padding-left: 0; }
+  .community-inner button { min-height: 52px; justify-content: space-between; padding-inline: 16px; }
   .footer-top { align-items: flex-start; flex-direction: column; gap: 24px; }
   .footer-links { grid-template-columns: 1fr 1fr; }
 }
@@ -439,8 +445,9 @@ footer { padding-top: 70px; color: white; background: var(--ink); }
 .consent-check a, .collection-notice a, .checkout-consent a { color: var(--ink); text-decoration: underline; text-underline-offset: 2px; }
 .checkout-consent { margin: 17px 0 5px; padding: 14px; background: white; border: 1px solid var(--line); }
 .collection-notice { color: inherit; font-size: 11px; line-height: 1.45; }
-.community-inner .collection-notice { grid-column: 1 / -1; margin: 0; color: rgba(255,255,255,.78); }
+.community-inner .collection-notice { grid-column: 1 / -1; margin: 2px 0 0; color: rgba(255,255,255,.82); }
 .community-inner .collection-notice a { color: white; }
+.community-inner .form-error { grid-column: 1 / -1; margin: 0; }
 
 /* Founder admin */
 .admin-shell { min-height: 100vh; background: #efede8; }
@@ -706,9 +713,17 @@ footer { padding-top: 70px; color: white; background: var(--ink); }
 .delete-account summary { cursor: pointer; color: #8a0012; font-weight: 700; }
 .delete-account label { max-width: 380px; margin-block: 18px; }
 .seller-paths { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 45px 0 70px; }
-.seller-paths article { padding: clamp(28px, 4vw, 52px); background: white; border: 1px solid var(--line); }
-.seller-paths h2 { margin-bottom: 18px; font-size: 36px; }
-.seller-paths p:not(.eyebrow) { min-height: 75px; color: var(--muted); line-height: 1.55; }
+.seller-paths article { min-width: 0; display: flex; flex-direction: column; padding: clamp(32px, 4vw, 52px); background: white; border: 1px solid var(--line); }
+.seller-paths .eyebrow { margin-bottom: 20px; }
+.seller-paths h2 { margin-bottom: 24px; font-size: 36px; line-height: 1.12; }
+.seller-paths p:not(.eyebrow) { color: var(--muted); line-height: 1.65; }
+.seller-paths .seller-path-description { min-height: 80px; margin-bottom: 28px; }
+.seller-paths .seller-payment-note { margin: 0; color: var(--ink); }
+.seller-benefits { display: grid; gap: 13px; margin: 32px 0 38px; padding: 0; list-style: none; line-height: 1.45; }
+.seller-benefits li { position: relative; padding-left: 18px; }
+.seller-benefits li::before { position: absolute; top: .62em; left: 0; width: 6px; height: 6px; background: var(--accent); border-radius: 50%; content: ""; }
+.seller-actions { margin-top: auto; }
+.seller-actions.row-actions { row-gap: 18px; }
 .listing-shell { max-width: 1050px; margin-inline: auto; }
 .listing-form { display: grid; gap: 18px; }
 .listing-form section { padding: clamp(24px, 4vw, 44px); background: white; border: 1px solid var(--line); }
@@ -755,6 +770,7 @@ footer { padding-top: 70px; color: white; background: var(--ink); }
 
 @media (max-width: 620px) {
   .seller-paths, .garage-metrics { grid-template-columns: 1fr; }
+  .seller-paths .seller-path-description { min-height: 0; }
   .garage-nav nav { grid-template-columns: 1fr 1fr; }
   .listing-images { grid-template-columns: 1fr 1fr; }
   .review-grid article { grid-template-columns: 1fr; }
