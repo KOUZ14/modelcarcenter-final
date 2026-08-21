@@ -51,10 +51,13 @@ export async function POST(request: Request) {
         currency: products.currency,
         inventoryQuantity: products.inventoryQuantity,
         reservedQuantity: products.reservedQuantity,
+        availabilityType: products.availabilityType,
+        releaseDate: products.releaseDate,
         primaryImageUrl: products.primaryImageUrl,
         keywords: products.keywords,
         defaultShippingCents: sellers.defaultShippingCents,
         shippingMode: sellers.shippingMode,
+        handlingTimeBusinessDays: sellers.handlingTimeBusinessDays,
         createdAt: products.createdAt,
       })
       .from(products)
@@ -62,20 +65,18 @@ export async function POST(request: Request) {
       .where(
         and(
           inArray(products.id, ids),
-          eq(products.status, "active"),
+          inArray(products.status, ["active", "sold_out"]),
           eq(sellers.status, "active"),
         ),
       );
     return Response.json({
-      products: rows
-        .map((row) => ({
+      products: rows.map((row) => ({
           ...row,
           availableQuantity: Math.max(
             0,
             row.inventoryQuantity - row.reservedQuantity,
           ),
-        }))
-        .filter((row) => row.availableQuantity > 0),
+        })),
     });
   } catch (error) {
     console.error(error);

@@ -270,6 +270,12 @@ export const products = sqliteTable(
     currency: text("currency").notNull().default("usd"),
     inventoryQuantity: integer("inventory_quantity").notNull().default(0),
     reservedQuantity: integer("reserved_quantity").notNull().default(0),
+    availabilityType: text("availability_type", {
+      enum: ["in_stock", "preorder"],
+    })
+      .notNull()
+      .default("in_stock"),
+    releaseDate: text("release_date"),
     status: text("status", {
       enum: [
         "draft",
@@ -342,6 +348,70 @@ export const productImages = sqliteTable(
   ],
 );
 
+export const conversations = sqliteTable(
+  "conversations",
+  {
+    id: text("id").primaryKey(),
+    buyerUserId: text("buyer_user_id")
+      .notNull()
+      .references(() => authUser.id, { onDelete: "cascade" }),
+    sellerId: text("seller_id")
+      .notNull()
+      .references(() => sellers.id, { onDelete: "cascade" }),
+    productId: text("product_id").references(() => products.id, {
+      onDelete: "set null",
+    }),
+    productSlugSnapshot: text("product_slug_snapshot").notNull(),
+    productTitleSnapshot: text("product_title_snapshot").notNull(),
+    productImageUrlSnapshot: text("product_image_url_snapshot"),
+    lastMessagePreview: text("last_message_preview").notNull().default(""),
+    lastMessageAt: text("last_message_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    buyerLastReadAt: text("buyer_last_read_at"),
+    sellerLastReadAt: text("seller_last_read_at"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("conversations_buyer_seller_product_unique").on(
+      table.buyerUserId,
+      table.sellerId,
+      table.productId,
+    ),
+    index("conversations_buyer_activity_idx").on(
+      table.buyerUserId,
+      table.lastMessageAt,
+    ),
+    index("conversations_seller_activity_idx").on(
+      table.sellerId,
+      table.lastMessageAt,
+    ),
+  ],
+);
+
+export const conversationMessages = sqliteTable(
+  "conversation_messages",
+  {
+    id: text("id").primaryKey(),
+    conversationId: text("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    senderUserId: text("sender_user_id").references(() => authUser.id, {
+      onDelete: "set null",
+    }),
+    body: text("body").notNull(),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("conversation_messages_thread_idx").on(
+      table.conversationId,
+      table.createdAt,
+    ),
+  ],
+);
+
 export const wishlistItems = sqliteTable(
   "wishlist_items",
   {
@@ -362,6 +432,41 @@ export const wishlistItems = sqliteTable(
       table.productId,
     ),
     index("wishlist_user_idx").on(table.userId, table.createdAt),
+  ],
+);
+
+export const availabilityAlerts = sqliteTable(
+  "availability_alerts",
+  {
+    id: text("id").primaryKey(),
+    productId: text("product_id")
+      .notNull()
+      .references(() => products.id, { onDelete: "cascade" }),
+    userId: text("user_id").references(() => authUser.id, {
+      onDelete: "set null",
+    }),
+    email: text("email").notNull(),
+    unsubscribeToken: text("unsubscribe_token").notNull(),
+    status: text("status", {
+      enum: ["active", "notified", "unsubscribed"],
+    })
+      .notNull()
+      .default("active"),
+    consentAt: text("consent_at").notNull(),
+    notifiedAt: text("notified_at"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("availability_alerts_product_email_unique").on(
+      table.productId,
+      table.email,
+    ),
+    uniqueIndex("availability_alerts_token_unique").on(table.unsubscribeToken),
+    index("availability_alerts_product_status_idx").on(
+      table.productId,
+      table.status,
+    ),
+    index("availability_alerts_user_idx").on(table.userId, table.createdAt),
   ],
 );
 
@@ -566,6 +671,12 @@ export const orderItems = sqliteTable(
     unitPriceCents: integer("unit_price_cents").notNull(),
     quantity: integer("quantity").notNull(),
     imageUrlSnapshot: text("image_url_snapshot"),
+    availabilityTypeSnapshot: text("availability_type_snapshot", {
+      enum: ["in_stock", "preorder"],
+    })
+      .notNull()
+      .default("in_stock"),
+    releaseDateSnapshot: text("release_date_snapshot"),
   },
   (table) => [
     index("order_items_order_idx").on(table.orderId),
@@ -1119,6 +1230,12 @@ export const checkoutReservationItems = sqliteTable(
     unitPriceCents: integer("unit_price_cents").notNull(),
     quantity: integer("quantity").notNull(),
     imageUrlSnapshot: text("image_url_snapshot"),
+    availabilityTypeSnapshot: text("availability_type_snapshot", {
+      enum: ["in_stock", "preorder"],
+    })
+      .notNull()
+      .default("in_stock"),
+    releaseDateSnapshot: text("release_date_snapshot"),
   },
   (table) => [
     index("checkout_reservation_items_reservation_idx").on(table.reservationId),

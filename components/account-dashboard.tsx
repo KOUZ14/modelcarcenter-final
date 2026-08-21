@@ -366,6 +366,7 @@ function Orders({
                 )}
                 <p>
                   {String(item.productTitleSnapshot)} × {String(item.quantity)}
+                  {item.availabilityTypeSnapshot === "preorder" && item.releaseDateSnapshot ? ` · Preorder releases ${date(String(item.releaseDateSnapshot))}` : ""}
                 </p>
               </div>
             ))}
@@ -664,6 +665,7 @@ function Sales({
             {sale.items.map((item) => (
               <p key={String(item.id)}>
                 {String(item.productTitleSnapshot)} × {String(item.quantity)}
+                {item.availabilityTypeSnapshot === "preorder" && item.releaseDateSnapshot ? ` · Preorder releases ${date(String(item.releaseDateSnapshot))}` : ""}
               </p>
             ))}
             <p>

@@ -16,6 +16,7 @@ import {
 } from "./stripe";
 import type { ShippingAddress } from "./types";
 import { addBusinessDays } from "./reputation-rules";
+import { preorderShipAnchor } from "./availability-rules";
 
 type StripeEvent = { id: string; type: string; data: { object: Record<string, unknown> } };
 
@@ -182,8 +183,15 @@ async function finalizePaidCheckout(event: StripeEvent, session: StripeCheckoutS
     reservation.platformFeeCents,
   );
   const paidAt = new Date();
+  const preorderAnchor = preorderShipAnchor(
+    items.map((item) =>
+      item.availabilityTypeSnapshot === "preorder"
+        ? item.releaseDateSnapshot
+        : null,
+    ),
+  );
   const shipByAt = addBusinessDays(
-    paidAt,
+    preorderAnchor && preorderAnchor > paidAt ? preorderAnchor : paidAt,
     reservation.handlingTimeBusinessDays,
   );
   const d1 = getD1();
@@ -224,10 +232,12 @@ async function finalizePaidCheckout(event: StripeEvent, session: StripeCheckoutS
     statements.push(
       d1.prepare(`INSERT INTO order_items
         (id, order_id, product_id, product_title_snapshot, seller_sku_snapshot, scale_snapshot,
-         manufacturer_snapshot, unit_price_cents, quantity, image_url_snapshot)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+         manufacturer_snapshot, unit_price_cents, quantity, image_url_snapshot,
+         availability_type_snapshot, release_date_snapshot)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .bind(crypto.randomUUID(), orderId, item.productId, item.productTitleSnapshot, item.sellerSkuSnapshot,
-          item.scaleSnapshot, item.manufacturerSnapshot, item.unitPriceCents, item.quantity, item.imageUrlSnapshot),
+          item.scaleSnapshot, item.manufacturerSnapshot, item.unitPriceCents, item.quantity, item.imageUrlSnapshot,
+          item.availabilityTypeSnapshot, item.releaseDateSnapshot),
     );
   }
   await d1.batch(statements);
@@ -239,7 +249,13 @@ async function finalizePaidCheckout(event: StripeEvent, session: StripeCheckoutS
     currency: session.currency ?? reservation.currency,
     totalCents,
     shippingAddress: shipping,
-    items: items.map((item) => ({ title: item.productTitleSnapshot, quantity: item.quantity, unitPriceCents: item.unitPriceCents })),
+    items: items.map((item) => ({
+      title: item.productTitleSnapshot,
+      quantity: item.quantity,
+      unitPriceCents: item.unitPriceCents,
+      availabilityType: item.availabilityTypeSnapshot,
+      releaseDate: item.releaseDateSnapshot,
+    })),
   });
   return { orderId, orderNumber };
 }

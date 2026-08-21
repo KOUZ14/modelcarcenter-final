@@ -169,6 +169,11 @@ export function CartPage() {
                   <Link href={`/products/${item.slug}`}>{item.title}</Link>
                 </h2>
                 <p>Sold by {item.sellerName}</p>
+                {item.availabilityType === "preorder" && item.releaseDate && (
+                  <p className="cart-preorder-note">
+                    Preorder · Expected release {formatReleaseDate(item.releaseDate)}
+                  </p>
+                )}
                 <label>
                   Quantity
                   <select
@@ -229,6 +234,13 @@ export function CartPage() {
           <p>
             Tax, when enabled, is calculated by Stripe Checkout. {shippingMode === "calculated" ? "The seller must use your selected service or an equal/faster service." : shippingMode === "free" ? "This store offers free shipping." : "This store uses a flat shipping rate."}
           </p>
+          {cart.some((item) => item.availabilityType === "preorder") && (
+            <p className="checkout-preorder-notice">
+              This order includes a preorder. You’ll be charged in full today;
+              the complete order ships after the latest expected release date.
+              Release dates may change.
+            </p>
+          )}
           <label className="consent-check checkout-consent">
             <input type="checkbox" checked={acceptedPolicies} onChange={(event) => setAcceptedPolicies(event.target.checked)} />
             <span>I agree to the <Link href="/terms">Marketplace Terms</Link> and acknowledge the <Link href="/privacy">Privacy Policy</Link>, <Link href="/shipping">Shipping Policy</Link>, and <Link href="/returns">Returns &amp; Refunds Policy</Link>.</span>
@@ -264,3 +276,12 @@ type ShippingOption = {
   estimatedDays: number | null;
   durationTerms: string;
 };
+
+function formatReleaseDate(value: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(`${value}T12:00:00.000Z`));
+}

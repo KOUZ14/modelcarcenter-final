@@ -30,6 +30,8 @@ export async function loadAuthoritativeCart(items: RequestedCartItem[]) {
       currency: products.currency,
       inventoryQuantity: products.inventoryQuantity,
       reservedQuantity: products.reservedQuantity,
+      availabilityType: products.availabilityType,
+      releaseDate: products.releaseDate,
       status: products.status,
       imageUrl: products.primaryImageUrl,
       packageLength: products.packageLength,
@@ -70,6 +72,8 @@ export async function loadAuthoritativeCart(items: RequestedCartItem[]) {
   for (const row of rows) {
     const quantity = consolidated.get(row.id)!;
     if (row.status !== "active" || row.sellerStatus !== "active") throw new Error(`${row.title} is no longer available.`);
+    if (row.availabilityType === "preorder" && !row.releaseDate)
+      throw new Error(`${row.title} has an incomplete preorder release date.`);
     if (row.inventoryQuantity - row.reservedQuantity < quantity) throw new Error(`Only ${Math.max(0, row.inventoryQuantity - row.reservedQuantity)} of ${row.title} are currently available.`);
   }
   const seller = rows[0];
@@ -165,9 +169,23 @@ export async function reserveCart(
         WHERE id = ?`).bind(item.quantity, item.id),
       d1.prepare(`INSERT INTO checkout_reservation_items
         (id, reservation_id, product_id, product_title_snapshot, seller_sku_snapshot, scale_snapshot,
-         manufacturer_snapshot, unit_price_cents, quantity, image_url_snapshot)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .bind(crypto.randomUUID(), reservationId, item.id, item.title, item.sellerSku, item.scale, item.manufacturer, item.priceCents, item.quantity, item.imageUrl),
+         manufacturer_snapshot, unit_price_cents, quantity, image_url_snapshot,
+         availability_type_snapshot, release_date_snapshot)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .bind(
+          crypto.randomUUID(),
+          reservationId,
+          item.id,
+          item.title,
+          item.sellerSku,
+          item.scale,
+          item.manufacturer,
+          item.priceCents,
+          item.quantity,
+          item.imageUrl,
+          item.availabilityType,
+          item.releaseDate,
+        ),
     );
   }
   try {

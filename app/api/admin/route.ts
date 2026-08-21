@@ -18,6 +18,11 @@ import {
 import { commitInventoryCsv, previewInventoryCsv } from "@/lib/csv-import";
 import { config } from "@/lib/config";
 import {
+  notifyRestockSubscribers,
+  parseProductAvailability,
+  syncPreorderReleaseSchedule,
+} from "@/lib/availability";
+import {
   determineMarketplaceFee,
   foundingSellerRatePeriod,
   isEligibleForFoundingSellerRate,
@@ -221,6 +226,8 @@ async function loadAdminSection(section: string) {
         priceCents: products.priceCents,
         inventoryQuantity: products.inventoryQuantity,
         reservedQuantity: products.reservedQuantity,
+        availabilityType: products.availabilityType,
+        releaseDate: products.releaseDate,
         status: products.status,
         primaryImageUrl: products.primaryImageUrl,
         rejectionReason: products.rejectionReason,
@@ -550,6 +557,8 @@ async function reviewCollectorListing(payload: Record<string, unknown>) {
       title: products.title,
       slug: products.slug,
       status: products.status,
+      availabilityType: products.availabilityType,
+      releaseDate: products.releaseDate,
       sellerType: sellers.sellerType,
       sellerStatus: sellers.status,
       sellerEmail: sellers.contactEmail,
@@ -737,13 +746,23 @@ async function refreshStripe(sellerId: string) {
 async function saveProduct(payload: Record<string, unknown>) {
   const id = cleanText(payload.id, 100) || crypto.randomUUID();
   const existing = await getDb()
-    .select({ primaryImageUrl: products.primaryImageUrl })
+    .select({
+      primaryImageUrl: products.primaryImageUrl,
+      inventoryQuantity: products.inventoryQuantity,
+      reservedQuantity: products.reservedQuantity,
+      status: products.status,
+      availabilityType: products.availabilityType,
+      releaseDate: products.releaseDate,
+    })
     .from(products)
     .where(eq(products.id, id))
     .limit(1);
   const sellerId = requiredString(payload.sellerId, "sellerId", 100);
   const seller = await getDb()
-    .select({ id: sellers.id })
+    .select({
+      id: sellers.id,
+      handlingTimeBusinessDays: sellers.handlingTimeBusinessDays,
+    })
     .from(sellers)
     .where(eq(sellers.id, sellerId))
     .limit(1);
@@ -751,6 +770,13 @@ async function saveProduct(payload: Record<string, unknown>) {
   const title = requiredString(payload.title, "title", 200);
   const sellerSku = requiredString(payload.sellerSku, "sellerSku", 100);
   const collectible = parseCollectibleDetails(payload);
+  const availability = parseProductAvailability(payload);
+  const inventoryQuantity = integer(
+    payload.inventoryQuantity,
+    "inventoryQuantity",
+    existing[0]?.reservedQuantity ?? 0,
+    1_000_000,
+  );
   const values = {
     id,
     sellerId,
@@ -773,12 +799,8 @@ async function saveProduct(payload: Record<string, unknown>) {
     condition: legacyConditionFromCollectibleDetails(collectible),
     ...collectible,
     priceCents: integer(payload.priceCents, "priceCents", 0, 100_000_000),
-    inventoryQuantity: integer(
-      payload.inventoryQuantity,
-      "inventoryQuantity",
-      0,
-      1_000_000,
-    ),
+    inventoryQuantity,
+    ...availability,
     primaryImageUrl: existing[0]?.primaryImageUrl ?? null,
     keywords: cleanText(payload.keywords, 1_000),
   };
@@ -787,8 +809,34 @@ async function saveProduct(payload: Record<string, unknown>) {
     .values({ ...values, status: "draft", currency: "usd" })
     .onConflictDoUpdate({
       target: products.id,
-      set: { ...values, updatedAt: new Date().toISOString() },
+      set: {
+        ...values,
+        status:
+          existing[0]?.status === "sold_out" &&
+          inventoryQuantity > (existing[0]?.reservedQuantity ?? 0)
+            ? "active"
+            : existing[0]?.status,
+        updatedAt: new Date().toISOString(),
+      },
     });
+  if (
+    existing[0] &&
+    existing[0].inventoryQuantity - existing[0].reservedQuantity < 1 &&
+    inventoryQuantity - existing[0].reservedQuantity > 0
+  ) {
+    await notifyRestockSubscribers(id);
+  }
+  if (existing[0]) {
+    await syncPreorderReleaseSchedule({
+      productId: id,
+      title,
+      previousAvailabilityType: existing[0].availabilityType,
+      previousReleaseDate: existing[0].releaseDate,
+      availabilityType: availability.availabilityType,
+      releaseDate: availability.releaseDate,
+      handlingTimeBusinessDays: seller[0].handlingTimeBusinessDays,
+    });
+  }
   return { productId: id };
 }
 
@@ -915,6 +963,7 @@ async function refundOrder(payload: Record<string, unknown>) {
       )
       .bind(refund.id, orderId),
   ];
+  const restockedProductIds: string[] = [];
   if (restock) {
     const items = await db
       .select({
@@ -924,18 +973,26 @@ async function refundOrder(payload: Record<string, unknown>) {
       .from(orderItems)
       .where(eq(orderItems.orderId, orderId));
     items
-      .filter((item) => item.productId)
+      .filter((item): item is typeof item & { productId: string } => Boolean(item.productId))
       .forEach((item) =>
-        statements.push(
+        {
+          restockedProductIds.push(item.productId);
+          statements.push(
           d1
             .prepare(
               `UPDATE products SET inventory_quantity = inventory_quantity + ?, status = CASE WHEN status = 'sold_out' THEN 'active' ELSE status END, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
             )
             .bind(item.quantity, item.productId),
-        ),
+          );
+        },
       );
   }
   await d1.batch(statements);
+  await Promise.all(
+    [...new Set(restockedProductIds)].map((productId) =>
+      notifyRestockSubscribers(productId),
+    ),
+  );
   return {
     refundId: refund.id,
     refundStatus: refund.status,

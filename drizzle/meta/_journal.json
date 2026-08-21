@@ -78,6 +78,13 @@
       "when": 1787274572196,
       "tag": "0010_parched_scream",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1787280479572,
+      "tag": "0011_milky_maximus",
+      "breakpoints": true
     }
   ]
 }

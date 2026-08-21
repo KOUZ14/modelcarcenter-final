@@ -2,6 +2,10 @@ import { eq } from "drizzle-orm";
 import { getD1, getDb } from "@/db";
 import { products, sellers } from "@/db/schema";
 import { parseCsv, planImportUpserts, validateImportRows } from "./validation";
+import {
+  notifyRestockSubscribers,
+  syncPreorderReleaseSchedule,
+} from "./availability";
 
 export const inventoryCsvHeaders = [
   "seller_sku",
@@ -27,6 +31,8 @@ export const inventoryCsvHeaders = [
   "provenance",
   "price",
   "inventory_quantity",
+  "availability_type",
+  "release_date",
   "keywords",
 ];
 
@@ -40,12 +46,28 @@ export function previewInventoryCsv(csv: string) {
 
 export async function commitInventoryCsv(sellerId: string, csv: string) {
   const db = getDb();
-  const seller = await db.select({ id: sellers.id }).from(sellers).where(eq(sellers.id, sellerId)).limit(1);
+  const seller = await db
+    .select({
+      id: sellers.id,
+      handlingTimeBusinessDays: sellers.handlingTimeBusinessDays,
+    })
+    .from(sellers)
+    .where(eq(sellers.id, sellerId))
+    .limit(1);
   if (!seller[0]) throw new Error("Select a valid seller before importing.");
   const preview = previewInventoryCsv(csv);
   if (preview.errors.length) throw new Error("Fix every row error before committing this import.");
   const existing = await db
-    .select({ id: products.id, sellerSku: products.sellerSku, slug: products.slug })
+    .select({
+      id: products.id,
+      sellerSku: products.sellerSku,
+      slug: products.slug,
+      inventoryQuantity: products.inventoryQuantity,
+      reservedQuantity: products.reservedQuantity,
+      status: products.status,
+      availabilityType: products.availabilityType,
+      releaseDate: products.releaseDate,
+    })
     .from(products)
     .where(eq(products.sellerId, sellerId));
   const planned = planImportUpserts(existing, preview.valid);
@@ -60,8 +82,8 @@ export async function commitInventoryCsv(sellerId: string, csv: string) {
          vehicle_model, vehicle_year, color, condition, model_condition, packaging_condition,
          original_box_status, missing_parts, defects, restoration_customization, material,
          product_number, edition_serial, coa_status, accessories, provenance, price_cents,
-         currency, inventory_quantity, reserved_quantity, status, keywords)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'usd', ?, 0, 'draft', ?)
+         currency, inventory_quantity, reserved_quantity, availability_type, release_date, status, keywords)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'usd', ?, 0, ?, ?, 'draft', ?)
         ON CONFLICT(seller_id, seller_sku) DO UPDATE SET
           title = excluded.title, description = excluded.description, scale = excluded.scale,
           model_manufacturer = excluded.model_manufacturer, vehicle_make = excluded.vehicle_make,
@@ -78,6 +100,12 @@ export async function commitInventoryCsv(sellerId: string, csv: string) {
             WHEN excluded.inventory_quantity >= products.reserved_quantity THEN excluded.inventory_quantity
             ELSE products.reserved_quantity
           END,
+          availability_type = excluded.availability_type,
+          release_date = excluded.release_date,
+          status = CASE
+            WHEN products.status = 'sold_out' AND excluded.inventory_quantity > products.reserved_quantity THEN 'active'
+            ELSE products.status
+          END,
           keywords = excluded.keywords,
           updated_at = CURRENT_TIMESTAMP`)
         .bind(productId, sellerId, slug, row.sellerSku, row.title, row.description, row.scale,
@@ -85,13 +113,43 @@ export async function commitInventoryCsv(sellerId: string, csv: string) {
           row.condition, row.modelCondition, row.packagingCondition, row.originalBoxStatus,
           row.missingParts, row.defects, row.restorationCustomization, row.material,
           row.productNumber, row.editionSerial, row.coaStatus, row.accessories, row.provenance,
-          row.priceCents, row.inventoryQuantity, row.keywords),
+          row.priceCents, row.inventoryQuantity, row.availabilityType, row.releaseDate, row.keywords),
     );
   }
   await d1.batch(statements);
+  const existingById = new Map(existing.map((item) => [item.id, item]));
+  const restocked = planned.filter((row) => {
+    const previous = existingById.get(row.id);
+    return Boolean(
+      previous &&
+      previous.inventoryQuantity - previous.reservedQuantity < 1 &&
+      row.inventoryQuantity - previous.reservedQuantity > 0,
+    );
+  });
+  await Promise.all(
+    restocked.map((row) => notifyRestockSubscribers(row.id)),
+  );
+  await Promise.all(
+    planned.flatMap((row) => {
+      const previous = existingById.get(row.id);
+      return previous
+        ? [
+            syncPreorderReleaseSchedule({
+              productId: row.id,
+              title: row.title,
+              previousAvailabilityType: previous.availabilityType,
+              previousReleaseDate: previous.releaseDate,
+              availabilityType: row.availabilityType,
+              releaseDate: row.releaseDate,
+              handlingTimeBusinessDays: seller[0].handlingTimeBusinessDays,
+            }),
+          ]
+        : [];
+    }),
+  );
   return { imported: planned.length, created: planned.filter((row) => row.operation === "insert").length };
 }
 
 export function inventoryCsvTemplate() {
-  return `${inventoryCsvHeaders.join(",")}\nSKU-001,Example model,Short plain-text description,1:18,AUTOart,Porsche,911,1973,Silver,mint,excellent,included,None known,None known,None known,Die-cast metal,78123,147 of 500,included,"Display base; booklet",Single-owner collection,249.95,2,"porsche 911 classic"\n`;
+  return `${inventoryCsvHeaders.join(",")}\nSKU-001,Example model,Short plain-text description,1:18,AUTOart,Porsche,911,1973,Silver,mint,excellent,included,None known,None known,None known,Die-cast metal,78123,147 of 500,included,"Display base; booklet",Single-owner collection,249.95,2,in_stock,,"porsche 911 classic"\n`;
 }

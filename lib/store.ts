@@ -26,6 +26,11 @@ import { buildStoreAnalytics } from "./store-rules";
 import { determineMarketplaceFee } from "./fees";
 import { parseParcel } from "./shipping-rules";
 import {
+  notifyRestockSubscribers,
+  parseProductAvailability,
+  syncPreorderReleaseSchedule,
+} from "./availability";
+import {
   assertCollectibleListingReady,
   cleanText,
   integer,
@@ -254,6 +259,7 @@ export async function saveStoreProduct(
     existing?.reservedQuantity ?? 0,
     1_000_000,
   );
+  const availability = parseProductAvailability(payload);
   const collectible = parseCollectibleDetails(payload);
   const hasPackageOverride = [
     payload.packageLength,
@@ -295,11 +301,14 @@ export async function saveStoreProduct(
     packageHeight: packageOverride?.height ?? null,
     packageWeight: packageOverride?.weight ?? null,
     inventoryQuantity,
+    ...availability,
     primaryImageUrl: existing?.primaryImageUrl ?? null,
     keywords: cleanText(payload.keywords, 1_000),
   };
 
   if (existing) {
+    const wasSoldOut =
+      existing.inventoryQuantity - existing.reservedQuantity < 1;
     const nextStatus =
       existing.status === "sold_out" &&
       inventoryQuantity > existing.reservedQuantity
@@ -311,6 +320,18 @@ export async function saveStoreProduct(
       .where(
         and(eq(products.id, existing.id), eq(products.sellerId, store.id)),
       );
+    if (wasSoldOut && inventoryQuantity - existing.reservedQuantity > 0) {
+      await notifyRestockSubscribers(existing.id);
+    }
+    await syncPreorderReleaseSchedule({
+      productId: existing.id,
+      title,
+      previousAvailabilityType: existing.availabilityType,
+      previousReleaseDate: existing.releaseDate,
+      availabilityType: availability.availabilityType,
+      releaseDate: availability.releaseDate,
+      handlingTimeBusinessDays: store.handlingTimeBusinessDays,
+    });
   } else {
     await db.insert(products).values({
       id,

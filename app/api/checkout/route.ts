@@ -49,7 +49,10 @@ export async function POST(request: Request) {
       sellerStripeAccountId: cart.seller.sellerStripeAccountId!,
       items: cart.items.map((item) => ({
         title: item.title,
-        description: item.description,
+        description:
+          item.availabilityType === "preorder" && item.releaseDate
+            ? `Preorder · Expected release ${formatReleaseDate(item.releaseDate)}. ${item.description}`.trim()
+            : item.description,
         imageUrl: item.imageUrl,
         priceCents: item.priceCents,
         currency: item.currency,
@@ -75,4 +78,13 @@ export async function POST(request: Request) {
     console.error(error);
     return Response.json({ error: safe }, { status: 400 });
   }
+}
+
+function formatReleaseDate(value: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(`${value}T12:00:00.000Z`));
 }

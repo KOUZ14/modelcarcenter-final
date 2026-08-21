@@ -103,32 +103,50 @@ export type EmailOrder = {
   currency: string;
   totalCents: number;
   shippingAddress: ShippingAddress;
-  items: Array<{ title: string; quantity: number; unitPriceCents: number }>;
+  items: Array<{
+    title: string;
+    quantity: number;
+    unitPriceCents: number;
+    availabilityType?: "in_stock" | "preorder";
+    releaseDate?: string | null;
+  }>;
 };
 
 function orderItemsHtml(order: EmailOrder) {
-  return order.items.map((item) => `<li>${escapeHtml(item.title)} × ${item.quantity} — ${escapeHtml(money(item.unitPriceCents * item.quantity, order.currency))}</li>`).join("");
+  return order.items.map((item) => `<li>${escapeHtml(item.title)} × ${item.quantity} — ${escapeHtml(money(item.unitPriceCents * item.quantity, order.currency))}${item.availabilityType === "preorder" && item.releaseDate ? `<br><strong>Preorder · Expected release ${escapeHtml(formatReleaseDate(item.releaseDate))}</strong>` : ""}</li>`).join("");
 }
 
 function orderItemsText(order: EmailOrder) {
-  return order.items.map((item) => `${item.title} x ${item.quantity} — ${money(item.unitPriceCents * item.quantity, order.currency)}`).join("\n");
+  return order.items.map((item) => `${item.title} x ${item.quantity} — ${money(item.unitPriceCents * item.quantity, order.currency)}${item.availabilityType === "preorder" && item.releaseDate ? `\nPreorder · Expected release ${formatReleaseDate(item.releaseDate)}` : ""}`).join("\n");
+}
+
+function formatReleaseDate(value: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(`${value}T12:00:00.000Z`));
 }
 
 export async function sendPaidOrderEmails(order: EmailOrder) {
   const address = addressText(order.shippingAddress);
+  const hasPreorder = order.items.some(
+    (item) => item.availabilityType === "preorder",
+  );
   await Promise.allSettled([
     sendEmail({
       to: order.sellerEmail,
       subject: `New paid order ${order.orderNumber}`,
-      html: `<h1>New paid order</h1><p>Order <strong>${escapeHtml(order.orderNumber)}</strong> is ready to fulfill.</p><ul>${orderItemsHtml(order)}</ul><h2>Ship to</h2><pre>${escapeHtml(address)}</pre><p>Total paid: ${escapeHtml(money(order.totalCents, order.currency))}</p><p>Please fulfill the order and send tracking to ${escapeHtml(config.supportEmail)}.</p>`,
-      text: `New paid order ${order.orderNumber}\n\n${orderItemsText(order)}\n\nShip to:\n${address}\n\nTotal paid: ${money(order.totalCents, order.currency)}\n\nSend tracking to ${config.supportEmail}.`,
+      html: `<h1>New paid order</h1><p>Order <strong>${escapeHtml(order.orderNumber)}</strong> is paid${hasPreorder ? " and includes a preorder. Hold that item until its release date." : " and ready to fulfill."}</p><ul>${orderItemsHtml(order)}</ul><h2>Ship to</h2><pre>${escapeHtml(address)}</pre><p>Total paid: ${escapeHtml(money(order.totalCents, order.currency))}</p><p>Please fulfill on schedule and send tracking to ${escapeHtml(config.supportEmail)}.</p>`,
+      text: `New paid order ${order.orderNumber}${hasPreorder ? " includes a preorder. Hold that item until its release date." : " is ready to fulfill."}\n\n${orderItemsText(order)}\n\nShip to:\n${address}\n\nTotal paid: ${money(order.totalCents, order.currency)}\n\nSend tracking to ${config.supportEmail}.`,
       idempotencyKey: `seller-paid-${order.orderNumber}`,
     }),
     sendEmail({
       to: order.buyerEmail,
       subject: `Order confirmation ${order.orderNumber}`,
-      html: `<h1>Thanks for your order</h1><p>Your order <strong>${escapeHtml(order.orderNumber)}</strong> from ${escapeHtml(order.sellerName)} is paid.</p><ul>${orderItemsHtml(order)}</ul><h2>Shipping address</h2><pre>${escapeHtml(address)}</pre><p>Total: ${escapeHtml(money(order.totalCents, order.currency))}</p><p>Questions? Contact ${escapeHtml(config.supportEmail)}.</p>`,
-      text: `Order ${order.orderNumber} from ${order.sellerName} is paid.\n\n${orderItemsText(order)}\n\nShipping address:\n${address}\n\nTotal: ${money(order.totalCents, order.currency)}\nQuestions: ${config.supportEmail}`,
+      html: `<h1>Thanks for your order</h1><p>Your order <strong>${escapeHtml(order.orderNumber)}</strong> from ${escapeHtml(order.sellerName)} is paid.${hasPreorder ? " Preorder items will ship after the expected release date shown below; release dates may change." : ""}</p><ul>${orderItemsHtml(order)}</ul><h2>Shipping address</h2><pre>${escapeHtml(address)}</pre><p>Total: ${escapeHtml(money(order.totalCents, order.currency))}</p><p>Questions? Contact ${escapeHtml(config.supportEmail)}.</p>`,
+      text: `Order ${order.orderNumber} from ${order.sellerName} is paid.${hasPreorder ? " Preorder items will ship after the expected release date; release dates may change." : ""}\n\n${orderItemsText(order)}\n\nShipping address:\n${address}\n\nTotal: ${money(order.totalCents, order.currency)}\nQuestions: ${config.supportEmail}`,
       idempotencyKey: `buyer-paid-${order.orderNumber}`,
     }),
   ]);

@@ -444,6 +444,8 @@ export type ValidatedImportRow = {
   photoIssuesChecked: boolean;
   priceCents: number;
   inventoryQuantity: number;
+  availabilityType: "in_stock" | "preorder";
+  releaseDate: string | null;
   keywords: string;
 };
 
@@ -461,6 +463,15 @@ export function validateImportRows(rows: CsvRow[]) {
     let inventoryQuantity = 0;
     try { priceCents = moneyToCents(row.price); } catch (error) { rowErrors.push((error as Error).message); }
     try { inventoryQuantity = integer(row.inventory_quantity, "inventory_quantity", 0, 1_000_000); } catch (error) { rowErrors.push((error as Error).message); }
+    const availabilityType = cleanText(row.availability_type, 20) || "in_stock";
+    const releaseDate = cleanText(row.release_date, 10) || null;
+    if (!['in_stock', 'preorder'].includes(availabilityType))
+      rowErrors.push("availability_type must be in_stock or preorder");
+    if (
+      availabilityType === "preorder" &&
+      (!releaseDate || !/^\d{4}-\d{2}-\d{2}$/.test(releaseDate))
+    )
+      rowErrors.push("release_date is required for preorders in YYYY-MM-DD format");
     let collectible: ReturnType<typeof parseCollectibleDetails> | null = null;
     try {
       collectible = parseCollectibleDetails({
@@ -503,6 +514,8 @@ export function validateImportRows(rows: CsvRow[]) {
       ...collectible,
       priceCents,
       inventoryQuantity,
+      availabilityType: availabilityType as "in_stock" | "preorder",
+      releaseDate: availabilityType === "preorder" ? releaseDate : null,
       keywords: cleanText(row.keywords, 1_000),
     });
   });

@@ -106,12 +106,20 @@ Approved professional sellers use the same passwordless magic-link authenticatio
 The Store Console provides:
 
 - Seller-scoped product creation and editing, stock changes that cannot drop below reserved inventory, publishing/unpublishing, and archival
+- In-stock and preorder sales modes with required expected release dates, paid-order release snapshots, automatic ship-by recalculation, and buyer release-update email
+- Durable one-time restock alerts on sold-out product pages; inventory increases reactivate sold-out listings and notify active subscribers
 - CSV preview and seller-SKU upsert importing using the canonical inventory template; new imports start as drafts and updates preserve the existing product status
 - Paid-order details and shipping-address access for the owning store, carrier rates and labels, handling reminders, tracking events, and manual-tracking fallback
 - Lifetime sales, order, fee, unit, inventory-value, low-stock, rolling six-month, and top-product analytics calculated only from that seller's records
 - Storefront profile, shipping, and return-policy settings; contact-email changes, refunds, payout remediation, suspensions, and store closure remain founder/support actions
 
 Professional stores can create and edit drafts before onboarding is complete, but products can become active only while the seller is active and Stripe reports both charges and payouts enabled. Suspended accounts retain read-only access. Store inventory "deletion" is archival so order snapshots and in-flight reservation references remain intact.
+
+### Availability lifecycle
+
+Preorder inventory is an allocation: checkout charges the buyer in full, reserves the requested units exactly like in-stock inventory, and shows the expected release date on the product page, cart, Stripe line item, confirmation email, buyer account, and seller order. Mixed carts use the latest preorder release date as the fulfillment anchor. When a seller changes a preorder date or switches the product to in stock, affected paid orders receive an email and their ship-by deadline is recalculated.
+
+Sold-out product pages remain public so collectors can save the model or register an email alert. Raising available inventory above zero reactivates a sold-out listing and attempts each active alert once. Successfully delivered alerts are marked notified; skipped or failed email deliveries remain active for a later retry. Every alert email includes a tokenized unsubscribe link.
 
 ## Database and D1
 
@@ -273,12 +281,13 @@ The admin provides:
 Download the canonical template from the admin import tab. The columns are:
 
 ```text
-seller_sku,title,description,scale,model_manufacturer,vehicle_make,vehicle_model,vehicle_year,color,model_condition,packaging_condition,original_box,missing_parts,defects,restoration_customization,material,product_number,edition_serial,coa,accessories,provenance,price,inventory_quantity,keywords
+seller_sku,title,description,scale,model_manufacturer,vehicle_make,vehicle_model,vehicle_year,color,model_condition,packaging_condition,original_box,missing_parts,defects,restoration_customization,material,product_number,edition_serial,coa,accessories,provenance,price,inventory_quantity,availability_type,release_date,keywords
 ```
 
 - Select the seller before upload.
 - `seller_sku`, title, scale, manufacturer, vehicle make/model, collectible conditions/disclosures, material, price, and inventory are required.
 - `price` is decimal currency and is normalized to integer cents.
+- `availability_type` is optional and defaults to `in_stock`; use `preorder` with a `release_date` in `YYYY-MM-DD` format.
 - `model_condition` is `mint`, `near_mint`, `excellent`, `good`, `fair`, or `poor`.
 - `packaging_condition` is `sealed`, `mint`, `excellent`, `good`, `fair`, `poor`, or `not_included`; `original_box` is `included`, `not_included`, or `reproduction`.
 - `coa` is `included`, `not_included`, or `not_applicable`.
@@ -296,7 +305,7 @@ npm run build
 npm run validate:artifact
 ```
 
-Tests cover search normalization, availability, server totals, fee calculation, the single-seller rule, Model Hunt validation, CSV validation/upsert planning, Stripe signature and event idempotency logic, inventory reservation/release/completion, safe auth redirects, resource ownership, seller-only fulfillment, wishlist deduplication, guest-data merging, verified legacy-record claims, moderation gates, image validation, high-value shipping rules, package validation, combined-shipping identity, handling reminders, tracking-state mapping, and the built marketplace artifact.
+Tests cover search normalization, product availability modes, preorder release validation and ship anchors, server totals, fee calculation, the single-seller rule, Model Hunt validation, CSV validation/upsert planning, Stripe signature and event idempotency logic, inventory reservation/release/completion, safe auth redirects, resource ownership, seller-only fulfillment, wishlist deduplication, guest-data merging, verified legacy-record claims, moderation gates, image validation, high-value shipping rules, package validation, combined-shipping identity, handling reminders, tracking-state mapping, and the built marketplace artifact.
 
 ## Production launch checklist
 

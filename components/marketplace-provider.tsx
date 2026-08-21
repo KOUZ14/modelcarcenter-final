@@ -88,7 +88,7 @@ export function MarketplaceProvider({ children }: { children: React.ReactNode })
           const fresh = new Map((data.products ?? []).map((product) => [product.id, product]));
           guestCart = guestCart.flatMap((item) => {
             const product = fresh.get(item.productId);
-            return product
+            return product && product.availableQuantity > 0
               ? [cartItemFromProduct(product, Math.min(item.quantity, product.availableQuantity))]
               : [];
           });
@@ -179,6 +179,8 @@ function cartItemFromProduct(product: ProductSummary, quantity: number): CartIte
     priceCents: product.priceCents,
     currency: product.currency,
     availableQuantity: product.availableQuantity,
+    availabilityType: product.availabilityType,
+    releaseDate: product.releaseDate,
     shippingCents: product.defaultShippingCents,
     shippingMode:
       product.sellerType === "collector" ? "calculated" : product.shippingMode,

@@ -29,9 +29,13 @@ export function ProductCard({ product }: { product: ProductSummary }) {
             <div className="image-placeholder">Image coming soon</div>
           )}
         </Link>
-        {product.availableQuantity <= 2 && (
+        {product.availableQuantity < 1 ? (
+          <span className="product-badge sold-out">Sold out</span>
+        ) : product.availabilityType === "preorder" ? (
+          <span className="product-badge preorder">Preorder</span>
+        ) : product.availableQuantity <= 2 ? (
           <span className="product-badge">Low stock</span>
-        )}
+        ) : null}
         <button
           className={saved ? "favorite active" : "favorite"}
           type="button"

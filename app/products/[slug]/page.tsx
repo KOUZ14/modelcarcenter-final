@@ -71,9 +71,15 @@ export default async function ProductPage({
       priceCurrency: product.currency.toUpperCase(),
       price: (product.priceCents / 100).toFixed(2),
       availability:
-        product.availableQuantity > 0
-          ? "https://schema.org/InStock"
-          : "https://schema.org/OutOfStock",
+        product.availableQuantity < 1
+          ? "https://schema.org/OutOfStock"
+          : product.availabilityType === "preorder"
+            ? "https://schema.org/PreOrder"
+            : "https://schema.org/InStock",
+      availabilityStarts:
+        product.availabilityType === "preorder" && product.releaseDate
+          ? product.releaseDate
+          : undefined,
       seller: { "@type": "Organization", name: product.sellerName },
     },
   };
@@ -110,9 +116,13 @@ export default async function ProductPage({
               {formatMoney(product.priceCents, product.currency)}
             </p>
             <p className="stock-line">
-              {product.availableQuantity === 1
-                ? "Only 1 available"
-                : `${product.availableQuantity} available`}{" "}
+              {product.availableQuantity < 1
+                ? "Sold out"
+                : product.availabilityType === "preorder" && product.releaseDate
+                  ? `Preorder · Expected release ${formatReleaseDate(product.releaseDate)}`
+                  : product.availableQuantity === 1
+                    ? "Only 1 available"
+                    : `${product.availableQuantity} available`}{" "}
               · Model: {formatCondition(product.modelCondition)}
             </p>
             <ProductPurchase product={product} />
@@ -251,4 +261,13 @@ export default async function ProductPage({
       <SiteFooter />
     </main>
   );
+}
+
+function formatReleaseDate(value: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(`${value}T12:00:00.000Z`));
 }

@@ -85,6 +85,8 @@ type Product = {
   currency: string;
   inventoryQuantity: number;
   reservedQuantity: number;
+  availabilityType: "in_stock" | "preorder";
+  releaseDate: string | null;
   status: string;
   primaryImageUrl: string | null;
   images: EditableProductImage[];
@@ -98,6 +100,8 @@ type OrderItem = {
   sellerSkuSnapshot: string;
   quantity: number;
   unitPriceCents: number;
+  availabilityTypeSnapshot: "in_stock" | "preorder";
+  releaseDateSnapshot: string | null;
 };
 
 type StoreOrder = {
@@ -258,6 +262,9 @@ export function StoreDashboard({
               )}
             </button>
           ))}
+          <Link className="store-messages-link" href="/messages">
+            Buyer messages
+          </Link>
         </nav>
         <div className="store-sidebar-links">
           <Link href={`/sellers/${data.store.slug}`}>View storefront</Link>
@@ -504,6 +511,9 @@ function Inventory({
                     <small>
                       {product.scale} · {product.modelManufacturer}
                     </small>
+                    {product.availabilityType === "preorder" && product.releaseDate && (
+                      <small>Preorder · releases {formatUtcDate(product.releaseDate)}</small>
+                    )}
                   </td>
                   <td>{product.sellerSku}</td>
                   <td>{formatMoney(product.priceCents, product.currency)}</td>
@@ -575,6 +585,9 @@ function ProductEditor({
   const [images, setImages] = useState(product?.images ?? []);
   const [primaryUploadFinished, setPrimaryUploadFinished] = useState(false);
   const [imageError, setImageError] = useState("");
+  const [availabilityType, setAvailabilityType] = useState<
+    "in_stock" | "preorder"
+  >(product?.availabilityType ?? "in_stock");
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
@@ -664,6 +677,41 @@ function ProductEditor({
             <label>Price (USD)<input name="price" inputMode="decimal" required defaultValue={product ? (product.priceCents / 100).toFixed(2) : ""} /></label>
             <label>Inventory quantity<input name="inventoryQuantity" type="number" min={product?.reservedQuantity ?? 0} max={1000000} required defaultValue={product?.inventoryQuantity ?? 1} /></label>
           </div>
+          <fieldset className="availability-fields">
+            <legend>Availability</legend>
+            <div className="form-row">
+              <label>
+                Sales workflow
+                <select
+                  name="availabilityType"
+                  value={availabilityType}
+                  onChange={(event) =>
+                    setAvailabilityType(
+                      event.target.value as "in_stock" | "preorder",
+                    )
+                  }
+                >
+                  <option value="in_stock">In stock · ships after purchase</option>
+                  <option value="preorder">Preorder · ships after release</option>
+                </select>
+              </label>
+              <label>
+                Expected release date
+                <input
+                  name="releaseDate"
+                  type="date"
+                  required={availabilityType === "preorder"}
+                  disabled={availabilityType !== "preorder"}
+                  defaultValue={product?.releaseDate ?? ""}
+                />
+              </label>
+            </div>
+            <p className="form-note">
+              Preorders are paid at checkout and count against the inventory
+              quantity above. The expected release date appears before purchase
+              and in the order confirmation.
+            </p>
+          </fieldset>
           <fieldset><legend>Package override (optional)</legend><p className="form-note">Leave all four blank to use the store default package for calculated checkout rates.</p><div className="parcel-grid"><label>Length (in)<input name="packageLength" inputMode="decimal" defaultValue={product?.packageLength ?? ""} /></label><label>Width (in)<input name="packageWidth" inputMode="decimal" defaultValue={product?.packageWidth ?? ""} /></label><label>Height (in)<input name="packageHeight" inputMode="decimal" defaultValue={product?.packageHeight ?? ""} /></label><label>Weight (lb)<input name="packageWeight" inputMode="decimal" defaultValue={product?.packageWeight ?? ""} /></label></div></fieldset>
           <CollectibleListingFields product={product}/>
           <ProductImageFields
@@ -788,7 +836,7 @@ function Orders({
             <div className="store-order-body">
               <div>
                 <h4>Items</h4>
-                {order.items.map((item) => <p key={item.id}><b>{item.productTitleSnapshot}</b><br /><span>{item.sellerSkuSnapshot} · {item.quantity} × {formatMoney(item.unitPriceCents, order.currency)}</span></p>)}
+                {order.items.map((item) => <p key={item.id}><b>{item.productTitleSnapshot}</b><br /><span>{item.sellerSkuSnapshot} · {item.quantity} × {formatMoney(item.unitPriceCents, order.currency)}</span>{item.availabilityTypeSnapshot === "preorder" && item.releaseDateSnapshot && <><br /><span className="order-preorder-date">Preorder · Expected release {date(item.releaseDateSnapshot)}</span></>}</p>)}
                 <dl className="store-order-totals"><div><dt>Items</dt><dd>{formatMoney(order.subtotalCents, order.currency)}</dd></div><div><dt>Shipping</dt><dd>{formatMoney(order.shippingCents, order.currency)}</dd></div>{order.taxCents > 0 && <div><dt>Tax</dt><dd>{formatMoney(order.taxCents, order.currency)}</dd></div>}<div><dt>Model Car Center fee ({feePercent(order.marketplaceFeeBps)})</dt><dd>−{formatMoney(order.platformFeeCents, order.currency)}</dd></div><div><dt>Payment processing</dt><dd>{order.paymentProcessingFeeCents == null ? "Recorded by Stripe after settlement" : `${formatMoney(order.paymentProcessingFeeCents, order.currency)} paid separately by Model Car Center`}</dd></div><div><dt>Seller proceeds</dt><dd>{order.sellerProceedsCents == null ? "Not recorded for this order" : formatMoney(order.sellerProceedsCents, order.currency)}</dd></div></dl>
               </div>
               <div>

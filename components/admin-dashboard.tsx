@@ -666,6 +666,8 @@ type AdminProduct = {
   priceCents: number;
   inventoryQuantity: number;
   reservedQuantity: number;
+  availabilityType: "in_stock" | "preorder";
+  releaseDate: string | null;
   status: string;
   primaryImageUrl?: string | null;
   rejectionReason?: string | null;
@@ -879,6 +881,8 @@ function emptyProduct(sellerId: string): AdminProduct {
     priceCents: 0,
     inventoryQuantity: 1,
     reservedQuantity: 0,
+    availabilityType: "in_stock",
+    releaseDate: null,
     status: "draft",
   };
 }
@@ -899,6 +903,9 @@ function ProductEditor({
   const [images, setImages] = useState(product.images ?? []);
   const [primaryUploadFinished, setPrimaryUploadFinished] = useState(false);
   const [imageError, setImageError] = useState("");
+  const [availabilityType, setAvailabilityType] = useState<
+    "in_stock" | "preorder"
+  >(product.availabilityType ?? "in_stock");
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
@@ -1054,6 +1061,36 @@ function ProductEditor({
             defaultValue={product.inventoryQuantity}
           />
         </label>
+        <fieldset className="availability-fields">
+          <legend>Availability</legend>
+          <div className="form-row">
+            <label>
+              Sales workflow
+              <select
+                name="availabilityType"
+                value={availabilityType}
+                onChange={(event) =>
+                  setAvailabilityType(
+                    event.target.value as "in_stock" | "preorder",
+                  )
+                }
+              >
+                <option value="in_stock">In stock</option>
+                <option value="preorder">Preorder</option>
+              </select>
+            </label>
+            <label>
+              Expected release date
+              <input
+                name="releaseDate"
+                type="date"
+                required={availabilityType === "preorder"}
+                disabled={availabilityType !== "preorder"}
+                defaultValue={product.releaseDate ?? ""}
+              />
+            </label>
+          </div>
+        </fieldset>
         <ProductImageFields
           images={images}
           primaryImageUrl={product.primaryImageUrl}
@@ -1474,6 +1511,8 @@ type AdminOrder = {
     productTitleSnapshot: string;
     quantity: number;
     unitPriceCents: number;
+    availabilityTypeSnapshot: "in_stock" | "preorder";
+    releaseDateSnapshot: string | null;
   }>;
 };
 function Orders({
@@ -1531,6 +1570,7 @@ function OrderPanel({
             <p key={item.id}>
               {item.productTitleSnapshot} × {item.quantity} —{" "}
               {money(item.unitPriceCents * item.quantity, order.currency)}
+              {item.availabilityTypeSnapshot === "preorder" && item.releaseDateSnapshot ? ` · Preorder releases ${shortDate(item.releaseDateSnapshot)}` : ""}
             </p>
           ))}
           <p>

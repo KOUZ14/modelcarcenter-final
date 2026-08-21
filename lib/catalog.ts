@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, sql, type SQL } from "drizzle-orm";
 import { getDb } from "@/db";
 import { productImages, products, sellers } from "@/db/schema";
 import { normalizeSearch } from "./business";
@@ -55,6 +55,8 @@ const productSelection = {
   inventoryQuantity: products.inventoryQuantity,
   reservedQuantity: products.reservedQuantity,
   availableQuantity: sql<number>`${products.inventoryQuantity} - ${products.reservedQuantity}`,
+  availabilityType: products.availabilityType,
+  releaseDate: products.releaseDate,
   primaryImageUrl: products.primaryImageUrl,
   keywords: products.keywords,
   defaultShippingCents: sellers.defaultShippingCents,
@@ -196,7 +198,7 @@ export async function getProductBySlug(
     .where(
       and(
         eq(products.slug, slug),
-        eq(products.status, "active"),
+        inArray(products.status, ["active", "sold_out"]),
         eq(sellers.status, "active"),
       ),
     )

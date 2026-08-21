@@ -38,6 +38,8 @@ export type ProductSummary = {
   inventoryQuantity: number;
   reservedQuantity: number;
   availableQuantity: number;
+  availabilityType: "in_stock" | "preorder";
+  releaseDate: string | null;
   primaryImageUrl: string | null;
   keywords: string;
   defaultShippingCents: number;
@@ -78,6 +80,8 @@ export type CartItem = {
   priceCents: number;
   currency: string;
   availableQuantity: number;
+  availabilityType: "in_stock" | "preorder";
+  releaseDate: string | null;
   shippingCents: number;
   shippingMode: "calculated" | "flat" | "free";
   quantity: number;
