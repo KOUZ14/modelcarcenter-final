@@ -123,6 +123,12 @@ export const sellers = sqliteTable(
     returnPolicySummary: text("return_policy_summary").notNull().default(""),
     sellerTermsVersion: text("seller_terms_version"),
     sellerTermsAcceptedAt: text("seller_terms_accepted_at"),
+    taxInfoStatus: text("tax_info_status", {
+      enum: ["not_checked", "collecting", "ready", "needs_attention"],
+    })
+      .notNull()
+      .default("not_checked"),
+    taxInfoVerifiedAt: text("tax_info_verified_at"),
     ...timestamps,
   },
   (table) => [
@@ -571,6 +577,149 @@ export const communitySubscribers = sqliteTable(
   (table) => [
     uniqueIndex("community_subscribers_email_unique").on(table.email),
   ],
+);
+
+export const taxProfiles = sqliteTable("tax_profiles", {
+  id: text("id").primaryKey(),
+  legalStructure: text("legal_structure", {
+    enum: ["sole_proprietor"],
+  })
+    .notNull()
+    .default("sole_proprietor"),
+  homeState: text("home_state").notNull().default("CA"),
+  productTaxCode: text("product_tax_code")
+    .notNull()
+    .default("txcd_99999999"),
+  sellerPermitStatus: text("seller_permit_status", {
+    enum: ["not_checked", "active", "needs_attention"],
+  })
+    .notNull()
+    .default("not_checked"),
+  marketplaceFacilitatorStatus: text("marketplace_facilitator_status", {
+    enum: ["not_checked", "confirmed", "needs_attention"],
+  })
+    .notNull()
+    .default("not_checked"),
+  stripeCaliforniaRegistrationStatus: text(
+    "stripe_california_registration_status",
+    { enum: ["not_checked", "active", "needs_attention"] },
+  )
+    .notNull()
+    .default("not_checked"),
+  salesTaxFilingFrequency: text("sales_tax_filing_frequency", {
+    enum: ["not_set", "monthly", "quarterly", "annual"],
+  })
+    .notNull()
+    .default("not_set"),
+  nextSalesTaxDueAt: text("next_sales_tax_due_at"),
+  caAccountVerifiedAt: text("ca_account_verified_at"),
+  sellerDocumentationIssued: integer("seller_documentation_issued", {
+    mode: "boolean",
+  })
+    .notNull()
+    .default(false),
+  w9CollectionReady: integer("w9_collection_ready", { mode: "boolean" })
+    .notNull()
+    .default(false),
+  stripeTaxReportingReady: integer("stripe_tax_reporting_ready", {
+    mode: "boolean",
+  })
+    .notNull()
+    .default(false),
+  incomeTaxReserveBps: integer("income_tax_reserve_bps")
+    .notNull()
+    .default(0),
+  notes: text("notes").notNull().default(""),
+  updatedBy: text("updated_by"),
+  ...timestamps,
+});
+
+export const taxTasks = sqliteTable(
+  "tax_tasks",
+  {
+    id: text("id").primaryKey(),
+    kind: text("kind", {
+      enum: [
+        "ca_sales_tax",
+        "federal_estimated_tax",
+        "ca_estimated_tax",
+        "annual_income_tax",
+        "seller_reporting",
+        "other",
+      ],
+    }).notNull(),
+    title: text("title").notNull(),
+    jurisdiction: text("jurisdiction").notNull().default(""),
+    periodStart: text("period_start"),
+    periodEnd: text("period_end"),
+    dueAt: text("due_at").notNull(),
+    status: text("status", {
+      enum: ["upcoming", "ready", "filed", "paid", "not_required"],
+    })
+      .notNull()
+      .default("upcoming"),
+    amountDueCents: integer("amount_due_cents"),
+    amountPaidCents: integer("amount_paid_cents"),
+    filedAt: text("filed_at"),
+    paidAt: text("paid_at"),
+    confirmationReference: text("confirmation_reference")
+      .notNull()
+      .default(""),
+    notes: text("notes").notNull().default(""),
+    calendarKey: text("calendar_key"),
+    updatedBy: text("updated_by"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("tax_tasks_calendar_key_unique").on(table.calendarKey),
+    index("tax_tasks_due_idx").on(table.status, table.dueAt),
+    check(
+      "tax_tasks_amounts_nonnegative",
+      sql`(${table.amountDueCents} IS NULL OR ${table.amountDueCents} >= 0) AND (${table.amountPaidCents} IS NULL OR ${table.amountPaidCents} >= 0)`,
+    ),
+  ],
+);
+
+export const businessLedgerEntries = sqliteTable(
+  "business_ledger_entries",
+  {
+    id: text("id").primaryKey(),
+    entryType: text("entry_type", {
+      enum: ["expense", "owner_draw", "other_income"],
+    }).notNull(),
+    category: text("category").notNull(),
+    description: text("description").notNull(),
+    vendor: text("vendor").notNull().default(""),
+    occurredAt: text("occurred_at").notNull(),
+    amountCents: integer("amount_cents").notNull(),
+    reference: text("reference").notNull().default(""),
+    notes: text("notes").notNull().default(""),
+    status: text("status", { enum: ["active", "voided"] })
+      .notNull()
+      .default("active"),
+    updatedBy: text("updated_by"),
+    ...timestamps,
+  },
+  (table) => [
+    index("business_ledger_date_idx").on(table.status, table.occurredAt),
+    check("business_ledger_amount_positive", sql`${table.amountCents} > 0`),
+  ],
+);
+
+export const taxActivity = sqliteTable(
+  "tax_activity",
+  {
+    id: text("id").primaryKey(),
+    action: text("action").notNull(),
+    subjectType: text("subject_type").notNull(),
+    subjectId: text("subject_id"),
+    summary: text("summary").notNull(),
+    actorEmail: text("actor_email").notNull(),
+    createdAt: text("created_at")
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [index("tax_activity_created_idx").on(table.createdAt)],
 );
 
 export const orders = sqliteTable(

@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { getD1, getDb } from "@/db";
 import {
+  businessLedgerEntries,
   communitySubscribers,
   orderItems,
   orders,
@@ -8,6 +9,9 @@ import {
   products,
   sellerApplications,
   sellers,
+  taxActivity,
+  taxProfiles,
+  taxTasks,
   wantedRequests,
 } from "@/db/schema";
 import { requireAdminApi } from "@/lib/admin-auth";
@@ -48,6 +52,12 @@ import {
 import { registerShippoTracking } from "@/lib/shippo";
 import { recordOrderTrackingUpdate } from "@/lib/shipping";
 import {
+  buildTaxYearReports,
+  shippingState,
+  soleProprietorPlanningCalendar,
+  taxReadiness,
+} from "@/lib/tax-admin";
+import {
   assertCollectibleListingReady,
   cleanText,
   integer,
@@ -67,8 +77,11 @@ export async function GET(request: Request) {
   const identity = await requireAdminApi();
   if (identity instanceof Response) return identity;
   try {
-    const section =
-      new URL(request.url).searchParams.get("section") ?? "overview";
+    const url = new URL(request.url);
+    const section = url.searchParams.get("section") ?? "overview";
+    if (section === "tax_export") {
+      return taxExportResponse(url.searchParams.get("year"));
+    }
     return Response.json(await loadAdminSection(section));
   } catch (error) {
     return routeError(error, "Admin data is temporarily unavailable.");
@@ -81,7 +94,7 @@ export async function POST(request: Request) {
   try {
     const payload = await readJsonObject(request);
     const action = requiredString(payload.action, "action", 60);
-    const result = await runAdminAction(action, payload);
+    const result = await runAdminAction(action, payload, identity.email);
     return Response.json({ ok: true, ...result });
   } catch (error) {
     return routeError(error, "The admin action could not be completed.");
@@ -327,6 +340,97 @@ async function loadAdminSection(section: string) {
       })),
     };
   }
+  if (section === "tax") {
+    const [profileRows, taskRows, ledgerRows, activityRows, sellerRows, taxOrders] =
+      await Promise.all([
+        db.select().from(taxProfiles).where(eq(taxProfiles.id, "primary")).limit(1),
+        db.select().from(taxTasks).orderBy(asc(taxTasks.dueAt)).limit(500),
+        db
+          .select()
+          .from(businessLedgerEntries)
+          .orderBy(desc(businessLedgerEntries.occurredAt))
+          .limit(1_000),
+        db.select().from(taxActivity).orderBy(desc(taxActivity.createdAt)).limit(80),
+        db
+          .select({
+            id: sellers.id,
+            storeName: sellers.storeName,
+            sellerType: sellers.sellerType,
+            status: sellers.status,
+            stripeAccountId: sellers.stripeAccountId,
+            stripeChargesEnabled: sellers.stripeChargesEnabled,
+            stripePayoutsEnabled: sellers.stripePayoutsEnabled,
+            taxInfoStatus: sellers.taxInfoStatus,
+            taxInfoVerifiedAt: sellers.taxInfoVerifiedAt,
+            sellerTermsAcceptedAt: sellers.sellerTermsAcceptedAt,
+          })
+          .from(sellers)
+          .orderBy(asc(sellers.storeName)),
+        db
+          .select({
+            id: orders.id,
+            orderNumber: orders.orderNumber,
+            currency: orders.currency,
+            subtotalCents: orders.subtotalCents,
+            shippingCents: orders.shippingCents,
+            taxCents: orders.taxCents,
+            totalCents: orders.totalCents,
+            refundedAmountCents: orders.refundedAmountCents,
+            platformFeeCents: orders.platformFeeCents,
+            paymentProcessingFeeCents: orders.paymentProcessingFeeCents,
+            sellerProceedsCents: orders.sellerProceedsCents,
+            sellerTransferAmountCents: orders.sellerTransferAmountCents,
+            sellerTransferReversedCents: orders.sellerTransferReversedCents,
+            paymentStatus: orders.paymentStatus,
+            shippingAddress: orders.shippingAddress,
+            paidAt: orders.paidAt,
+            createdAt: orders.createdAt,
+          })
+          .from(orders)
+          .where(sql`${orders.paymentStatus} IN ('paid', 'partially_refunded', 'refunded')`)
+          .orderBy(desc(orders.paidAt)),
+      ]);
+    const profile = profileRows[0] ?? defaultTaxProfile();
+    const ledgerByYear = new Map<
+      number,
+      {
+        expensesCents: number;
+        ownerDrawsCents: number;
+        otherIncomeCents: number;
+      }
+    >();
+    for (const entry of ledgerRows) {
+      if (entry.status !== "active") continue;
+      const parsed = new Date(`${entry.occurredAt}T12:00:00Z`);
+      if (Number.isNaN(parsed.getTime())) continue;
+      const year = parsed.getUTCFullYear();
+      const summary = ledgerByYear.get(year) ?? {
+        expensesCents: 0,
+        ownerDrawsCents: 0,
+        otherIncomeCents: 0,
+      };
+      if (entry.entryType === "expense") summary.expensesCents += entry.amountCents;
+      if (entry.entryType === "owner_draw") summary.ownerDrawsCents += entry.amountCents;
+      if (entry.entryType === "other_income") summary.otherIncomeCents += entry.amountCents;
+      ledgerByYear.set(year, summary);
+    }
+    return {
+      section,
+      profile,
+      automaticTaxEnabled: config.automaticTax,
+      readiness: taxReadiness(profile, config.automaticTax),
+      reports: buildTaxYearReports(taxOrders),
+      ledgerByYear: [...ledgerByYear.entries()].map(([year, summary]) => ({
+        year,
+        ...summary,
+      })),
+      tasks: taskRows,
+      ledger: ledgerRows,
+      activity: activityRows,
+      sellers: sellerRows,
+      currentYear: new Date().getUTCFullYear(),
+    };
+  }
   if (section === "resolution") {
     return {
       section,
@@ -339,8 +443,23 @@ async function loadAdminSection(section: string) {
 async function runAdminAction(
   action: string,
   payload: Record<string, unknown>,
+  actorEmail: string,
 ): Promise<Record<string, unknown>> {
   const db = getDb();
+  if (action === "save_tax_profile")
+    return saveTaxProfile(payload, actorEmail);
+  if (action === "create_tax_task")
+    return createTaxTask(payload, actorEmail);
+  if (action === "update_tax_task")
+    return updateTaxTask(payload, actorEmail);
+  if (action === "seed_tax_calendar")
+    return seedTaxCalendar(payload, actorEmail);
+  if (action === "create_ledger_entry")
+    return createLedgerEntry(payload, actorEmail);
+  if (action === "void_ledger_entry")
+    return voidLedgerEntry(payload, actorEmail);
+  if (action === "seller_tax_status")
+    return saveSellerTaxStatus(payload, actorEmail);
   if (action === "approve_application") {
     const applicationId = requiredString(
       payload.applicationId,
@@ -1032,6 +1151,457 @@ async function refundOrder(payload: Record<string, unknown>) {
     refundStatus: refund.status,
     restocked: restock,
   };
+}
+
+function defaultTaxProfile() {
+  return {
+    id: "primary",
+    legalStructure: "sole_proprietor" as const,
+    homeState: "CA",
+    productTaxCode: "txcd_99999999",
+    sellerPermitStatus: "not_checked" as const,
+    marketplaceFacilitatorStatus: "not_checked" as const,
+    stripeCaliforniaRegistrationStatus: "not_checked" as const,
+    salesTaxFilingFrequency: "not_set" as const,
+    nextSalesTaxDueAt: null,
+    caAccountVerifiedAt: null,
+    sellerDocumentationIssued: false,
+    w9CollectionReady: false,
+    stripeTaxReportingReady: false,
+    incomeTaxReserveBps: 0,
+    notes: "",
+    updatedBy: null,
+    createdAt: "",
+    updatedAt: "",
+  };
+}
+
+function allowedValue<T extends string>(
+  value: unknown,
+  field: string,
+  allowed: readonly T[],
+): T {
+  const cleaned = requiredString(value, field, 60) as T;
+  if (!allowed.includes(cleaned)) {
+    throw new ValidationError(`Choose a valid ${field}.`);
+  }
+  return cleaned;
+}
+
+function optionalDate(value: unknown, field: string) {
+  const cleaned = cleanText(value, 10);
+  if (!cleaned) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(cleaned)) {
+    throw new ValidationError(`${field} must be a valid date.`);
+  }
+  const parsed = new Date(`${cleaned}T12:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new ValidationError(`${field} must be a valid date.`);
+  }
+  return cleaned;
+}
+
+async function recordTaxActivity(input: {
+  action: string;
+  subjectType: string;
+  subjectId?: string | null;
+  summary: string;
+  actorEmail: string;
+}) {
+  await getDb().insert(taxActivity).values({
+    id: crypto.randomUUID(),
+    action: input.action,
+    subjectType: input.subjectType,
+    subjectId: input.subjectId ?? null,
+    summary: input.summary,
+    actorEmail: input.actorEmail,
+  });
+}
+
+async function saveTaxProfile(
+  payload: Record<string, unknown>,
+  actorEmail: string,
+) {
+  const values = {
+    id: "primary",
+    legalStructure: "sole_proprietor" as const,
+    homeState: "CA",
+    productTaxCode: "txcd_99999999",
+    sellerPermitStatus: allowedValue(
+      payload.sellerPermitStatus,
+      "seller permit status",
+      ["not_checked", "active", "needs_attention"] as const,
+    ),
+    marketplaceFacilitatorStatus: allowedValue(
+      payload.marketplaceFacilitatorStatus,
+      "marketplace facilitator status",
+      ["not_checked", "confirmed", "needs_attention"] as const,
+    ),
+    stripeCaliforniaRegistrationStatus: allowedValue(
+      payload.stripeCaliforniaRegistrationStatus,
+      "Stripe California registration status",
+      ["not_checked", "active", "needs_attention"] as const,
+    ),
+    salesTaxFilingFrequency: allowedValue(
+      payload.salesTaxFilingFrequency,
+      "sales tax filing frequency",
+      ["not_set", "monthly", "quarterly", "annual"] as const,
+    ),
+    nextSalesTaxDueAt: optionalDate(
+      payload.nextSalesTaxDueAt,
+      "Next sales tax due date",
+    ),
+    caAccountVerifiedAt: optionalDate(
+      payload.caAccountVerifiedAt,
+      "California account verification date",
+    ),
+    sellerDocumentationIssued: payload.sellerDocumentationIssued === true,
+    w9CollectionReady: payload.w9CollectionReady === true,
+    stripeTaxReportingReady: payload.stripeTaxReportingReady === true,
+    incomeTaxReserveBps: integer(
+      payload.incomeTaxReserveBps,
+      "incomeTaxReserveBps",
+      0,
+      10_000,
+    ),
+    notes: cleanText(payload.notes, 4_000),
+    updatedBy: actorEmail,
+    updatedAt: new Date().toISOString(),
+  };
+  await getDb()
+    .insert(taxProfiles)
+    .values(values)
+    .onConflictDoUpdate({ target: taxProfiles.id, set: values });
+  await recordTaxActivity({
+    action: "profile_saved",
+    subjectType: "tax_profile",
+    subjectId: "primary",
+    summary: "Updated the tax and compliance profile.",
+    actorEmail,
+  });
+  return {};
+}
+
+async function createTaxTask(
+  payload: Record<string, unknown>,
+  actorEmail: string,
+) {
+  const id = crypto.randomUUID();
+  const kind = allowedValue(payload.kind, "tax task type", [
+    "ca_sales_tax",
+    "federal_estimated_tax",
+    "ca_estimated_tax",
+    "annual_income_tax",
+    "seller_reporting",
+    "other",
+  ] as const);
+  const title = requiredString(payload.title, "title", 180);
+  const dueAt = optionalDate(payload.dueAt, "Due date");
+  if (!dueAt) throw new ValidationError("Choose a due date.");
+  const amountDueCents =
+    payload.amountDueCents === null || payload.amountDueCents === ""
+      ? null
+      : integer(payload.amountDueCents, "amountDueCents", 0, 1_000_000_000);
+  await getDb().insert(taxTasks).values({
+    id,
+    kind,
+    title,
+    jurisdiction: cleanText(payload.jurisdiction, 100),
+    periodStart: optionalDate(payload.periodStart, "Period start"),
+    periodEnd: optionalDate(payload.periodEnd, "Period end"),
+    dueAt,
+    amountDueCents,
+    confirmationReference: "",
+    notes: cleanText(payload.notes, 2_000),
+    updatedBy: actorEmail,
+  });
+  await recordTaxActivity({
+    action: "task_created",
+    subjectType: "tax_task",
+    subjectId: id,
+    summary: `Added “${title}” due ${dueAt}.`,
+    actorEmail,
+  });
+  return { taskId: id };
+}
+
+async function updateTaxTask(
+  payload: Record<string, unknown>,
+  actorEmail: string,
+) {
+  const id = requiredString(payload.taskId, "taskId", 100);
+  const rows = await getDb()
+    .select()
+    .from(taxTasks)
+    .where(eq(taxTasks.id, id))
+    .limit(1);
+  const task = rows[0];
+  if (!task) throw new ValidationError("Tax task not found.");
+  const status = allowedValue(payload.status, "tax task status", [
+    "upcoming",
+    "ready",
+    "filed",
+    "paid",
+    "not_required",
+  ] as const);
+  const amountPaidCents =
+    payload.amountPaidCents === null || payload.amountPaidCents === ""
+      ? null
+      : integer(payload.amountPaidCents, "amountPaidCents", 0, 1_000_000_000);
+  const now = new Date().toISOString();
+  await getDb()
+    .update(taxTasks)
+    .set({
+      status,
+      amountPaidCents,
+      confirmationReference: cleanText(payload.confirmationReference, 300),
+      notes: cleanText(payload.notes, 2_000),
+      filedAt:
+        ["filed", "paid"].includes(status) && !task.filedAt
+          ? now
+          : status === "upcoming" || status === "ready"
+            ? null
+            : task.filedAt,
+      paidAt:
+        status === "paid" && !task.paidAt
+          ? now
+          : status !== "paid"
+            ? null
+            : task.paidAt,
+      updatedBy: actorEmail,
+      updatedAt: now,
+    })
+    .where(eq(taxTasks.id, id));
+  await recordTaxActivity({
+    action: "task_updated",
+    subjectType: "tax_task",
+    subjectId: id,
+    summary: `Updated “${task.title}” to ${status.replaceAll("_", " ")}.`,
+    actorEmail,
+  });
+  return {};
+}
+
+async function seedTaxCalendar(
+  payload: Record<string, unknown>,
+  actorEmail: string,
+) {
+  const year = integer(payload.year, "year", 2024, 2100);
+  const tasks = soleProprietorPlanningCalendar(year);
+  let created = 0;
+  for (const task of tasks) {
+    const result = await getDb()
+      .insert(taxTasks)
+      .values({
+        id: crypto.randomUUID(),
+        ...task,
+        updatedBy: actorEmail,
+      })
+      .onConflictDoNothing({ target: taxTasks.calendarKey });
+    const meta = result as { meta?: { changes?: number } };
+    created += Number(meta.meta?.changes ?? 0);
+  }
+  await recordTaxActivity({
+    action: "calendar_seeded",
+    subjectType: "tax_calendar",
+    subjectId: String(year),
+    summary: `Added the ${year} sole-proprietor planning calendar (${created} new items).`,
+    actorEmail,
+  });
+  return { created };
+}
+
+async function createLedgerEntry(
+  payload: Record<string, unknown>,
+  actorEmail: string,
+) {
+  const id = crypto.randomUUID();
+  const entryType = allowedValue(payload.entryType, "entry type", [
+    "expense",
+    "owner_draw",
+    "other_income",
+  ] as const);
+  const description = requiredString(payload.description, "description", 240);
+  const occurredAt = optionalDate(payload.occurredAt, "Transaction date");
+  if (!occurredAt) throw new ValidationError("Choose a transaction date.");
+  const amountCents = integer(
+    payload.amountCents,
+    "amountCents",
+    1,
+    1_000_000_000,
+  );
+  await getDb().insert(businessLedgerEntries).values({
+    id,
+    entryType,
+    category: requiredString(payload.category, "category", 100),
+    description,
+    vendor: cleanText(payload.vendor, 160),
+    occurredAt,
+    amountCents,
+    reference: cleanText(payload.reference, 300),
+    notes: cleanText(payload.notes, 2_000),
+    updatedBy: actorEmail,
+  });
+  await recordTaxActivity({
+    action: "ledger_entry_created",
+    subjectType: "ledger_entry",
+    subjectId: id,
+    summary: `Recorded ${entryType.replaceAll("_", " ")}: ${description}.`,
+    actorEmail,
+  });
+  return { entryId: id };
+}
+
+async function voidLedgerEntry(
+  payload: Record<string, unknown>,
+  actorEmail: string,
+) {
+  const id = requiredString(payload.entryId, "entryId", 100);
+  const rows = await getDb()
+    .select()
+    .from(businessLedgerEntries)
+    .where(eq(businessLedgerEntries.id, id))
+    .limit(1);
+  const entry = rows[0];
+  if (!entry || entry.status === "voided") {
+    throw new ValidationError("Active bookkeeping entry not found.");
+  }
+  await getDb()
+    .update(businessLedgerEntries)
+    .set({
+      status: "voided",
+      updatedBy: actorEmail,
+      updatedAt: new Date().toISOString(),
+    })
+    .where(eq(businessLedgerEntries.id, id));
+  await recordTaxActivity({
+    action: "ledger_entry_voided",
+    subjectType: "ledger_entry",
+    subjectId: id,
+    summary: `Voided bookkeeping entry: ${entry.description}.`,
+    actorEmail,
+  });
+  return {};
+}
+
+async function saveSellerTaxStatus(
+  payload: Record<string, unknown>,
+  actorEmail: string,
+) {
+  const sellerId = requiredString(payload.sellerId, "sellerId", 100);
+  const status = allowedValue(payload.status, "seller tax status", [
+    "not_checked",
+    "collecting",
+    "ready",
+    "needs_attention",
+  ] as const);
+  const rows = await getDb()
+    .select({ storeName: sellers.storeName })
+    .from(sellers)
+    .where(eq(sellers.id, sellerId))
+    .limit(1);
+  if (!rows[0]) throw new ValidationError("Seller not found.");
+  await getDb()
+    .update(sellers)
+    .set({
+      taxInfoStatus: status,
+      taxInfoVerifiedAt: status === "ready" ? new Date().toISOString() : null,
+      updatedAt: new Date().toISOString(),
+    })
+    .where(eq(sellers.id, sellerId));
+  await recordTaxActivity({
+    action: "seller_tax_status_updated",
+    subjectType: "seller",
+    subjectId: sellerId,
+    summary: `Updated ${rows[0].storeName} tax readiness to ${status.replaceAll("_", " ")}.`,
+    actorEmail,
+  });
+  return {};
+}
+
+async function taxExportResponse(yearInput: string | null) {
+  const currentYear = new Date().getUTCFullYear();
+  const year = yearInput ? Number(yearInput) : currentYear;
+  if (!Number.isInteger(year) || year < 2024 || year > 2100) {
+    throw new ValidationError("Choose a valid export year.");
+  }
+  const rows = await getDb()
+    .select({
+      orderNumber: orders.orderNumber,
+      paidAt: orders.paidAt,
+      createdAt: orders.createdAt,
+      shippingAddress: orders.shippingAddress,
+      currency: orders.currency,
+      subtotalCents: orders.subtotalCents,
+      shippingCents: orders.shippingCents,
+      taxCents: orders.taxCents,
+      totalCents: orders.totalCents,
+      refundedAmountCents: orders.refundedAmountCents,
+      platformFeeCents: orders.platformFeeCents,
+      paymentProcessingFeeCents: orders.paymentProcessingFeeCents,
+      sellerProceedsCents: orders.sellerProceedsCents,
+      sellerTransferAmountCents: orders.sellerTransferAmountCents,
+      sellerTransferReversedCents: orders.sellerTransferReversedCents,
+      paymentStatus: orders.paymentStatus,
+    })
+    .from(orders)
+    .where(sql`${orders.paymentStatus} IN ('paid', 'partially_refunded', 'refunded')`)
+    .orderBy(asc(orders.paidAt));
+  const header = [
+    "order_number",
+    "paid_date",
+    "destination_state",
+    "currency",
+    "merchandise_cents",
+    "shipping_cents",
+    "tax_collected_cents",
+    "gross_charge_cents",
+    "refunded_cents",
+    "platform_fee_cents",
+    "stripe_fee_cents",
+    "seller_proceeds_cents",
+    "seller_transfer_cents",
+    "seller_transfer_reversed_cents",
+    "payment_status",
+  ];
+  const csvRows = rows
+    .filter((row) => {
+      const parsed = new Date(row.paidAt ?? row.createdAt);
+      return !Number.isNaN(parsed.getTime()) && parsed.getUTCFullYear() === year;
+    })
+    .map((row) => [
+      row.orderNumber,
+      row.paidAt ?? row.createdAt,
+      shippingState(row.shippingAddress) ?? "",
+      row.currency,
+      row.subtotalCents,
+      row.shippingCents,
+      row.taxCents,
+      row.totalCents,
+      row.refundedAmountCents,
+      row.platformFeeCents,
+      row.paymentProcessingFeeCents ?? "",
+      row.sellerProceedsCents ?? "",
+      row.sellerTransferAmountCents,
+      row.sellerTransferReversedCents,
+      row.paymentStatus,
+    ]);
+  const csv = [header, ...csvRows]
+    .map((row) => row.map(csvCell).join(","))
+    .join("\r\n");
+  return new Response(`\uFEFF${csv}\r\n`, {
+    headers: {
+      "Content-Type": "text/csv; charset=utf-8",
+      "Content-Disposition": `attachment; filename="model-car-center-tax-${year}.csv"`,
+      "Cache-Control": "private, no-store",
+    },
+  });
+}
+
+function csvCell(value: string | number) {
+  let text = String(value);
+  if (/^[=+\-@]/.test(text)) text = `'${text}`;
+  return `"${text.replaceAll('"', '""')}"`;
 }
 
 async function count(

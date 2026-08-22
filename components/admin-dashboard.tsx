@@ -23,6 +23,7 @@ const tabs = [
   "import",
   "hunts",
   "orders",
+  "tax",
   "resolution",
 ] as const;
 
@@ -112,7 +113,11 @@ export function AdminDashboard({ adminEmail }: { adminEmail: string }) {
               setActionLink("");
             }}
           >
-            {item === "hunts" ? "Model Hunts" : item}
+            {item === "hunts"
+              ? "Model Hunts"
+              : item === "tax"
+                ? "Tax & compliance"
+                : item}
           </button>
         ))}
       </nav>
@@ -122,6 +127,8 @@ export function AdminDashboard({ adminEmail }: { adminEmail: string }) {
           <h1>
             {tab === "hunts"
               ? "Model Hunts"
+              : tab === "tax"
+                ? "Tax & compliance"
               : tab[0].toUpperCase() + tab.slice(1)}
           </h1>
         </div>
@@ -168,6 +175,7 @@ function AdminSection({
   if (tab === "import") return <Importer data={data} action={action} />;
   if (tab === "hunts") return <Hunts data={data} action={action} />;
   if (tab === "orders") return <Orders data={data} action={action} />;
+  if (tab === "tax") return <TaxCenter data={data} action={action} />;
   return <ResolutionCases data={data} action={action} />;
 }
 
@@ -1540,6 +1548,557 @@ function AdminCasePanel({
   );
 }
 
+type TaxProfile = {
+  id: string;
+  sellerPermitStatus: string;
+  marketplaceFacilitatorStatus: string;
+  stripeCaliforniaRegistrationStatus: string;
+  salesTaxFilingFrequency: string;
+  nextSalesTaxDueAt?: string | null;
+  caAccountVerifiedAt?: string | null;
+  sellerDocumentationIssued: boolean;
+  w9CollectionReady: boolean;
+  stripeTaxReportingReady: boolean;
+  incomeTaxReserveBps: number;
+  notes: string;
+  updatedAt?: string;
+};
+
+type TaxTotals = {
+  orderCount: number;
+  merchandiseCents: number;
+  shippingCents: number;
+  grossChargesCents: number;
+  taxCollectedCents: number;
+  taxOnFullyRefundedOrdersCents: number;
+  taxAfterFullRefundsCents: number;
+  refundsCents: number;
+  netCustomerCollectionsCents: number;
+  platformFeesCents: number;
+  platformFeesAfterFullRefundsCents: number;
+  stripeFeesCents: number;
+  sellerProceedsCents: number;
+  netSellerTransferCents: number;
+  californiaOrderCount: number;
+  californiaMerchandiseCents: number;
+  californiaShippingCents: number;
+  californiaTaxCollectedCents: number;
+  californiaTaxOnFullyRefundedOrdersCents: number;
+  californiaTaxAfterFullRefundsCents: number;
+  partialRefundReviewCount: number;
+  missingStateCount: number;
+};
+
+type TaxYearReport = {
+  year: number;
+  totals: TaxTotals;
+  months: Array<TaxTotals & { month: string; label: string }>;
+};
+
+type TaxTask = {
+  id: string;
+  kind: string;
+  title: string;
+  jurisdiction: string;
+  periodStart?: string | null;
+  periodEnd?: string | null;
+  dueAt: string;
+  status: string;
+  amountDueCents?: number | null;
+  amountPaidCents?: number | null;
+  confirmationReference: string;
+  notes: string;
+  filedAt?: string | null;
+  paidAt?: string | null;
+  updatedAt: string;
+};
+
+type LedgerEntry = {
+  id: string;
+  entryType: "expense" | "owner_draw" | "other_income";
+  category: string;
+  description: string;
+  vendor: string;
+  occurredAt: string;
+  amountCents: number;
+  reference: string;
+  notes: string;
+  status: "active" | "voided";
+  updatedAt: string;
+};
+
+type SellerTaxRow = {
+  id: string;
+  storeName: string;
+  sellerType: string;
+  status: string;
+  stripeAccountId?: string | null;
+  stripeChargesEnabled: boolean;
+  stripePayoutsEnabled: boolean;
+  taxInfoStatus: string;
+  taxInfoVerifiedAt?: string | null;
+  sellerTermsAcceptedAt?: string | null;
+};
+
+type TaxActivityRow = {
+  id: string;
+  summary: string;
+  actorEmail: string;
+  createdAt: string;
+};
+
+const EMPTY_TAX_TOTALS: TaxTotals = {
+  orderCount: 0,
+  merchandiseCents: 0,
+  shippingCents: 0,
+  grossChargesCents: 0,
+  taxCollectedCents: 0,
+  taxOnFullyRefundedOrdersCents: 0,
+  taxAfterFullRefundsCents: 0,
+  refundsCents: 0,
+  netCustomerCollectionsCents: 0,
+  platformFeesCents: 0,
+  platformFeesAfterFullRefundsCents: 0,
+  stripeFeesCents: 0,
+  sellerProceedsCents: 0,
+  netSellerTransferCents: 0,
+  californiaOrderCount: 0,
+  californiaMerchandiseCents: 0,
+  californiaShippingCents: 0,
+  californiaTaxCollectedCents: 0,
+  californiaTaxOnFullyRefundedOrdersCents: 0,
+  californiaTaxAfterFullRefundsCents: 0,
+  partialRefundReviewCount: 0,
+  missingStateCount: 0,
+};
+
+function TaxCenter({
+  data,
+  action,
+}: {
+  data: AdminData;
+  action(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
+}) {
+  const reports = (data.reports as TaxYearReport[]) ?? [];
+  const currentYear = Number(data.currentYear ?? new Date().getFullYear());
+  const ledgerByYear =
+    (data.ledgerByYear as Array<{
+      year: number;
+      expensesCents: number;
+      ownerDrawsCents: number;
+      otherIncomeCents: number;
+    }>) ?? [];
+  const yearOptions = [
+    ...new Set([
+      currentYear,
+      ...reports.map((row) => row.year),
+      ...ledgerByYear.map((row) => row.year),
+    ]),
+  ].sort((a, b) => b - a);
+  const [year, setYear] = useState(currentYear);
+  const report = reports.find((row) => row.year === year);
+  const totals = report?.totals ?? EMPTY_TAX_TOTALS;
+  const ledgerSummary = ledgerByYear.find((row) => row.year === year) ?? {
+    expensesCents: 0,
+    ownerDrawsCents: 0,
+    otherIncomeCents: 0,
+  };
+  const profile = data.profile as TaxProfile;
+  const readiness =
+    (data.readiness as Array<{
+      id: string;
+      label: string;
+      detail: string;
+      ready: boolean;
+    }>) ?? [];
+  const readyCount = readiness.filter((item) => item.ready).length;
+  const marginProxy =
+    totals.platformFeesAfterFullRefundsCents +
+    ledgerSummary.otherIncomeCents -
+    totals.stripeFeesCents -
+    ledgerSummary.expensesCents;
+  const reserveTarget = Math.max(
+    0,
+    Math.round((marginProxy * (profile?.incomeTaxReserveBps ?? 0)) / 10_000),
+  );
+  const ledger = ((data.ledger as LedgerEntry[]) ?? []).filter(
+    (entry) => Number(entry.occurredAt.slice(0, 4)) === year,
+  );
+  return (
+    <div className="tax-center">
+      <section className="tax-command-bar">
+        <div>
+          <p className="eyebrow">California sole proprietor</p>
+          <h2>One place for every tax deadline, dollar, and proof point.</h2>
+          <p>
+            Order figures come from your checkout records. Checklist confirmations,
+            filings, payments, expenses, and owner draws are private admin records.
+          </p>
+        </div>
+        <div className={`tax-readiness-score ${readyCount === readiness.length ? "ready" : "attention"}`}>
+          <span>Launch tax readiness</span>
+          <b>{readyCount}/{readiness.length}</b>
+          <small>{readyCount === readiness.length ? "All tracked controls are ready" : `${readiness.length - readyCount} controls need attention`}</small>
+        </div>
+      </section>
+
+      <section className="tax-readiness-grid" aria-label="Tax readiness checklist">
+        {readiness.map((item) => (
+          <article key={item.id} className={item.ready ? "ready" : "attention"}>
+            <span>{item.ready ? "Ready" : "Action needed"}</span>
+            <h3>{item.label}</h3>
+            <p>{item.detail}</p>
+          </article>
+        ))}
+      </section>
+
+      <section className="tax-section-heading">
+        <div>
+          <p className="eyebrow">Order-derived reporting</p>
+          <h2>{year} financial picture</h2>
+        </div>
+        <div className="tax-year-actions">
+          <label>
+            Reporting year
+            <select value={year} onChange={(event) => setYear(Number(event.target.value))}>
+              {yearOptions.map((option) => <option key={option}>{option}</option>)}
+            </select>
+          </label>
+          <a className="button outline small" href={`/api/admin?section=tax_export&year=${year}`}>
+            Download CPA CSV
+          </a>
+        </div>
+      </section>
+
+      <div className="tax-metric-grid">
+        <TaxMetric label="California merchandise" value={money(totals.californiaMerchandiseCents, "usd")} detail={`${totals.californiaOrderCount} California orders`} />
+        <TaxMetric label="California tax collected" value={money(totals.californiaTaxCollectedCents, "usd")} detail={`${money(totals.californiaTaxAfterFullRefundsCents, "usd")} after full refunds`} />
+        <TaxMetric label="Marketplace fees" value={money(totals.platformFeesAfterFullRefundsCents, "usd")} detail={`${money(totals.platformFeesCents, "usd")} before full-refund adjustments`} />
+        <TaxMetric label="Recorded Stripe fees" value={money(totals.stripeFeesCents, "usd")} detail="Processing cost recorded from Stripe" />
+        <TaxMetric label="Manual business expenses" value={money(ledgerSummary.expensesCents, "usd")} detail="Excludes owner draws and personal tax payments" />
+        <TaxMetric label="Operating margin proxy" value={money(marginProxy, "usd")} detail="Fees + other income − Stripe fees − recorded expenses" tone={marginProxy < 0 ? "warning" : undefined} />
+        <TaxMetric label="Income-tax reserve target" value={money(reserveTarget, "usd")} detail={`${((profile?.incomeTaxReserveBps ?? 0) / 100).toFixed(1)}% planning rate`} />
+        <TaxMetric label="Owner draws" value={money(ledgerSummary.ownerDrawsCents, "usd")} detail="Tracked separately; not a business expense" />
+      </div>
+
+      {(totals.partialRefundReviewCount > 0 || totals.missingStateCount > 0) && (
+        <div className="tax-warning" role="note">
+          <b>Reconciliation needed.</b>{" "}
+          {totals.partialRefundReviewCount > 0 && `${totals.partialRefundReviewCount} partially refunded order(s) need their Stripe Tax adjustment checked. `}
+          {totals.missingStateCount > 0 && `${totals.missingStateCount} paid order(s) have no readable destination state.`}
+        </div>
+      )}
+
+      <section className="admin-panel tax-monthly-panel">
+        <div className="panel-heading">
+          <div><p className="eyebrow">Monthly reconciliation</p><h2>California filing support</h2></div>
+          <small>Collected tax is gross tax less only fully refunded orders. Verify partial-refund tax in Stripe.</small>
+        </div>
+        <div className="admin-table-wrap">
+          <table>
+            <thead><tr><th>Month</th><th>Orders</th><th>CA merchandise</th><th>CA shipping</th><th>CA tax collected</th><th>After full refunds</th><th>All refunds</th></tr></thead>
+            <tbody>
+              {report?.months.length ? report.months.map((month) => (
+                <tr key={month.month}><td><b>{month.label}</b></td><td>{month.orderCount}</td><td>{money(month.californiaMerchandiseCents, "usd")}</td><td>{money(month.californiaShippingCents, "usd")}</td><td>{money(month.californiaTaxCollectedCents, "usd")}</td><td>{money(month.californiaTaxAfterFullRefundsCents, "usd")}</td><td>{money(month.refundsCents, "usd")}</td></tr>
+              )) : <tr><td colSpan={7}>No paid orders recorded for {year}.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <TaxProfileForm key={profile?.updatedAt ?? "new"} profile={profile} automaticTaxEnabled={Boolean(data.automaticTaxEnabled)} action={action} />
+      <TaxTaskManager tasks={(data.tasks as TaxTask[]) ?? []} currentYear={currentYear} action={action} />
+      <LedgerManager entries={ledger} year={year} action={action} />
+      <SellerTaxReadiness sellers={(data.sellers as SellerTaxRow[]) ?? []} action={action} />
+      <TaxActivity rows={(data.activity as TaxActivityRow[]) ?? []} />
+      <TaxReferencePanel />
+    </div>
+  );
+}
+
+function TaxMetric({ label, value, detail, tone }: { label: string; value: string; detail: string; tone?: string }) {
+  return <article className={tone ?? ""}><span>{label}</span><b>{value}</b><small>{detail}</small></article>;
+}
+
+function TaxProfileForm({
+  profile,
+  automaticTaxEnabled,
+  action,
+}: {
+  profile: TaxProfile;
+  automaticTaxEnabled: boolean;
+  action(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
+}) {
+  const [form, setForm] = useState({
+    sellerPermitStatus: profile?.sellerPermitStatus ?? "not_checked",
+    marketplaceFacilitatorStatus: profile?.marketplaceFacilitatorStatus ?? "not_checked",
+    stripeCaliforniaRegistrationStatus: profile?.stripeCaliforniaRegistrationStatus ?? "not_checked",
+    salesTaxFilingFrequency: profile?.salesTaxFilingFrequency ?? "not_set",
+    nextSalesTaxDueAt: profile?.nextSalesTaxDueAt ?? "",
+    caAccountVerifiedAt: profile?.caAccountVerifiedAt ?? "",
+    sellerDocumentationIssued: profile?.sellerDocumentationIssued ?? false,
+    w9CollectionReady: profile?.w9CollectionReady ?? false,
+    stripeTaxReportingReady: profile?.stripeTaxReportingReady ?? false,
+    incomeTaxReservePercent: (profile?.incomeTaxReserveBps ?? 0) / 100,
+    notes: profile?.notes ?? "",
+  });
+  function field(name: string, value: string | number | boolean) {
+    setForm((current) => ({ ...current, [name]: value }));
+  }
+  return (
+    <section className="admin-panel tax-profile-panel">
+      <div className="panel-heading">
+        <div><p className="eyebrow">Control record</p><h2>California tax setup</h2></div>
+        <span className={`status ${automaticTaxEnabled ? "paid" : "failed"}`}>Automatic tax {automaticTaxEnabled ? "enabled" : "disabled"}</span>
+      </div>
+      <form className="tax-profile-form" onSubmit={(event) => {
+        event.preventDefault();
+        void action({
+          action: "save_tax_profile",
+          ...form,
+          incomeTaxReserveBps: Math.round(Number(form.incomeTaxReservePercent) * 100),
+        });
+      }}>
+        <label>Seller’s permit<select value={form.sellerPermitStatus} onChange={(event) => field("sellerPermitStatus", event.target.value)}><option value="not_checked">Not checked</option><option value="active">Active and matched</option><option value="needs_attention">Needs attention</option></select></label>
+        <label>CDTFA marketplace status<select value={form.marketplaceFacilitatorStatus} onChange={(event) => field("marketplaceFacilitatorStatus", event.target.value)}><option value="not_checked">Not confirmed</option><option value="confirmed">Confirmed</option><option value="needs_attention">Needs attention</option></select></label>
+        <label>Stripe California registration<select value={form.stripeCaliforniaRegistrationStatus} onChange={(event) => field("stripeCaliforniaRegistrationStatus", event.target.value)}><option value="not_checked">Not checked</option><option value="active">Active</option><option value="needs_attention">Needs attention</option></select></label>
+        <label>CDTFA filing frequency<select value={form.salesTaxFilingFrequency} onChange={(event) => field("salesTaxFilingFrequency", event.target.value)}><option value="not_set">Not set</option><option value="monthly">Monthly</option><option value="quarterly">Quarterly</option><option value="annual">Annual</option></select></label>
+        <label>Next sales-tax due date<input type="date" value={form.nextSalesTaxDueAt} onChange={(event) => field("nextSalesTaxDueAt", event.target.value)} /></label>
+        <label>CDTFA account last verified<input type="date" value={form.caAccountVerifiedAt} onChange={(event) => field("caAccountVerifiedAt", event.target.value)} /></label>
+        <label>Income-tax reserve target (%)<input type="number" min="0" max="100" step="0.1" value={form.incomeTaxReservePercent} onChange={(event) => field("incomeTaxReservePercent", event.target.value)} /><small>Planning aid only. Set this with your tax preparer.</small></label>
+        <div className="tax-profile-facts"><span><b>Structure</b>Sole proprietor</span><span><b>Home state</b>California</span><span><b>Product code</b>txcd_99999999</span></div>
+        <fieldset className="tax-checklist-fields">
+          <legend>Process confirmations</legend>
+          <label><input type="checkbox" checked={form.sellerDocumentationIssued} onChange={(event) => field("sellerDocumentationIssued", event.target.checked)} /> Sellers received marketplace tax documentation</label>
+          <label><input type="checkbox" checked={form.w9CollectionReady} onChange={(event) => field("w9CollectionReady", event.target.checked)} /> Seller W-9 collection process is ready</label>
+          <label><input type="checkbox" checked={form.stripeTaxReportingReady} onChange={(event) => field("stripeTaxReportingReady", event.target.checked)} /> Stripe Connect tax reporting was reviewed</label>
+        </fieldset>
+        <label className="tax-notes-field">Private notes<textarea rows={4} maxLength={4000} value={form.notes} onChange={(event) => field("notes", event.target.value)} placeholder="Advisor guidance, CDTFA call date, filing instructions…" /><small>Do not store a full permit number, SSN, EIN, or seller TIN here.</small></label>
+        <button className="button dark small">Save tax profile</button>
+      </form>
+    </section>
+  );
+}
+
+function TaxTaskManager({
+  tasks,
+  currentYear,
+  action,
+}: {
+  tasks: TaxTask[];
+  currentYear: number;
+  action(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
+}) {
+  const [form, setForm] = useState({
+    kind: "ca_sales_tax",
+    title: "",
+    jurisdiction: "California CDTFA",
+    periodStart: "",
+    periodEnd: "",
+    dueAt: "",
+    amountDue: "",
+    notes: "",
+  });
+  function field(name: string, value: string) {
+    setForm((current) => ({ ...current, [name]: value }));
+  }
+  return (
+    <section className="admin-panel tax-task-panel">
+      <div className="panel-heading">
+        <div><p className="eyebrow">Deadlines and payments</p><h2>Tax calendar</h2></div>
+        <button className="button outline small" onClick={() => void action({ action: "seed_tax_calendar", year: currentYear })}>Add {currentYear} sole-prop calendar</button>
+      </div>
+      <form className="tax-task-create" onSubmit={(event) => {
+        event.preventDefault();
+        void action({
+          action: "create_tax_task",
+          ...form,
+          amountDueCents: form.amountDue ? dollarsToCents(form.amountDue) : null,
+        }).then(() => setForm((current) => ({ ...current, title: "", dueAt: "", amountDue: "", notes: "" })));
+      }}>
+        <label>Type<select value={form.kind} onChange={(event) => field("kind", event.target.value)}><option value="ca_sales_tax">California sales tax</option><option value="federal_estimated_tax">Federal estimated tax</option><option value="ca_estimated_tax">California estimated tax</option><option value="annual_income_tax">Annual income tax</option><option value="seller_reporting">Seller reporting</option><option value="other">Other</option></select></label>
+        <label className="tax-task-title">Task<input required maxLength={180} value={form.title} onChange={(event) => field("title", event.target.value)} placeholder="Q3 CDTFA return and payment" /></label>
+        <label>Jurisdiction<input maxLength={100} value={form.jurisdiction} onChange={(event) => field("jurisdiction", event.target.value)} /></label>
+        <label>Period start<input type="date" value={form.periodStart} onChange={(event) => field("periodStart", event.target.value)} /></label>
+        <label>Period end<input type="date" value={form.periodEnd} onChange={(event) => field("periodEnd", event.target.value)} /></label>
+        <label>Due date<input required type="date" value={form.dueAt} onChange={(event) => field("dueAt", event.target.value)} /></label>
+        <label>Expected amount<input type="number" min="0" step="0.01" inputMode="decimal" value={form.amountDue} onChange={(event) => field("amountDue", event.target.value)} placeholder="0.00" /></label>
+        <label className="tax-task-notes">Notes<input maxLength={2000} value={form.notes} onChange={(event) => field("notes", event.target.value)} placeholder="Filing portal, preparer instructions, records needed…" /></label>
+        <button className="button dark small">Add deadline</button>
+      </form>
+      <div className="tax-task-list">
+        {tasks.length ? tasks.map((task) => <TaxTaskRow key={`${task.id}-${task.updatedAt}`} task={task} action={action} />) : <p className="tax-empty">No deadlines recorded. Add the planning calendar, then add your CDTFA filing dates.</p>}
+      </div>
+    </section>
+  );
+}
+
+function TaxTaskRow({
+  task,
+  action,
+}: {
+  task: TaxTask;
+  action(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
+}) {
+  const [status, setStatus] = useState(task.status);
+  const [amountPaid, setAmountPaid] = useState(task.amountPaidCents == null ? "" : (task.amountPaidCents / 100).toFixed(2));
+  const [confirmationReference, setConfirmationReference] = useState(task.confirmationReference);
+  const [notes, setNotes] = useState(task.notes);
+  const overdue = ["upcoming", "ready"].includes(task.status) && task.dueAt < todayDateInput();
+  return (
+    <article className={`tax-task ${overdue ? "overdue" : ""}`}>
+      <div className="tax-task-summary">
+        <span className={`status ${task.status}`}>{overdue ? "overdue" : task.status.replaceAll("_", " ")}</span>
+        <h3>{task.title}</h3>
+        <p>{task.jurisdiction || "No jurisdiction"} · Due {shortDate(task.dueAt)}</p>
+        <small>{task.periodStart && task.periodEnd ? `${shortDate(task.periodStart)}–${shortDate(task.periodEnd)}` : "No reporting period recorded"}</small>
+        {task.amountDueCents != null && <b>{money(task.amountDueCents, "usd")} expected</b>}
+      </div>
+      <form onSubmit={(event) => {
+        event.preventDefault();
+        void action({
+          action: "update_tax_task",
+          taskId: task.id,
+          status,
+          amountPaidCents: amountPaid ? dollarsToCents(amountPaid) : null,
+          confirmationReference,
+          notes,
+        });
+      }}>
+        <label>Status<select value={status} onChange={(event) => setStatus(event.target.value)}><option value="upcoming">Upcoming</option><option value="ready">Ready to file/pay</option><option value="filed">Filed</option><option value="paid">Paid</option><option value="not_required">Not required</option></select></label>
+        <label>Amount paid<input type="number" min="0" step="0.01" inputMode="decimal" value={amountPaid} onChange={(event) => setAmountPaid(event.target.value)} placeholder="0.00" /></label>
+        <label>Confirmation/reference<input maxLength={300} value={confirmationReference} onChange={(event) => setConfirmationReference(event.target.value)} placeholder="Confirmation ID or receipt location" /></label>
+        <label className="tax-task-row-notes">Notes<input maxLength={2000} value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
+        <button className="button dark small">Update</button>
+      </form>
+    </article>
+  );
+}
+
+function LedgerManager({
+  entries,
+  year,
+  action,
+}: {
+  entries: LedgerEntry[];
+  year: number;
+  action(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
+}) {
+  const [form, setForm] = useState({
+    entryType: "expense",
+    category: "Software and hosting",
+    description: "",
+    vendor: "",
+    occurredAt: todayDateInput(),
+    amount: "",
+    reference: "",
+    notes: "",
+  });
+  function field(name: string, value: string) {
+    setForm((current) => ({ ...current, [name]: value }));
+  }
+  return (
+    <section className="admin-panel tax-ledger-panel">
+      <div className="panel-heading"><div><p className="eyebrow">Schedule C support</p><h2>Bookkeeping entries</h2></div><small>Tax payments are tracked in the calendar, not as business expenses.</small></div>
+      <form className="tax-ledger-form" onSubmit={(event) => {
+        event.preventDefault();
+        void action({ action: "create_ledger_entry", ...form, amountCents: dollarsToCents(form.amount) }).then(() => setForm((current) => ({ ...current, description: "", vendor: "", amount: "", reference: "", notes: "" })));
+      }}>
+        <label>Entry type<select value={form.entryType} onChange={(event) => field("entryType", event.target.value)}><option value="expense">Business expense</option><option value="owner_draw">Owner draw</option><option value="other_income">Other business income</option></select></label>
+        <label>Category<select value={form.category} onChange={(event) => field("category", event.target.value)}><option>Software and hosting</option><option>Advertising</option><option>Professional services</option><option>Insurance</option><option>Office supplies</option><option>Shipping supplies</option><option>Bank fees</option><option>Home office</option><option>Owner draw</option><option>Other income</option><option>Other</option></select></label>
+        <label>Date<input required type="date" value={form.occurredAt} onChange={(event) => field("occurredAt", event.target.value)} /></label>
+        <label>Amount<input required type="number" min="0.01" step="0.01" inputMode="decimal" value={form.amount} onChange={(event) => field("amount", event.target.value)} placeholder="0.00" /></label>
+        <label className="tax-ledger-description">Description<input required maxLength={240} value={form.description} onChange={(event) => field("description", event.target.value)} placeholder="Cloud hosting bill" /></label>
+        <label>Vendor/source<input maxLength={160} value={form.vendor} onChange={(event) => field("vendor", event.target.value)} /></label>
+        <label>Receipt/reference<input maxLength={300} value={form.reference} onChange={(event) => field("reference", event.target.value)} placeholder="Receipt filename or confirmation" /></label>
+        <label className="tax-ledger-notes">Notes<input maxLength={2000} value={form.notes} onChange={(event) => field("notes", event.target.value)} /></label>
+        <button className="button dark small">Record entry</button>
+      </form>
+      <div className="admin-table-wrap">
+        <table>
+          <thead><tr><th>Date</th><th>Type</th><th>Description</th><th>Category</th><th>Vendor</th><th>Amount</th><th>Reference</th><th /></tr></thead>
+          <tbody>
+            {entries.length ? entries.map((entry) => (
+              <tr key={entry.id} className={entry.status === "voided" ? "voided" : ""}><td>{shortDate(entry.occurredAt)}</td><td>{entry.entryType.replaceAll("_", " ")}</td><td><b>{entry.description}</b>{entry.notes && <small>{entry.notes}</small>}</td><td>{entry.category}</td><td>{entry.vendor || "—"}</td><td>{money(entry.amountCents, "usd")}</td><td>{entry.reference || "—"}</td><td>{entry.status === "active" ? <button onClick={() => void action({ action: "void_ledger_entry", entryId: entry.id })}>Void</button> : "Voided"}</td></tr>
+            )) : <tr><td colSpan={8}>No manual bookkeeping entries for {year}.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function SellerTaxReadiness({
+  sellers,
+  action,
+}: {
+  sellers: SellerTaxRow[];
+  action(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
+}) {
+  return (
+    <section className="admin-panel tax-seller-panel">
+      <div className="panel-heading"><div><p className="eyebrow">Information reporting</p><h2>Seller tax readiness</h2></div><small>Track status only. TINs and W-9 documents stay in Stripe or your approved secure process.</small></div>
+      <div className="admin-table-wrap">
+        <table>
+          <thead><tr><th>Seller</th><th>Marketplace status</th><th>Stripe</th><th>Terms</th><th>Tax information</th><th>Last verified</th></tr></thead>
+          <tbody>
+            {sellers.length ? sellers.map((seller) => <SellerTaxRowEditor key={`${seller.id}-${seller.taxInfoVerifiedAt ?? seller.taxInfoStatus}`} seller={seller} action={action} />) : <tr><td colSpan={6}>No sellers yet.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function SellerTaxRowEditor({ seller, action }: { seller: SellerTaxRow; action(payload: Record<string, unknown>): Promise<Record<string, unknown>> }) {
+  const [status, setStatus] = useState(seller.taxInfoStatus);
+  return (
+    <tr>
+      <td><b>{seller.storeName}</b><small>{seller.sellerType}</small></td>
+      <td><span className={`status ${seller.status}`}>{seller.status}</span></td>
+      <td>{seller.stripeAccountId && seller.stripeChargesEnabled && seller.stripePayoutsEnabled ? "Connected and enabled" : seller.stripeAccountId ? "Onboarding incomplete" : "Not connected"}</td>
+      <td>{seller.sellerTermsAcceptedAt ? shortDate(seller.sellerTermsAcceptedAt) : "Not accepted"}</td>
+      <td><div className="tax-seller-status"><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="not_checked">Not checked</option><option value="collecting">Collecting</option><option value="ready">Ready</option><option value="needs_attention">Needs attention</option></select><button onClick={() => void action({ action: "seller_tax_status", sellerId: seller.id, status })}>Save</button></div></td>
+      <td>{seller.taxInfoVerifiedAt ? shortDate(seller.taxInfoVerifiedAt) : "—"}</td>
+    </tr>
+  );
+}
+
+function TaxActivity({ rows }: { rows: TaxActivityRow[] }) {
+  return (
+    <section className="admin-panel tax-activity-panel">
+      <div className="panel-heading"><div><p className="eyebrow">Evidence trail</p><h2>Recent tax activity</h2></div></div>
+      {rows.length ? <ol>{rows.map((row) => <li key={row.id}><span>{shortDateTime(row.createdAt)}</span><p><b>{row.summary}</b><small>{row.actorEmail}</small></p></li>)}</ol> : <p>No tax activity recorded yet.</p>}
+    </section>
+  );
+}
+
+function TaxReferencePanel() {
+  return (
+    <aside className="tax-reference-panel">
+      <div><p className="eyebrow light">Owner rules</p><h2>Keep these boundaries clear.</h2></div>
+      <ul><li>Sales tax is a liability, not revenue.</li><li>Seller proceeds are not owner income.</li><li>Owner draws are not deductible expenses.</li><li>Partially refunded orders require a Stripe Tax adjustment check.</li><li>The margin proxy is a planning view, not a completed tax return.</li></ul>
+      <nav aria-label="Official tax references"><a href="https://www.cdtfa.ca.gov/industry/MPFAct.htm" target="_blank" rel="noreferrer">CDTFA marketplace guide</a><a href="https://www.irs.gov/publications/p334" target="_blank" rel="noreferrer">IRS sole-proprietor guide</a><a href="https://www.ftb.ca.gov/file/business/types/sole-proprietorship.html" target="_blank" rel="noreferrer">California sole-proprietor guide</a><a href="https://docs.stripe.com/tax/tax-for-marketplaces" target="_blank" rel="noreferrer">Stripe marketplace tax setup</a></nav>
+    </aside>
+  );
+}
+
+function dollarsToCents(value: string) {
+  const normalized = value.trim();
+  if (!/^\d+(\.\d{1,2})?$/.test(normalized)) return Number.NaN;
+  return Math.round(Number(normalized) * 100);
+}
+
+function todayDateInput() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+
+function shortDateTime(value: string) {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? "Invalid date" : parsed.toLocaleString();
+}
+
 type AdminOrder = {
   id: string;
   orderNumber: string;
@@ -1722,7 +2281,9 @@ function feePercent(basisPoints: number) {
 
 function shortDate(value?: string | null) {
   if (!value) return "Not set";
-  const parsed = new Date(value);
+  const parsed = /^\d{4}-\d{2}-\d{2}$/.test(value)
+    ? new Date(`${value}T12:00:00`)
+    : new Date(value);
   return Number.isNaN(parsed.getTime())
     ? "Invalid date"
     : parsed.toLocaleDateString();

@@ -89,6 +89,9 @@ export function buildCheckoutSessionBody(input: CheckoutSessionInput) {
     "payment_intent_data[metadata][reservation_id]": input.reservationId,
     "automatic_tax[enabled]": config.automaticTax ? "true" : "false",
   });
+  if (config.automaticTax) {
+    body.set("automatic_tax[liability][type]", "self");
+  }
   if (input.buyerUserId) {
     body.set("metadata[buyer_user_id]", input.buyerUserId);
     body.set("payment_intent_data[metadata][buyer_user_id]", input.buyerUserId);
