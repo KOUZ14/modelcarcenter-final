@@ -9,6 +9,7 @@ import {
   productImages,
   products,
   sellerFeedback,
+  sellerAddresses,
   sellers,
   shipmentOrders,
   shipments,
@@ -527,6 +528,26 @@ export async function getOwnedProduct(userId: string, productId: string) {
     .where(eq(productImages.productId, productId))
     .orderBy(asc(productImages.sortOrder));
   return { ...rows[0], images };
+}
+
+export async function getCollectorShipFromAddresses(userId: string) {
+  return getDb()
+    .select({
+      id: sellerAddresses.id,
+      label: sellerAddresses.label,
+      street1: sellerAddresses.street1,
+      street2: sellerAddresses.street2,
+      city: sellerAddresses.city,
+      region: sellerAddresses.region,
+      postalCode: sellerAddresses.postalCode,
+      country: sellerAddresses.country,
+      phone: sellerAddresses.phone,
+      isDefault: sellerAddresses.isDefault,
+    })
+    .from(sellerAddresses)
+    .innerJoin(sellers, eq(sellerAddresses.sellerId, sellers.id))
+    .where(eq(sellers.ownerUserId, userId))
+    .orderBy(desc(sellerAddresses.isDefault), asc(sellerAddresses.label));
 }
 
 export async function getOwnedProductForImages(

@@ -119,6 +119,11 @@ test("delivery-gated transfers, case holds, partial refunds, and reversals recon
         order_id TEXT NOT NULL,
         status TEXT NOT NULL
       )`),
+      database.prepare(`CREATE TABLE disputes (
+        id TEXT PRIMARY KEY,
+        order_id TEXT,
+        status TEXT NOT NULL
+      )`),
     ]);
     await database
       .prepare("INSERT INTO sellers (id, stripe_account_id, status) VALUES (?, ?, 'active')")
@@ -185,9 +190,24 @@ test("delivery-gated transfers, case holds, partial refunds, and reversals recon
         "transferred",
         "partially_refunded",
       ),
+      insertOrder.bind(
+        "order-disputed",
+        "MCC-DISPUTED",
+        "ch_disputed",
+        "MCC_disputed",
+        null,
+        0,
+        0,
+        0,
+        "pending",
+        "paid",
+      ),
       database
         .prepare("INSERT INTO resolution_cases (id, order_id, status) VALUES (?, ?, ?)")
         .bind("case-held", "order-held", "under_review"),
+      database
+        .prepare("INSERT INTO disputes (id, order_id, status) VALUES (?, ?, ?)")
+        .bind("dp_open", "order-disputed", "needs_response"),
     ]);
 
     const created = [];

@@ -1,10 +1,21 @@
-import { and, eq, inArray, lt } from "drizzle-orm";
+import { and, eq, inArray, lt, sql } from "drizzle-orm";
 import { getD1, getDb } from "@/db";
-import { checkoutReservationItems, checkoutReservations, products, sellers } from "@/db/schema";
+import {
+  checkoutReservationItems,
+  checkoutReservations,
+  products,
+  sellerAddresses,
+  sellers,
+} from "@/db/schema";
 import { calculateServerTotals } from "./business";
 import { config } from "./config";
 import { determineMarketplaceFee } from "./fees";
 import { sellerAcceptedCurrentTerms } from "./legal";
+import {
+  sellerOriginSnapshot,
+  serializeShipFromAddress,
+  shipFromAddressKey,
+} from "./ship-from-address";
 
 export type RequestedCartItem = { productId: string; quantity: number };
 
@@ -22,6 +33,7 @@ export async function loadAuthoritativeCart(items: RequestedCartItem[]) {
     .select({
       id: products.id,
       sellerId: products.sellerId,
+      shipFromAddressId: products.shipFromAddressId,
       title: products.title,
       description: products.description,
       sellerSku: products.sellerSku,
@@ -54,13 +66,13 @@ export async function loadAuthoritativeCart(items: RequestedCartItem[]) {
       sellerTermsAcceptedAt: sellers.sellerTermsAcceptedAt,
       shippingCents: sellers.defaultShippingCents,
       shippingMode: sellers.shippingMode,
-      shippingOriginCountry: sellers.shippingOriginCountry,
-      shippingOriginRegion: sellers.shippingOriginRegion,
-      shippingOriginStreet1: sellers.shippingOriginStreet1,
-      shippingOriginStreet2: sellers.shippingOriginStreet2,
-      shippingOriginCity: sellers.shippingOriginCity,
-      shippingOriginPostalCode: sellers.shippingOriginPostalCode,
-      shippingOriginPhone: sellers.shippingOriginPhone,
+      shippingOriginCountry: sql<string>`coalesce(${sellerAddresses.country}, ${sellers.shippingOriginCountry})`,
+      shippingOriginRegion: sql<string | null>`coalesce(${sellerAddresses.region}, ${sellers.shippingOriginRegion})`,
+      shippingOriginStreet1: sql<string | null>`coalesce(${sellerAddresses.street1}, ${sellers.shippingOriginStreet1})`,
+      shippingOriginStreet2: sql<string | null>`coalesce(${sellerAddresses.street2}, ${sellers.shippingOriginStreet2})`,
+      shippingOriginCity: sql<string | null>`coalesce(${sellerAddresses.city}, ${sellers.shippingOriginCity})`,
+      shippingOriginPostalCode: sql<string | null>`coalesce(${sellerAddresses.postalCode}, ${sellers.shippingOriginPostalCode})`,
+      shippingOriginPhone: sql<string | null>`coalesce(${sellerAddresses.phone}, ${sellers.shippingOriginPhone})`,
       defaultPackageLength: sellers.defaultPackageLength,
       defaultPackageWidth: sellers.defaultPackageWidth,
       defaultPackageHeight: sellers.defaultPackageHeight,
@@ -68,10 +80,19 @@ export async function loadAuthoritativeCart(items: RequestedCartItem[]) {
     })
     .from(products)
     .innerJoin(sellers, eq(products.sellerId, sellers.id))
+    .leftJoin(sellerAddresses, eq(products.shipFromAddressId, sellerAddresses.id))
     .where(inArray(products.id, [...consolidated.keys()]));
   if (rows.length !== consolidated.size) throw new Error("One or more products no longer exist.");
   const sellerIds = new Set(rows.map((row) => row.sellerId));
   if (sellerIds.size !== 1) throw new Error("Model Car Center currently checks out one seller at a time.");
+  const originKeys = new Set(
+    rows.map((row) => shipFromAddressKey(sellerOriginSnapshot(row))),
+  );
+  if (originKeys.size !== 1) {
+    throw new Error(
+      "These models ship from different locations. Check out items from one ship-from address at a time.",
+    );
+  }
   for (const row of rows) {
     const quantity = consolidated.get(row.id)!;
     if (row.status !== "active" || row.sellerStatus !== "active") throw new Error(`${row.title} is no longer available.`);
@@ -135,9 +156,9 @@ export async function reserveCart(
       (id, seller_id, buyer_user_id, status, subtotal_cents, shipping_cents, shipping_mode,
        checkout_shipping_quote_id, selected_shipping_rate_id, selected_shipping_carrier,
        selected_shipping_service, selected_shipping_service_token, selected_shipping_estimated_days,
-       quoted_shipping_address, marketplace_fee_bps, platform_fee_cents, currency,
+       quoted_shipping_address, ship_from_address, marketplace_fee_bps, platform_fee_cents, currency,
        policy_version, policy_accepted_at, expires_at)
-      VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)`)
+      VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)`)
       .bind(
         reservationId,
         input.seller.sellerId,
@@ -152,6 +173,7 @@ export async function reserveCart(
         shipping?.serviceToken ?? null,
         shipping?.estimatedDays ?? null,
         shipping?.quotedAddress ?? null,
+        serializeShipFromAddress(sellerOriginSnapshot(input.seller)),
         input.fee.marketplaceFeeBps,
         input.totals.platformFeeCents,
         input.currency,

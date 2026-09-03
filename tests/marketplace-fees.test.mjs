@@ -216,7 +216,7 @@ test("checkout reservation SQL has one placeholder for every bound value", async
   assert.ok(reservationSql, "checkout reservation insert should be present");
   assert.equal(
     reservationSql[0].match(/\?/g)?.length,
-    18,
+    19,
     "reservation insert and bind arguments must stay aligned",
   );
 });

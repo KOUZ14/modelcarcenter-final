@@ -331,8 +331,15 @@ export function parseCollectorListing(payload: Record<string, unknown>) {
     packageWidth,
     packageHeight,
     packageWeight,
+    rememberPackageDefaults: checked(payload.rememberPackageDefaults),
     sellerDisplayName: requiredString(payload.sellerDisplayName, "sellerDisplayName", 120),
     sellerDescription: cleanText(payload.sellerDescription, 1_000),
+    shipFromAddressId:
+      cleanText(payload.shipFromAddressId, 100) === "new"
+        ? null
+        : cleanText(payload.shipFromAddressId, 100) || null,
+    shipFromAddressLabel:
+      cleanText(payload.shipFromAddressLabel, 80) || "Primary ship-from",
     shippingOriginCountry,
     shippingOriginRegion,
     shippingOriginStreet1: requiredString(payload.shippingOriginStreet1, "shippingOriginStreet1", 200),

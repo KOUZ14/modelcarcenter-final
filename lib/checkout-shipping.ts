@@ -11,6 +11,10 @@ import {
   selectBuyerRates,
 } from "./shipping-rules";
 import { cleanText, ValidationError } from "./validation";
+import {
+  requireCompleteShipFromAddress,
+  sellerOriginSnapshot,
+} from "./ship-from-address";
 
 type AuthoritativeCart = Awaited<ReturnType<typeof loadAuthoritativeCart>>;
 
@@ -23,6 +27,7 @@ export function checkoutCartFingerprint(cart: AuthoritativeCart) {
         id: item.id,
         quantity: item.quantity,
         priceCents: item.priceCents,
+        shipFromAddressId: item.shipFromAddressId,
       }))
       .sort((left, right) => left.id.localeCompare(right.id)),
   });
@@ -59,7 +64,8 @@ export async function quoteCheckoutShipping(
   if (cart.currency.toUpperCase() !== "USD")
     throw new ValidationError("Calculated shipping currently supports USD listings only.");
   const destination = parseCheckoutShippingAddress(destinationInput);
-  requireCompleteOrigin(cart.seller);
+  const origin = sellerOriginSnapshot(cart.seller);
+  requireCompleteShipFromAddress(origin);
   const parcel = combinePackages(cart.items, {
     length: cart.seller.defaultPackageLength,
     width: cart.seller.defaultPackageWidth,
@@ -75,13 +81,13 @@ export async function quoteCheckoutShipping(
     from: {
       name: cart.seller.contactName,
       company: cart.seller.sellerName,
-      street1: cart.seller.shippingOriginStreet1!,
-      street2: cart.seller.shippingOriginStreet2 ?? undefined,
-      city: cart.seller.shippingOriginCity!,
-      state: cart.seller.shippingOriginRegion ?? "",
-      zip: cart.seller.shippingOriginPostalCode!,
-      country: cart.seller.shippingOriginCountry,
-      phone: cart.seller.shippingOriginPhone!,
+      street1: origin.street1,
+      street2: origin.street2 ?? undefined,
+      city: origin.city,
+      state: origin.region ?? "",
+      zip: origin.postalCode,
+      country: origin.country,
+      phone: origin.phone,
       email: cart.seller.sellerEmail,
     },
     to: {
@@ -236,19 +242,4 @@ function parseRates(value: string) {
   } catch {
     throw new ValidationError("The stored shipping quote is invalid. Calculate fresh rates.");
   }
-}
-
-function requireCompleteOrigin(seller: AuthoritativeCart["seller"]) {
-  if (
-    !seller.shippingOriginStreet1 ||
-    !seller.shippingOriginCity ||
-    !seller.shippingOriginPostalCode ||
-    !seller.shippingOriginPhone ||
-    !seller.shippingOriginCountry ||
-    (["US", "CA"].includes(seller.shippingOriginCountry) &&
-      !seller.shippingOriginRegion)
-  )
-    throw new ValidationError(
-      "This seller must complete their ship-from address before calculated shipping is available.",
-    );
 }

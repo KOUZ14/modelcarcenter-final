@@ -82,11 +82,16 @@ export async function processEligibleSellerTransfers(input: {
            o.seller_transfer_status IN ('pending', 'failed') OR
            (o.seller_transfer_status = 'processing' AND o.seller_transfer_processing_at < ?)
          )
-         AND NOT EXISTS (
-           SELECT 1 FROM resolution_cases rc
-           WHERE rc.order_id = o.id
-             AND rc.status NOT IN ('resolved', 'closed', 'denied')
-         )
+          AND NOT EXISTS (
+            SELECT 1 FROM resolution_cases rc
+            WHERE rc.order_id = o.id
+              AND rc.status NOT IN ('resolved', 'closed', 'denied')
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM disputes d
+            WHERE d.order_id = o.id
+              AND d.status NOT IN ('won', 'prevented', 'warning_closed')
+          )
        ORDER BY o.payout_eligible_at, o.created_at
        LIMIT ?`,
     )
@@ -127,11 +132,16 @@ export async function processEligibleSellerTransfers(input: {
              seller_transfer_status IN ('pending', 'failed') OR
              (seller_transfer_status = 'processing' AND seller_transfer_processing_at < ?)
            )
-           AND NOT EXISTS (
-             SELECT 1 FROM resolution_cases rc
-             WHERE rc.order_id = orders.id
-               AND rc.status NOT IN ('resolved', 'closed', 'denied')
-           )`,
+            AND NOT EXISTS (
+              SELECT 1 FROM resolution_cases rc
+              WHERE rc.order_id = orders.id
+                AND rc.status NOT IN ('resolved', 'closed', 'denied')
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM disputes d
+              WHERE d.order_id = orders.id
+                AND d.status NOT IN ('won', 'prevented', 'warning_closed')
+            )`,
       )
       .bind(
         releaseAmountCents,

@@ -104,6 +104,10 @@ export function buildCheckoutSessionBody(input: CheckoutSessionInput) {
     body.set(`line_items[${index}][price_data][currency]`, item.currency);
     body.set(`line_items[${index}][price_data][unit_amount]`, String(item.priceCents));
     body.set(`line_items[${index}][price_data][product_data][name]`, item.title);
+    body.set(
+      `line_items[${index}][price_data][tax_behavior]`,
+      config.stripeTaxBehavior,
+    );
     if (item.description) body.set(`line_items[${index}][price_data][product_data][description]`, item.description.slice(0, 500));
     if (item.imageUrl?.startsWith("https://")) body.set(`line_items[${index}][price_data][product_data][images][0]`, item.imageUrl);
     body.set(`line_items[${index}][quantity]`, String(item.quantity));
@@ -113,6 +117,14 @@ export function buildCheckoutSessionBody(input: CheckoutSessionInput) {
     body.set(`line_items[${index}][price_data][currency]`, input.items[0].currency);
     body.set(`line_items[${index}][price_data][unit_amount]`, String(input.shippingCents));
     body.set(`line_items[${index}][price_data][product_data][name]`, "Seller shipping");
+    body.set(
+      `line_items[${index}][price_data][product_data][tax_code]`,
+      config.stripeShippingTaxCode,
+    );
+    body.set(
+      `line_items[${index}][price_data][tax_behavior]`,
+      config.stripeTaxBehavior,
+    );
     body.set(`line_items[${index}][quantity]`, "1");
   }
   return body;

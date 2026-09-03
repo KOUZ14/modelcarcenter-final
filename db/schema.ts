@@ -147,6 +147,35 @@ export const sellers = sqliteTable(
   ],
 );
 
+export const sellerAddresses = sqliteTable(
+  "seller_addresses",
+  {
+    id: text("id").primaryKey(),
+    sellerId: text("seller_id")
+      .notNull()
+      .references(() => sellers.id, { onDelete: "cascade" }),
+    label: text("label").notNull(),
+    street1: text("street_1").notNull(),
+    street2: text("street_2"),
+    city: text("city").notNull(),
+    region: text("region"),
+    postalCode: text("postal_code").notNull(),
+    country: text("country").notNull().default("US"),
+    phone: text("phone").notNull(),
+    isDefault: integer("is_default", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    ...timestamps,
+  },
+  (table) => [
+    index("seller_addresses_seller_idx").on(
+      table.sellerId,
+      table.isDefault,
+      table.createdAt,
+    ),
+  ],
+);
+
 export const sellerApplications = sqliteTable(
   "seller_applications",
   {
@@ -175,6 +204,10 @@ export const products = sqliteTable(
     sellerId: text("seller_id")
       .notNull()
       .references(() => sellers.id, { onDelete: "cascade" }),
+    shipFromAddressId: text("ship_from_address_id").references(
+      () => sellerAddresses.id,
+      { onDelete: "set null" },
+    ),
     slug: text("slug").notNull(),
     sellerSku: text("seller_sku").notNull(),
     title: text("title").notNull(),
@@ -313,6 +346,7 @@ export const products = sqliteTable(
     ),
     index("products_scale_idx").on(table.scale),
     index("products_manufacturer_idx").on(table.modelManufacturer),
+    index("products_ship_from_address_idx").on(table.shipFromAddressId),
     index("products_model_condition_idx").on(table.modelCondition),
     check("products_price_nonnegative", sql`${table.priceCents} >= 0`),
     check(
@@ -801,6 +835,7 @@ export const orders = sqliteTable(
       .default("unfulfilled"),
     buyerName: text("buyer_name").notNull().default(""),
     shippingAddress: text("shipping_address").notNull().default("{}"),
+    shipFromAddress: text("ship_from_address").notNull().default("{}"),
     carrier: text("carrier"),
     trackingNumber: text("tracking_number"),
     createdAt: text("created_at")
@@ -1344,6 +1379,62 @@ export const stripeEvents = sqliteTable(
   ],
 );
 
+export const disputes = sqliteTable(
+  "disputes",
+  {
+    id: text("id").primaryKey(),
+    orderId: text("order_id").references(() => orders.id, {
+      onDelete: "set null",
+    }),
+    stripeChargeId: text("stripe_charge_id"),
+    stripePaymentIntentId: text("stripe_payment_intent_id"),
+    status: text("status").notNull(),
+    reason: text("reason").notNull().default(""),
+    amountCents: integer("amount_cents").notNull().default(0),
+    currency: text("currency").notNull().default("usd"),
+    evidenceDueBy: text("evidence_due_by"),
+    closedAt: text("closed_at"),
+    ...timestamps,
+  },
+  (table) => [
+    index("disputes_order_idx").on(table.orderId),
+    index("disputes_status_idx").on(table.status, table.updatedAt),
+  ],
+);
+
+export const sellerAlerts = sqliteTable(
+  "seller_alerts",
+  {
+    id: text("id").primaryKey(),
+    sellerId: text("seller_id")
+      .notNull()
+      .references(() => sellers.id, { onDelete: "cascade" }),
+    type: text("type", {
+      enum: ["account_updated", "payout_failed", "external_account_updated"],
+    }).notNull(),
+    severity: text("severity", { enum: ["info", "warning", "critical"] })
+      .notNull()
+      .default("info"),
+    message: text("message").notNull(),
+    sourceObjectId: text("source_object_id"),
+    stripeEventId: text("stripe_event_id").notNull(),
+    acknowledged: integer("acknowledged", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    acknowledgedAt: text("acknowledged_at"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("seller_alerts_stripe_event_unique").on(table.stripeEventId),
+    index("seller_alerts_seller_idx").on(
+      table.sellerId,
+      table.acknowledged,
+      table.createdAt,
+    ),
+    index("seller_alerts_type_idx").on(table.type, table.createdAt),
+  ],
+);
+
 export const checkoutReservations = sqliteTable(
   "checkout_reservations",
   {
@@ -1374,6 +1465,7 @@ export const checkoutReservations = sqliteTable(
     selectedShippingServiceToken: text("selected_shipping_service_token"),
     selectedShippingEstimatedDays: integer("selected_shipping_estimated_days"),
     quotedShippingAddress: text("quoted_shipping_address"),
+    shipFromAddress: text("ship_from_address").notNull().default("{}"),
     marketplaceFeeBps: integer("marketplace_fee_bps")
       .notNull()
       .default(1000),

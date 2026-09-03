@@ -7,6 +7,18 @@ function integerEnv(name: string, fallback: number, min: number, max: number) {
   return Number.isInteger(parsed) && parsed >= min && parsed <= max ? parsed : fallback;
 }
 
+function enumEnv<const T extends string>(
+  name: string,
+  fallback: T,
+  allowed: readonly T[],
+) {
+  const value = textEnv(name, fallback);
+  if (!allowed.includes(value as T)) {
+    throw new Error(`${name} must be one of: ${allowed.join(", ")}.`);
+  }
+  return value as T;
+}
+
 export function parseFeeBasisPoints(
   value: string | undefined,
   fallback: number,
@@ -32,7 +44,17 @@ export const config = {
   betterAuthSecret: textEnv("BETTER_AUTH_SECRET"),
   stripeSecretKey: textEnv("STRIPE_SECRET_KEY"),
   stripeWebhookSecret: textEnv("STRIPE_WEBHOOK_SECRET"),
+  stripeConnectWebhookSecret: textEnv("STRIPE_CONNECT_WEBHOOK_SECRET"),
   stripeApiVersion: textEnv("STRIPE_API_VERSION", "2026-02-25.clover"),
+  stripeShippingTaxCode: textEnv(
+    "STRIPE_SHIPPING_TAX_CODE",
+    "txcd_92010001",
+  ),
+  stripeTaxBehavior: enumEnv(
+    "STRIPE_TAX_BEHAVIOR",
+    "exclusive",
+    ["exclusive", "inclusive"] as const,
+  ),
   shippoApiKey: textEnv("SHIPPO_API_KEY"),
   shippoWebhookSecret: textEnv("SHIPPO_WEBHOOK_SECRET"),
   shippoApiVersion: textEnv("SHIPPO_API_VERSION", "2018-02-08"),

@@ -2129,6 +2129,34 @@ type AdminOrder = {
     releaseDateSnapshot: string | null;
   }>;
 };
+
+type AdminDispute = {
+  id: string;
+  orderId?: string | null;
+  orderNumber?: string | null;
+  sellerName?: string | null;
+  status: string;
+  reason: string;
+  amountCents: number;
+  currency: string;
+  evidenceDueBy?: string | null;
+  closedAt?: string | null;
+  updatedAt: string;
+};
+
+type AdminSellerAlert = {
+  id: string;
+  sellerId: string;
+  sellerName: string;
+  type: string;
+  severity: "info" | "warning" | "critical";
+  message: string;
+  sourceObjectId?: string | null;
+  acknowledged: boolean;
+  acknowledgedAt?: string | null;
+  createdAt: string;
+};
+
 function Orders({
   data,
   action,
@@ -2137,18 +2165,128 @@ function Orders({
   action(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
 }) {
   const rows = (data.orders as AdminOrder[]) ?? [];
+  const disputeRows = (data.disputes as AdminDispute[]) ?? [];
+  const sellerAlertRows = (data.sellerAlerts as AdminSellerAlert[]) ?? [];
   return (
-    <div className="order-admin-list">
-      {rows.length ? (
-        rows.map((order) => (
-          <OrderPanel key={order.id} order={order} action={action} />
-        ))
-      ) : (
-        <div className="admin-panel">No orders yet.</div>
-      )}
+    <div className="admin-stack">
+      <StripeRiskPanels
+        disputes={disputeRows}
+        sellerAlerts={sellerAlertRows}
+        action={action}
+      />
+      <div className="order-admin-list">
+        {rows.length ? (
+          rows.map((order) => (
+            <OrderPanel key={order.id} order={order} action={action} />
+          ))
+        ) : (
+          <div className="admin-panel">No orders yet.</div>
+        )}
+      </div>
     </div>
   );
 }
+
+function StripeRiskPanels({
+  disputes,
+  sellerAlerts,
+  action,
+}: {
+  disputes: AdminDispute[];
+  sellerAlerts: AdminSellerAlert[];
+  action(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
+}) {
+  const openDisputes = disputes.filter(
+    (row) => !["won", "prevented", "warning_closed"].includes(row.status),
+  );
+  const openAlerts = sellerAlerts.filter((row) => !row.acknowledged);
+  return (
+    <>
+      <section className="admin-panel">
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">Stripe payment risk</p>
+            <h2>Disputes</h2>
+          </div>
+          <span className={`status ${openDisputes.length ? "failed" : "paid"}`}>
+            {openDisputes.length} open
+          </span>
+        </div>
+        {disputes.length ? (
+          <div className="admin-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Order</th>
+                  <th>Seller</th>
+                  <th>Status</th>
+                  <th>Reason</th>
+                  <th>Amount</th>
+                  <th>Evidence due</th>
+                </tr>
+              </thead>
+              <tbody>
+                {disputes.map((row) => (
+                  <tr key={row.id}>
+                    <td><b>{row.orderNumber ?? "Unmatched charge"}</b><br /><small>{row.id}</small></td>
+                    <td>{row.sellerName ?? "Unknown seller"}</td>
+                    <td><span className={`status ${["won", "prevented", "warning_closed"].includes(row.status) ? "paid" : "failed"}`}>{row.status.replaceAll("_", " ")}</span></td>
+                    <td>{row.reason.replaceAll("_", " ") || "Not provided"}</td>
+                    <td>{money(row.amountCents, row.currency)}</td>
+                    <td>{row.evidenceDueBy ? shortDateTime(row.evidenceDueBy) : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p>No Stripe disputes recorded.</p>
+        )}
+      </section>
+
+      <section className="admin-panel">
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">Stripe Connect monitoring</p>
+            <h2>Seller payout alerts</h2>
+          </div>
+          <span className={`status ${openAlerts.length ? "failed" : "paid"}`}>
+            {openAlerts.length} unacknowledged
+          </span>
+        </div>
+        {sellerAlerts.length ? (
+          <div className="admin-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Seller</th>
+                  <th>Severity</th>
+                  <th>Alert</th>
+                  <th>When</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sellerAlerts.map((row) => (
+                  <tr key={row.id}>
+                    <td><b>{row.sellerName}</b></td>
+                    <td><span className={`status ${row.severity === "info" ? "paid" : "failed"}`}>{row.severity}</span></td>
+                    <td>{row.message}</td>
+                    <td>{shortDateTime(row.createdAt)}</td>
+                    <td>{row.acknowledged ? "Acknowledged" : <button className="button outline small" onClick={() => void action({ action: "acknowledge_seller_alert", alertId: row.id })}>Acknowledge</button>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p>No Stripe Connect alerts recorded.</p>
+        )}
+      </section>
+    </>
+  );
+}
+
 function OrderPanel({
   order,
   action,

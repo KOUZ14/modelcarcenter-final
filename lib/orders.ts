@@ -21,8 +21,18 @@ import {
 import type { ShippingAddress } from "./types";
 import { addBusinessDays } from "./reputation-rules";
 import { preorderShipAnchor } from "./availability-rules";
+import {
+  disputeIsTerminal,
+  disputePayoutDisposition,
+} from "./stripe-event-rules";
 
-type StripeEvent = { id: string; type: string; data: { object: Record<string, unknown> } };
+type StripeEvent = {
+  id: string;
+  type: string;
+  account?: string;
+  created?: number;
+  data: { object: Record<string, unknown> };
+};
 
 export async function processStripeEvent(event: StripeEvent) {
   const db = getDb();
@@ -48,8 +58,7 @@ export async function processStripeEvent(event: StripeEvent) {
   }
 
   if (event.type === "account.updated") {
-    await updateSellerFromAccount(event);
-    return { recorded: true, sellerUpdated: true };
+    return updateSellerFromAccount(event);
   }
 
   if (event.type === "charge.refunded") {
@@ -134,6 +143,14 @@ export async function processStripeEvent(event: StripeEvent) {
         ),
     ]);
     return { recorded: true, refundUpdated: true };
+  }
+
+  if (
+    event.type === "charge.dispute.created" ||
+    event.type === "charge.dispute.updated" ||
+    event.type === "charge.dispute.closed"
+  ) {
+    return handleDisputeEvent(event);
   }
 
   if (event.type === "transfer.reversed" || event.type === "transfer.updated") {
@@ -221,6 +238,180 @@ export async function processStripeEvent(event: StripeEvent) {
   return { recorded: true, ignored: true };
 }
 
+export async function processConnectAccountEvent(event: StripeEvent) {
+  const duplicate = await getDb()
+    .select({ id: stripeEvents.id })
+    .from(stripeEvents)
+    .where(eq(stripeEvents.id, event.id))
+    .limit(1);
+  if (duplicate[0]) return { duplicate: true };
+
+  if (event.type === "account.updated") {
+    return updateSellerFromAccount(event);
+  }
+  if (event.type === "payout.failed") {
+    const payout = event.data.object as {
+      id?: string;
+      failure_code?: string | null;
+    };
+    const code = payout.failure_code?.trim().slice(0, 80);
+    return recordConnectAlert(event, {
+      type: "payout_failed",
+      severity: "critical",
+      sourceObjectId: payout.id,
+      message: code
+        ? `A Stripe payout failed (${code}). The seller must review their payout account.`
+        : "A Stripe payout failed. The seller must review their payout account.",
+    });
+  }
+  if (event.type === "account.external_account.updated") {
+    const externalAccount = event.data.object as {
+      id?: string;
+      status?: string | null;
+    };
+    const status = externalAccount.status?.trim().slice(0, 80) || "updated";
+    const needsAttention = ["errored", "verification_failed"].includes(status);
+    return recordConnectAlert(event, {
+      type: "external_account_updated",
+      severity: needsAttention ? "critical" : "info",
+      sourceObjectId: externalAccount.id,
+      message: needsAttention
+        ? `A seller payout account needs attention (${status}).`
+        : `A seller payout account was updated (${status}).`,
+    });
+  }
+
+  await recordEvent(event);
+  return { recorded: true, ignored: true };
+}
+
+async function handleDisputeEvent(event: StripeEvent) {
+  const dispute = event.data.object as {
+    id?: string;
+    charge?: string | { id?: string } | null;
+    payment_intent?: string | { id?: string } | null;
+    status?: string;
+    reason?: string;
+    amount?: number;
+    currency?: string;
+    evidence_details?: { due_by?: number | null } | null;
+  };
+  if (!dispute.id) {
+    await recordEvent(event);
+    return { recorded: true, ignored: true };
+  }
+
+  const chargeId =
+    typeof dispute.charge === "string"
+      ? dispute.charge
+      : dispute.charge?.id ?? null;
+  const paymentIntentId =
+    typeof dispute.payment_intent === "string"
+      ? dispute.payment_intent
+      : dispute.payment_intent?.id ?? null;
+  const status = dispute.status?.trim() || "unknown";
+  const disposition = disputePayoutDisposition(status);
+  const d1 = getD1();
+  const order = await d1
+    .prepare(`SELECT id, seller_id AS sellerId,
+      stripe_transfer_id AS stripeTransferId,
+      seller_transfer_status AS sellerTransferStatus
+      FROM orders
+      WHERE stripe_charge_id = ? OR stripe_payment_intent_id = ?
+      LIMIT 1`)
+    .bind(chargeId ?? "__missing_charge__", paymentIntentId ?? "__missing_intent__")
+    .first<{
+      id: string;
+      sellerId: string;
+      stripeTransferId: string | null;
+      sellerTransferStatus: string;
+    }>();
+  const evidenceDueBy = dispute.evidence_details?.due_by
+    ? new Date(dispute.evidence_details.due_by * 1000).toISOString()
+    : null;
+  const closedAt = disputeIsTerminal(status)
+    ? new Date((event.created ?? Math.floor(Date.now() / 1000)) * 1000).toISOString()
+    : null;
+  const statements = [
+    d1
+      .prepare("INSERT OR IGNORE INTO stripe_events (id, type) VALUES (?, ?)")
+      .bind(event.id, event.type),
+    d1
+      .prepare(`INSERT INTO disputes
+        (id, order_id, stripe_charge_id, stripe_payment_intent_id, status,
+         reason, amount_cents, currency, evidence_due_by, closed_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          order_id = COALESCE(disputes.order_id, excluded.order_id),
+          stripe_charge_id = COALESCE(excluded.stripe_charge_id, disputes.stripe_charge_id),
+          stripe_payment_intent_id = COALESCE(excluded.stripe_payment_intent_id, disputes.stripe_payment_intent_id),
+          status = excluded.status,
+          reason = excluded.reason,
+          amount_cents = excluded.amount_cents,
+          currency = excluded.currency,
+          evidence_due_by = excluded.evidence_due_by,
+          closed_at = COALESCE(excluded.closed_at, disputes.closed_at),
+          updated_at = CURRENT_TIMESTAMP`)
+      .bind(
+        dispute.id,
+        order?.id ?? null,
+        chargeId,
+        paymentIntentId,
+        status,
+        dispute.reason?.trim().slice(0, 100) ?? "",
+        Math.max(0, dispute.amount ?? 0),
+        dispute.currency?.toLowerCase().slice(0, 10) || "usd",
+        evidenceDueBy,
+        closedAt,
+      ),
+  ];
+
+  if (order && disposition === "cancel" && !order.stripeTransferId) {
+    statements.push(
+      d1
+        .prepare(`UPDATE orders SET
+          seller_transfer_status = CASE
+            WHEN payment_flow = 'separate' THEN 'cancelled'
+            ELSE seller_transfer_status
+          END,
+          seller_transfer_last_error = CASE
+            WHEN payment_flow = 'separate' THEN ?
+            ELSE seller_transfer_last_error
+          END,
+          updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?`)
+        .bind(`Stripe dispute ${dispute.id} was lost.`, order.id),
+    );
+  }
+  if (
+    order &&
+    disposition === "release" &&
+    !order.stripeTransferId &&
+    order.sellerTransferStatus === "cancelled"
+  ) {
+    statements.push(
+      d1
+        .prepare(`UPDATE orders SET
+          seller_transfer_status = 'pending',
+          seller_transfer_last_error = NULL,
+          updated_at = CURRENT_TIMESTAMP
+          WHERE id = ? AND seller_transfer_last_error LIKE 'Stripe dispute %'`)
+        .bind(order.id),
+    );
+  }
+
+  await d1.batch(statements);
+  return {
+    recorded: true,
+    disputeUpdated: true,
+    disputeId: dispute.id,
+    status,
+    payoutDisposition: disposition,
+    orderMatched: Boolean(order),
+    transferAlreadyReleased: Boolean(order?.stripeTransferId),
+  };
+}
+
 async function recordEvent(event: StripeEvent) {
   await getDb().insert(stripeEvents).values({ id: event.id, type: event.type }).onConflictDoNothing();
 }
@@ -231,23 +422,137 @@ async function updateSellerFromAccount(event: StripeEvent) {
     charges_enabled?: boolean;
     payouts_enabled?: boolean;
     metadata?: { seller_id?: string };
+    requirements?: { currently_due?: string[] | null };
   };
   const d1 = getD1();
-  const ready = account.charges_enabled === true && account.payouts_enabled === true;
-  await d1.batch([
-    d1.prepare("INSERT INTO stripe_events (id, type) VALUES (?, ?)").bind(event.id, event.type),
-    d1.prepare(`UPDATE sellers SET
-      stripe_charges_enabled = ?, stripe_payouts_enabled = ?,
-      status = CASE
-        WHEN status = 'suspended' THEN status
-        WHEN ? = 1 AND status IN ('approved', 'onboarding', 'active') THEN 'active'
-        WHEN ? = 0 AND status = 'active' THEN 'onboarding'
-        ELSE status
-      END,
-      updated_at = CURRENT_TIMESTAMP
-      WHERE stripe_account_id = ? OR id = ?`)
-      .bind(account.charges_enabled ? 1 : 0, account.payouts_enabled ? 1 : 0, ready ? 1 : 0, ready ? 1 : 0, account.id ?? "", account.metadata?.seller_id ?? ""),
-  ]);
+  const ready =
+    account.charges_enabled === true && account.payouts_enabled === true;
+  const seller = await findSellerForConnectEvent(event);
+  const changed = Boolean(
+    seller &&
+      (seller.stripeChargesEnabled !== Number(account.charges_enabled === true) ||
+        seller.stripePayoutsEnabled !== Number(account.payouts_enabled === true)),
+  );
+  const currentlyDue = account.requirements?.currently_due?.length ?? 0;
+  const statements = [
+    d1
+      .prepare("INSERT OR IGNORE INTO stripe_events (id, type) VALUES (?, ?)")
+      .bind(event.id, event.type),
+    d1
+      .prepare(`UPDATE sellers SET
+        stripe_charges_enabled = ?, stripe_payouts_enabled = ?,
+        status = CASE
+          WHEN status = 'suspended' THEN status
+          WHEN ? = 1 AND status IN ('approved', 'onboarding', 'active') THEN 'active'
+          WHEN ? = 0 AND status = 'active' THEN 'onboarding'
+          ELSE status
+        END,
+        updated_at = CURRENT_TIMESTAMP
+        WHERE stripe_account_id = ? OR id = ?`)
+      .bind(
+        account.charges_enabled ? 1 : 0,
+        account.payouts_enabled ? 1 : 0,
+        ready ? 1 : 0,
+        ready ? 1 : 0,
+        event.account ?? account.id ?? "",
+        account.metadata?.seller_id ?? "",
+      ),
+  ];
+  if (seller && (changed || !ready || currentlyDue > 0)) {
+    statements.push(
+      sellerAlertStatement(d1, event, seller.id, {
+        type: "account_updated",
+        severity: ready && currentlyDue === 0 ? "info" : "warning",
+        sourceObjectId: event.account ?? account.id,
+        message:
+          ready && currentlyDue === 0
+            ? "Stripe confirmed that seller charges and payouts are enabled."
+            : `Stripe seller verification needs attention${currentlyDue ? ` (${currentlyDue} requirement${currentlyDue === 1 ? "" : "s"} due)` : ""}.`,
+      }),
+    );
+  }
+  await d1.batch(statements);
+  return {
+    recorded: true,
+    sellerUpdated: Boolean(seller),
+    ready,
+    currentlyDue,
+  };
+}
+
+type SellerAlertInput = {
+  type: "account_updated" | "payout_failed" | "external_account_updated";
+  severity: "info" | "warning" | "critical";
+  message: string;
+  sourceObjectId?: string | null;
+};
+
+async function recordConnectAlert(
+  event: StripeEvent,
+  alert: SellerAlertInput,
+) {
+  const d1 = getD1();
+  const seller = await findSellerForConnectEvent(event);
+  const statements = [
+    d1
+      .prepare("INSERT OR IGNORE INTO stripe_events (id, type) VALUES (?, ?)")
+      .bind(event.id, event.type),
+  ];
+  if (seller) {
+    statements.push(sellerAlertStatement(d1, event, seller.id, alert));
+  }
+  await d1.batch(statements);
+  return {
+    recorded: true,
+    alerted: Boolean(seller),
+    sellerMatched: Boolean(seller),
+  };
+}
+
+function sellerAlertStatement(
+  d1: D1Database,
+  event: StripeEvent,
+  sellerId: string,
+  alert: SellerAlertInput,
+) {
+  return d1
+    .prepare(`INSERT OR IGNORE INTO seller_alerts
+      (id, seller_id, type, severity, message, source_object_id, stripe_event_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`)
+    .bind(
+      event.id,
+      sellerId,
+      alert.type,
+      alert.severity,
+      alert.message,
+      alert.sourceObjectId ?? null,
+      event.id,
+    );
+}
+
+async function findSellerForConnectEvent(event: StripeEvent) {
+  const object = event.data.object as {
+    id?: string;
+    account?: string;
+    metadata?: { seller_id?: string };
+  };
+  const stripeAccountId =
+    event.account ?? object.account ??
+    (event.type === "account.updated" ? object.id : undefined) ??
+    "";
+  return getD1()
+    .prepare(`SELECT id,
+      stripe_charges_enabled AS stripeChargesEnabled,
+      stripe_payouts_enabled AS stripePayoutsEnabled
+      FROM sellers
+      WHERE stripe_account_id = ? OR id = ?
+      LIMIT 1`)
+    .bind(stripeAccountId, object.metadata?.seller_id ?? "")
+    .first<{
+      id: string;
+      stripeChargesEnabled: number;
+      stripePayoutsEnabled: number;
+    }>();
 }
 
 async function finalizePaidCheckout(event: StripeEvent, session: StripeCheckoutSession) {
@@ -277,6 +582,7 @@ async function finalizePaidCheckout(event: StripeEvent, session: StripeCheckoutS
         checkoutReservations.selectedShippingServiceToken,
       selectedShippingEstimatedDays:
         checkoutReservations.selectedShippingEstimatedDays,
+      shipFromAddress: checkoutReservations.shipFromAddress,
       marketplaceFeeBps: checkoutReservations.marketplaceFeeBps,
       platformFeeCents: checkoutReservations.platformFeeCents,
       currency: checkoutReservations.currency,
@@ -357,8 +663,8 @@ async function finalizePaidCheckout(event: StripeEvent, session: StripeCheckoutS
        selected_shipping_carrier, selected_shipping_service, selected_shipping_service_token,
        selected_shipping_estimated_days, marketplace_fee_bps, platform_fee_cents,
        payment_processing_fee_cents, seller_proceeds_cents, tax_cents, total_cents,
-       payment_status, fulfillment_status, buyer_name, shipping_address, paid_at, ship_by_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'paid', 'unfulfilled', ?, ?, ?, ?)`)
+        payment_status, fulfillment_status, buyer_name, shipping_address, ship_from_address, paid_at, ship_by_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'paid', 'unfulfilled', ?, ?, ?, ?, ?)`)
       .bind(orderId, orderNumber, reservation.sellerId, reservation.buyerUserId, session.id, intent, charge,
         paymentFlow, transferGroup, paymentFlow === "separate" ? "pending" : "transferred", buyerEmail,
         session.currency ?? reservation.currency, reservation.subtotalCents, reservation.shippingCents,
@@ -368,6 +674,7 @@ async function finalizePaidCheckout(event: StripeEvent, session: StripeCheckoutS
         reservation.marketplaceFeeBps, reservation.platformFeeCents,
         settlement.paymentProcessingFeeCents, settlement.sellerProceedsCents,
         taxCents, totalCents, shipping.name ?? "", JSON.stringify(shipping),
+        reservation.shipFromAddress,
         paidAt.toISOString(), shipByAt.toISOString()),
   );
   for (const item of items) {

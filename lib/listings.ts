@@ -1,6 +1,11 @@
 import { and, eq, sql } from "drizzle-orm";
 import { getDb } from "@/db";
-import { productImages, products, sellers } from "@/db/schema";
+import {
+  productImages,
+  products,
+  sellerAddresses,
+  sellers,
+} from "@/db/schema";
 import { getOwnedProduct, type VerifiedCollectorUser } from "./collector-store";
 import {
   createAccountOnboardingLink,
@@ -21,7 +26,6 @@ type CollectorProfile = { displayName: string; bio: string };
 export async function getOrCreateCollectorSeller(
   user: VerifiedCollectorUser,
   profile: CollectorProfile,
-  input?: ReturnType<typeof parseCollectorListing>,
 ) {
   const db = getDb();
   const existing = await db
@@ -34,52 +38,33 @@ export async function getOrCreateCollectorSeller(
       throw new ValidationError(
         "This account is already linked to a managed seller.",
       );
-    if (input) {
-      await db
-        .update(sellers)
-        .set({
-          storeName: input.sellerDisplayName,
-          description: input.sellerDescription,
-          shippingMode: "calculated",
-          shippingOriginCountry: input.shippingOriginCountry,
-          shippingOriginRegion: input.shippingOriginRegion,
-          shippingOriginStreet1: input.shippingOriginStreet1,
-          shippingOriginStreet2: input.shippingOriginStreet2,
-          shippingOriginCity: input.shippingOriginCity,
-          shippingOriginPostalCode: input.shippingOriginPostalCode,
-          shippingOriginPhone: input.shippingOriginPhone,
-          updatedAt: new Date().toISOString(),
-        })
-        .where(eq(sellers.id, existing[0].id));
-      return {
-        ...existing[0],
-        storeName: input.sellerDisplayName,
-        shippingMode: "calculated" as const,
-      };
-    }
     return existing[0];
   }
   const id = crypto.randomUUID();
-  const storeName = input?.sellerDisplayName ?? profile.displayName;
+  const storeName = profile.displayName;
   const seller = {
     id,
     slug: `${makeSlug(storeName)}-${id.slice(0, 6)}`,
     storeName,
     contactName: profile.displayName,
     contactEmail: user.email,
-    description: input?.sellerDescription ?? profile.bio,
+    description: profile.bio,
     sellerType: "collector" as const,
     ownerUserId: user.id,
     status: "approved" as const,
     defaultShippingCents: 0,
     shippingMode: "calculated" as const,
-    shippingOriginCountry: input?.shippingOriginCountry ?? "US",
-    shippingOriginRegion: input?.shippingOriginRegion ?? null,
-    shippingOriginStreet1: input?.shippingOriginStreet1 ?? null,
-    shippingOriginStreet2: input?.shippingOriginStreet2 ?? null,
-    shippingOriginCity: input?.shippingOriginCity ?? null,
-    shippingOriginPostalCode: input?.shippingOriginPostalCode ?? null,
-    shippingOriginPhone: input?.shippingOriginPhone ?? null,
+    shippingOriginCountry: "US",
+    shippingOriginRegion: null,
+    shippingOriginStreet1: null,
+    shippingOriginStreet2: null,
+    shippingOriginCity: null,
+    shippingOriginPostalCode: null,
+    shippingOriginPhone: null,
+    defaultPackageLength: "12",
+    defaultPackageWidth: "9",
+    defaultPackageHeight: "6",
+    defaultPackageWeight: "2",
     shippingPolicySummary: "Ships directly from this collector seller.",
     returnPolicySummary: "Contact Model Car Center before returning an order.",
     stripeAccountId: null,
@@ -97,12 +82,10 @@ export async function saveCollectorListing(input: {
   productId?: string | null;
 }) {
   const values = parseCollectorListing(input.payload);
-  const seller = await getOrCreateCollectorSeller(
-    input.user,
-    input.profile,
-    values,
-  );
+  const seller = await getOrCreateCollectorSeller(input.user, input.profile);
   const db = getDb();
+  const shipFromAddress = await resolveShipFromAddress(seller.id, values);
+  await updateCollectorSellerPreferences(seller.id, values);
   if (input.productId) {
     const owned = await getOwnedProduct(input.user.id, input.productId);
     if (!owned) throw new ValidationError("Listing not found.");
@@ -117,6 +100,7 @@ export async function saveCollectorListing(input: {
       .update(products)
       .set({
         ...listingProductValues(values),
+        shipFromAddressId: shipFromAddress.id,
         status: nextStatus,
         rejectionReason: null,
         updatedAt: new Date().toISOString(),
@@ -124,7 +108,11 @@ export async function saveCollectorListing(input: {
       .where(
         and(eq(products.id, input.productId), eq(products.sellerId, seller.id)),
       );
-    return { productId: input.productId, status: nextStatus };
+    return {
+      productId: input.productId,
+      status: nextStatus,
+      shipFromAddress,
+    };
   }
   const id = crypto.randomUUID();
   const slug = `${makeSlug(values.title)}-${id.slice(0, 8)}`;
@@ -133,11 +121,116 @@ export async function saveCollectorListing(input: {
     sellerId: seller.id,
     slug,
     sellerSku: `COL-${id.replaceAll("-", "").slice(0, 12).toUpperCase()}`,
+    shipFromAddressId: shipFromAddress.id,
     ...listingProductValues(values),
     currency: "usd",
     status: "draft",
   });
-  return { productId: id, status: "draft" as const };
+  return { productId: id, status: "draft" as const, shipFromAddress };
+}
+
+async function updateCollectorSellerPreferences(
+  sellerId: string,
+  values: ReturnType<typeof parseCollectorListing>,
+) {
+  await getDb()
+    .update(sellers)
+    .set({
+      storeName: values.sellerDisplayName,
+      description: values.sellerDescription,
+      shippingMode: "calculated",
+      ...(values.rememberPackageDefaults
+        ? {
+            defaultPackageLength: values.packageLength,
+            defaultPackageWidth: values.packageWidth,
+            defaultPackageHeight: values.packageHeight,
+            defaultPackageWeight: values.packageWeight,
+          }
+        : {}),
+      updatedAt: new Date().toISOString(),
+    })
+    .where(eq(sellers.id, sellerId));
+}
+
+async function resolveShipFromAddress(
+  sellerId: string,
+  values: ReturnType<typeof parseCollectorListing>,
+) {
+  const db = getDb();
+  if (values.shipFromAddressId) {
+    const selected = await db
+      .select()
+      .from(sellerAddresses)
+      .where(
+        and(
+          eq(sellerAddresses.id, values.shipFromAddressId),
+          eq(sellerAddresses.sellerId, sellerId),
+        ),
+      )
+      .limit(1);
+    if (!selected[0]) {
+      throw new ValidationError("Choose one of your saved ship-from addresses.");
+    }
+    return selected[0];
+  }
+
+  const existing = await db
+    .select()
+    .from(sellerAddresses)
+    .where(eq(sellerAddresses.sellerId, sellerId));
+  const matching = existing.find(
+    (address) =>
+      normalizedAddressPart(address.street1) ===
+        normalizedAddressPart(values.shippingOriginStreet1) &&
+      normalizedAddressPart(address.street2) ===
+        normalizedAddressPart(values.shippingOriginStreet2) &&
+      normalizedAddressPart(address.city) ===
+        normalizedAddressPart(values.shippingOriginCity) &&
+      normalizedAddressPart(address.region) ===
+        normalizedAddressPart(values.shippingOriginRegion) &&
+      normalizedAddressPart(address.postalCode) ===
+        normalizedAddressPart(values.shippingOriginPostalCode) &&
+      normalizedAddressPart(address.country) ===
+        normalizedAddressPart(values.shippingOriginCountry) &&
+      normalizedAddressPart(address.phone) ===
+        normalizedAddressPart(values.shippingOriginPhone),
+  );
+  if (matching) return matching;
+
+  const address = {
+    id: crypto.randomUUID(),
+    sellerId,
+    label: values.shipFromAddressLabel,
+    street1: values.shippingOriginStreet1,
+    street2: values.shippingOriginStreet2,
+    city: values.shippingOriginCity,
+    region: values.shippingOriginRegion,
+    postalCode: values.shippingOriginPostalCode,
+    country: values.shippingOriginCountry,
+    phone: values.shippingOriginPhone,
+    isDefault: existing.length === 0,
+  };
+  await db.insert(sellerAddresses).values(address);
+  if (address.isDefault) {
+    await db
+      .update(sellers)
+      .set({
+        shippingOriginStreet1: address.street1,
+        shippingOriginStreet2: address.street2,
+        shippingOriginCity: address.city,
+        shippingOriginRegion: address.region,
+        shippingOriginPostalCode: address.postalCode,
+        shippingOriginCountry: address.country,
+        shippingOriginPhone: address.phone,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(sellers.id, sellerId));
+  }
+  return address;
+}
+
+function normalizedAddressPart(value: string | null | undefined) {
+  return (value ?? "").trim().toLowerCase().replace(/\s+/g, " ");
 }
 
 function listingProductValues(

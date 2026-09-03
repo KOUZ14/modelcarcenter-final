@@ -3,11 +3,13 @@ import { getD1, getDb } from "@/db";
 import {
   businessLedgerEntries,
   communitySubscribers,
+  disputes,
   orderItems,
   orders,
   productImages,
   products,
   sellerApplications,
+  sellerAlerts,
   sellers,
   taxActivity,
   taxProfiles,
@@ -299,45 +301,82 @@ async function loadAdminSection(section: string) {
     return { section, hunts, candidateProducts };
   }
   if (section === "orders") {
-    const orderRows = await db
-      .select({
-        id: orders.id,
-        orderNumber: orders.orderNumber,
-        sellerName: sellers.storeName,
-        buyerEmail: orders.buyerEmail,
-        buyerName: orders.buyerName,
-        shippingAddress: orders.shippingAddress,
-        currency: orders.currency,
-        subtotalCents: orders.subtotalCents,
-        shippingCents: orders.shippingCents,
-        taxCents: orders.taxCents,
-        marketplaceFeeBps: orders.marketplaceFeeBps,
-        platformFeeCents: orders.platformFeeCents,
-        paymentProcessingFeeCents: orders.paymentProcessingFeeCents,
-        sellerProceedsCents: orders.sellerProceedsCents,
-        totalCents: orders.totalCents,
-        paymentStatus: orders.paymentStatus,
-        fulfillmentStatus: orders.fulfillmentStatus,
-        carrier: orders.carrier,
-        trackingNumber: orders.trackingNumber,
-        createdAt: orders.createdAt,
-        paidAt: orders.paidAt,
-        shippedAt: orders.shippedAt,
-      })
-      .from(orders)
-      .innerJoin(sellers, eq(orders.sellerId, sellers.id))
-      .orderBy(desc(orders.createdAt))
-      .limit(250);
-    const items = await db
-      .select()
-      .from(orderItems)
-      .orderBy(asc(orderItems.id));
+    const [orderRows, items, disputeRows, sellerAlertRows] = await Promise.all([
+      db
+        .select({
+          id: orders.id,
+          orderNumber: orders.orderNumber,
+          sellerName: sellers.storeName,
+          buyerEmail: orders.buyerEmail,
+          buyerName: orders.buyerName,
+          shippingAddress: orders.shippingAddress,
+          currency: orders.currency,
+          subtotalCents: orders.subtotalCents,
+          shippingCents: orders.shippingCents,
+          taxCents: orders.taxCents,
+          marketplaceFeeBps: orders.marketplaceFeeBps,
+          platformFeeCents: orders.platformFeeCents,
+          paymentProcessingFeeCents: orders.paymentProcessingFeeCents,
+          sellerProceedsCents: orders.sellerProceedsCents,
+          totalCents: orders.totalCents,
+          paymentStatus: orders.paymentStatus,
+          fulfillmentStatus: orders.fulfillmentStatus,
+          carrier: orders.carrier,
+          trackingNumber: orders.trackingNumber,
+          createdAt: orders.createdAt,
+          paidAt: orders.paidAt,
+          shippedAt: orders.shippedAt,
+        })
+        .from(orders)
+        .innerJoin(sellers, eq(orders.sellerId, sellers.id))
+        .orderBy(desc(orders.createdAt))
+        .limit(250),
+      db.select().from(orderItems).orderBy(asc(orderItems.id)),
+      db
+        .select({
+          id: disputes.id,
+          orderId: disputes.orderId,
+          orderNumber: orders.orderNumber,
+          sellerName: sellers.storeName,
+          status: disputes.status,
+          reason: disputes.reason,
+          amountCents: disputes.amountCents,
+          currency: disputes.currency,
+          evidenceDueBy: disputes.evidenceDueBy,
+          closedAt: disputes.closedAt,
+          updatedAt: disputes.updatedAt,
+        })
+        .from(disputes)
+        .leftJoin(orders, eq(disputes.orderId, orders.id))
+        .leftJoin(sellers, eq(orders.sellerId, sellers.id))
+        .orderBy(desc(disputes.updatedAt))
+        .limit(100),
+      db
+        .select({
+          id: sellerAlerts.id,
+          sellerId: sellerAlerts.sellerId,
+          sellerName: sellers.storeName,
+          type: sellerAlerts.type,
+          severity: sellerAlerts.severity,
+          message: sellerAlerts.message,
+          sourceObjectId: sellerAlerts.sourceObjectId,
+          acknowledged: sellerAlerts.acknowledged,
+          acknowledgedAt: sellerAlerts.acknowledgedAt,
+          createdAt: sellerAlerts.createdAt,
+        })
+        .from(sellerAlerts)
+        .innerJoin(sellers, eq(sellerAlerts.sellerId, sellers.id))
+        .orderBy(asc(sellerAlerts.acknowledged), desc(sellerAlerts.createdAt))
+        .limit(100),
+    ]);
     return {
       section,
       orders: orderRows.map((order) => ({
         ...order,
         items: items.filter((item) => item.orderId === order.id),
       })),
+      disputes: disputeRows,
+      sellerAlerts: sellerAlertRows,
     };
   }
   if (section === "tax") {
@@ -446,6 +485,18 @@ async function runAdminAction(
   actorEmail: string,
 ): Promise<Record<string, unknown>> {
   const db = getDb();
+  if (action === "acknowledge_seller_alert") {
+    const alertId = requiredString(payload.alertId, "alertId", 100);
+    await db
+      .update(sellerAlerts)
+      .set({
+        acknowledged: true,
+        acknowledgedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(sellerAlerts.id, alertId));
+    return { acknowledged: true };
+  }
   if (action === "save_tax_profile")
     return saveTaxProfile(payload, actorEmail);
   if (action === "create_tax_task")

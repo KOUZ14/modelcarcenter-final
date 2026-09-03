@@ -30,6 +30,10 @@ import {
 } from "./shipping-rules";
 import { cleanText, ValidationError } from "./validation";
 import {
+  parseStoredShipFromAddress,
+  shipFromAddressKey,
+} from "./ship-from-address";
+import {
   addCalendarDays,
   REFUND_REQUEST_DAYS_AFTER_DELIVERY,
 } from "./protection";
@@ -42,11 +46,10 @@ export async function quoteOwnedOrders(
 ) {
   const orderIds = parseOrderIds(payload.orderIds);
   const rows = await loadOwnedOrders(userId, orderIds);
-  const { store, recipient, declaredValueCents } = validateOrdersForShipment(
+  const { store, origin, recipient, declaredValueCents } = validateOrdersForShipment(
     rows,
     orderIds,
   );
-  requireCompleteOrigin(store);
   const parcel = parseParcel(payload);
   const rules = highValueShippingRules(
     declaredValueCents,
@@ -58,13 +61,13 @@ export async function quoteOwnedOrders(
     from: {
       name: store.contactName,
       company: store.storeName,
-      street1: store.shippingOriginStreet1!,
-      street2: store.shippingOriginStreet2 ?? undefined,
-      city: store.shippingOriginCity!,
-      state: store.shippingOriginRegion ?? "",
-      zip: store.shippingOriginPostalCode!,
-      country: store.shippingOriginCountry,
-      phone: store.shippingOriginPhone!,
+      street1: origin.street1,
+      street2: origin.street2 ?? undefined,
+      city: origin.city,
+      state: origin.region ?? "",
+      zip: origin.postalCode,
+      country: origin.country,
+      phone: origin.phone,
       email: store.contactEmail,
     },
     to: { ...recipient, email: rows[0].order.buyerEmail },
@@ -568,8 +571,17 @@ function validateOrdersForShipment(
     throw new ValidationError("Combined orders must use the same currency.");
   if (rows[0].order.currency.toUpperCase() !== "USD")
     throw new ValidationError("Shippo label purchasing currently supports USD orders only.");
+  const origins = rows.map(({ order }) =>
+    parseStoredShipFromAddress(order.shipFromAddress, store),
+  );
+  if (new Set(origins.map(shipFromAddressKey)).size !== 1) {
+    throw new ValidationError(
+      "Combined shipping requires orders from the same ship-from address.",
+    );
+  }
   return {
     store,
+    origin: origins[0],
     recipient: parseStoredShippingAddress(rows[0].order.shippingAddress),
     declaredValueCents: rows.reduce(
       (total, { order }) => total + order.subtotalCents,
@@ -599,21 +611,6 @@ function selectedServiceRequirements(
     );
   }
   return [...unique.values()];
-}
-
-function requireCompleteOrigin(store: typeof sellers.$inferSelect) {
-  if (
-    !store.shippingOriginStreet1 ||
-    !store.shippingOriginCity ||
-    !store.shippingOriginPostalCode ||
-    !store.shippingOriginPhone ||
-    !store.shippingOriginCountry ||
-    (["US", "CA"].includes(store.shippingOriginCountry) &&
-      !store.shippingOriginRegion)
-  )
-    throw new ValidationError(
-      "Complete the ship-from street, city, state, postal code, country, and phone in Store settings first.",
-    );
 }
 
 function parseOrderIds(value: unknown) {
