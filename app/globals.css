@@ -832,9 +832,21 @@ footer { padding-top: 70px; color: white; background: var(--ink); }
 .seller-actions.row-actions { row-gap: 18px; }
 .listing-shell { max-width: 1050px; margin-inline: auto; }
 .listing-form { display: grid; gap: 18px; }
-.listing-form section { padding: clamp(24px, 4vw, 44px); background: white; border: 1px solid var(--line); }
-.listing-form section > h2, .listing-submit h2 { margin-bottom: 26px; font-size: 30px; }
-.listing-form section > label { margin-bottom: 18px; }
+.listing-section-controls { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding-inline: 2px; }
+.listing-section-controls > p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.listing-section-controls > div { display: flex; flex: 0 0 auto; gap: 18px; }
+.listing-section { background: white; border: 1px solid var(--line); }
+.listing-section > summary { min-height: 88px; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 20px clamp(24px, 4vw, 44px); cursor: pointer; list-style: none; transition: background .18s ease; }
+.listing-section > summary::-webkit-details-marker { display: none; }
+.listing-section > summary:hover { background: #faf9f6; }
+.listing-section > summary:focus-visible { outline: 2px solid var(--ink); outline-offset: -3px; }
+.listing-section > summary::after { width: 10px; height: 10px; flex: 0 0 auto; border-right: 2px solid var(--ink); border-bottom: 2px solid var(--ink); content: ""; transform: rotate(45deg); transition: transform .18s ease; }
+.listing-section[open] > summary { border-bottom: 1px solid var(--line); }
+.listing-section[open] > summary::after { transform: rotate(225deg); }
+.listing-section-title { display: block; color: var(--ink); font-size: clamp(22px, 3vw, 30px); font-weight: 700; line-height: 1.05; letter-spacing: -.03em; }
+.listing-section-content { padding: clamp(24px, 4vw, 44px); }
+.listing-section-content > label { margin-bottom: 18px; }
+.listing-section-action-row { display: flex; justify-content: flex-end; margin-bottom: 26px; }
 .listing-form textarea { resize: vertical; }
 .collectible-fields, .photo-checklist { min-width: 0; display: grid; gap: 18px; margin: 0; padding: 0; border: 0; }
 .collectible-fields legend { width: 100%; margin-bottom: 4px; color: var(--ink); font-size: 20px; font-weight: 700; letter-spacing: -.02em; text-transform: none; }
@@ -857,12 +869,10 @@ footer { padding-top: 70px; color: white; background: var(--ink); }
 .product-photo-fields .listing-images { margin-block: 4px; }
 .listing-submit { display: grid; gap: 22px; }
 .listing-submit > div:first-child { display: grid; gap: 16px; justify-items: start; }
-.listing-submit > div:first-child > h2, .listing-submit > div:first-child > p, .listing-submit > div:first-child > .consent-check { margin: 0; }
+.listing-submit > div:first-child > p, .listing-submit > div:first-child > .consent-check { margin: 0; }
 .listing-submit > div:first-child > .consent-check { max-width: 760px; }
 .listing-submit > div:first-child > .button { margin-top: 2px; }
 .listing-submit > .row-actions { gap: 10px; padding-top: 2px; }
-.section-heading-row { display: flex; gap: 18px; align-items: flex-start; justify-content: space-between; margin-bottom: 26px; }
-.section-heading-row h2 { margin: 0; }
 .step-label { margin: 0 0 6px; color: var(--muted); font-size: 11px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
 .text-action { flex: 0 0 auto; padding: 8px 0; color: var(--ink); background: transparent; border: 0; border-bottom: 1px solid currentColor; font-size: 12px; font-weight: 800; cursor: pointer; }
 .text-action:hover { color: var(--accent); }
@@ -898,7 +908,8 @@ footer { padding-top: 70px; color: white; background: var(--ink); }
   .seller-paths .seller-path-description { min-height: 0; }
   .garage-nav nav { grid-template-columns: 1fr 1fr; }
   .listing-images { grid-template-columns: 1fr 1fr; }
-  .section-heading-row { display: grid; }
+  .listing-section-controls { align-items: flex-start; flex-direction: column; }
+  .listing-section > summary { min-height: 76px; }
   .text-action { justify-self: start; }
   .review-grid article { grid-template-columns: 1fr; }
   .review-grid img { width: 100%; height: 190px; }

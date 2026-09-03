@@ -300,6 +300,14 @@ export function CollectorListingForm({
     }
   }
 
+  function setAllListingSections(open: boolean) {
+    formRef.current
+      ?.querySelectorAll<HTMLDetailsElement>(".listing-section")
+      .forEach((section) => {
+        section.open = open;
+      });
+  }
+
   const stripeReady = Boolean(
     seller?.stripeChargesEnabled &&
       seller?.stripePayoutsEnabled &&
@@ -327,16 +335,27 @@ export function CollectorListingForm({
       </div>
 
       <form ref={formRef} className="listing-form" onSubmit={save} noValidate>
-        <section>
-          <div className="section-heading-row">
-            <div>
-              <p className="step-label">1 · The model</p>
-              <h2>Model details</h2>
-            </div>
-            <button className="text-action" type="button" onClick={buildTitle}>
-              Build title from details
-            </button>
+        <div className="listing-section-controls">
+          <p>Open the section you need. Your entries stay in place when a section is closed.</p>
+          <div>
+            <button className="text-action" type="button" onClick={() => setAllListingSections(true)}>Expand all</button>
+            <button className="text-action" type="button" onClick={() => setAllListingSections(false)}>Collapse all</button>
           </div>
+        </div>
+
+        <details className="listing-section" open>
+          <summary>
+            <span>
+              <span className="step-label">1 · The model</span>
+              <span className="listing-section-title">Model details</span>
+            </span>
+          </summary>
+          <div className="listing-section-content">
+            <div className="listing-section-action-row">
+              <button className="text-action" type="button" onClick={buildTitle}>
+                Build title from details
+              </button>
+            </div>
           <label>
             Product title
             <input name="title" required maxLength={200} placeholder="Example: 1967 Ford Mustang 1:18 AUTOart" defaultValue={String(product.title ?? "")} />
@@ -359,29 +378,47 @@ export function CollectorListingForm({
             <label>Color<input name="color" maxLength={80} autoComplete="off" defaultValue={String(product.color ?? "")} /></label>
           </div>
           <label>Description<textarea name="description" required maxLength={4000} rows={6} placeholder="What makes this model special? Include edition details and anything a buyer should know." defaultValue={String(product.description ?? "")} /></label>
-        </section>
-
-        <section>
-          <div className="section-heading-row">
-            <div>
-              <p className="step-label">2 · Condition</p>
-              <h2>Collector-grade details</h2>
-            </div>
-            <button className="text-action" type="button" onClick={fillCommonDisclosures}>Fill common “none” answers</button>
           </div>
-          <CollectibleListingFields product={product} />
-        </section>
+        </details>
 
-        <section>
-          <h2>Price and availability</h2>
+        <details className="listing-section">
+          <summary>
+            <span>
+              <span className="step-label">2 · Condition</span>
+              <span className="listing-section-title">Collector-grade details</span>
+            </span>
+          </summary>
+          <div className="listing-section-content">
+            <div className="listing-section-action-row">
+              <button className="text-action" type="button" onClick={fillCommonDisclosures}>Fill common “none” answers</button>
+            </div>
+          <CollectibleListingFields product={product} />
+          </div>
+        </details>
+
+        <details className="listing-section">
+          <summary>
+            <span>
+              <span className="step-label">3 · Price</span>
+              <span className="listing-section-title">Price and availability</span>
+            </span>
+          </summary>
+          <div className="listing-section-content">
           <div className="form-row">
             <label>Price (USD)<input name="price" inputMode="decimal" required defaultValue={product.priceCents == null ? "" : (Number(product.priceCents) / 100).toFixed(2)} /></label>
             <label>Quantity<input name="quantity" type="number" min={1} max={100} required defaultValue={String(product.inventoryQuantity ?? 1)} /></label>
           </div>
-        </section>
+          </div>
+        </details>
 
-        <section>
-          <h2>Packaged shipment</h2>
+        <details className="listing-section">
+          <summary>
+            <span>
+              <span className="step-label">4 · Package</span>
+              <span className="listing-section-title">Packaged shipment</span>
+            </span>
+          </summary>
+          <div className="listing-section-content">
           <p>Enter the final box size and packed weight. Your preferred size is already filled in.</p>
           <div className="parcel-grid">
             <label>Length (in)<input name="packageLength" inputMode="decimal" required defaultValue={String(product.packageLength ?? seller?.defaultPackageLength ?? "12")} /></label>
@@ -393,11 +430,17 @@ export function CollectorListingForm({
             <input type="checkbox" name="rememberPackageDefaults" defaultChecked={!productId} />
             <span>Use these package details as the starting point for my next listing.</span>
           </label>
-        </section>
+          </div>
+        </details>
 
-        <section>
-          <p className="step-label">3 · Shipping</p>
-          <h2>Where will this ship from?</h2>
+        <details className="listing-section">
+          <summary>
+            <span>
+              <span className="step-label">5 · Shipping</span>
+              <span className="listing-section-title">Where will this ship from?</span>
+            </span>
+          </summary>
+          <div className="listing-section-content">
           <p>Saved addresses are private and are used only for carrier rates and labels.</p>
           <label>
             Ship-from address
@@ -449,18 +492,32 @@ export function CollectorListingForm({
               <label>Short seller description<textarea name="sellerDescription" maxLength={1000} rows={3} defaultValue={String(seller?.description ?? "")} /></label>
             </div>
           </details>
-        </section>
+          </div>
+        </details>
 
-        <section>
-          <h2>Photos</h2>
+        <details className="listing-section">
+          <summary>
+            <span>
+              <span className="step-label">6 · Photos</span>
+              <span className="listing-section-title">Photos</span>
+            </span>
+          </summary>
+          <div className="listing-section-content">
           <p>Upload 4–8 original photos. Do not reuse another seller's photos.</p>
           <ProductImageFields images={images} primaryImageUrl={primaryImageUrl} files={files} disabled={busy} onFilesChange={setFiles} onRemove={productId ? removeImage : undefined} onRemoveLegacy={productId ? removeLegacyImage : undefined} onReorder={productId ? reorderImages : undefined} />
           <RequiredPhotoChecklist product={product} />
-        </section>
+          </div>
+        </details>
 
-        <section className="listing-submit">
+        <details className="listing-section">
+          <summary>
+            <span>
+              <span className="step-label">7 · Review</span>
+              <span className="listing-section-title">Payouts and review</span>
+            </span>
+          </summary>
+          <div className="listing-section-content listing-submit">
           <div>
-            <h2>Payouts and review</h2>
             <p>{stripeReady ? "Stripe payouts are ready. Submitted listings are reviewed before going live." : "You can keep drafting now. Complete secure Stripe-hosted payout onboarding before submission."}</p>
             <label className="consent-check">
               <input type="checkbox" checked={acceptedSellerTerms} onChange={(event) => setAcceptedSellerTerms(event.target.checked)} />
@@ -474,7 +531,8 @@ export function CollectorListingForm({
             <button className="button outline" type="submit" value="save" disabled={busy}>{busy ? "Saving…" : "Save draft"}</button>
             <button className="button dark" type="submit" value="submit" disabled={busy || !stripeReady || !acceptedSellerTerms}>{busy ? "Saving…" : "Submit for review"}</button>
           </div>
-        </section>
+          </div>
+        </details>
       </form>
       <p><Link className="text-link" href="/account?view=listings">Back to My Listings</Link></p>
     </div>
