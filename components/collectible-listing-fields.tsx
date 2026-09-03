@@ -233,8 +233,12 @@ export function RequiredPhotoChecklist({
   product?: CollectibleProduct | null;
 }) {
   return (
-    <fieldset className="photo-checklist">
-      <legend>Required photo checklist</legend>
+    <div
+      className="photo-checklist"
+      role="group"
+      aria-labelledby="required-photo-checklist-title"
+    >
+      <h3 id="required-photo-checklist-title">Required photo checklist</h3>
       <p className="field-note">
         A listing needs at least four original photos. Confirm every view before
         submitting or publishing; check the packaging and issue items when the
@@ -250,6 +254,6 @@ export function RequiredPhotoChecklist({
           <span>{label}</span>
         </label>
       ))}
-    </fieldset>
+    </div>
   );
 }
