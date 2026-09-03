@@ -853,7 +853,12 @@ footer { padding-top: 70px; color: white; background: var(--ink); }
 .product-photo-fields { display: grid; gap: 12px; padding: 18px; border: 1px solid var(--line); }
 .product-photo-fields > div:first-child p { margin-top: 5px; color: var(--muted); }
 .product-photo-fields .listing-images { margin-block: 4px; }
-.listing-submit { display: grid; gap: 18px; }
+.listing-submit { display: grid; gap: 22px; }
+.listing-submit > div:first-child { display: grid; gap: 16px; justify-items: start; }
+.listing-submit > div:first-child > h2, .listing-submit > div:first-child > p, .listing-submit > div:first-child > .consent-check { margin: 0; }
+.listing-submit > div:first-child > .consent-check { max-width: 760px; }
+.listing-submit > div:first-child > .button { margin-top: 2px; }
+.listing-submit > .row-actions { gap: 10px; padding-top: 2px; }
 .section-heading-row { display: flex; gap: 18px; align-items: flex-start; justify-content: space-between; margin-bottom: 26px; }
 .section-heading-row h2 { margin: 0; }
 .step-label { margin: 0 0 6px; color: var(--muted); font-size: 11px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
