@@ -10,11 +10,12 @@ export function SellerApplicationForm() {
   const [error, setError] = useState("");
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setState("loading"); setError("");
+    const formElement = event.currentTarget;
     try {
-      const response = await fetch("/api/seller-applications", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.fromEntries(new FormData(event.currentTarget).entries())) });
+      const response = await fetch("/api/seller-applications", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(Object.fromEntries(new FormData(formElement).entries())) });
       const data = await response.json() as { error?: string };
       if (!response.ok) throw new Error(data.error || "Application could not be submitted.");
-      event.currentTarget.reset(); setState("success");
+      formElement.reset(); setState("success");
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Please try again."); setState("error"); }
   }
   if (state === "success") return <div className="success-message application-success" role="status"><Icon name="check"/><h2>Application received.</h2><p>We&apos;ll review your store and contact you by email. No payout or banking information is collected here—approved sellers complete that securely with Stripe.</p><button type="button" onClick={() => setState("idle")}>Submit another application</button></div>;

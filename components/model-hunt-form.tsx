@@ -14,16 +14,17 @@ export function ModelHuntForm({ compact = false }: { compact?: boolean }) {
   const [state, setState] = useState<State>({ kind: "idle" });
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const formElement = event.currentTarget;
     setState({ kind: "loading" });
-    const form = new FormData(event.currentTarget);
+    const form = new FormData(formElement);
     const payload = Object.fromEntries(form.entries());
     try {
       const response = await fetch("/api/model-hunts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const data = await response.json() as { error?: string; message?: string; referenceCode?: string; products?: ProductSummary[] };
       if (response.status === 409 && data.products?.length) { setState({ kind: "matches", message: data.error, products: data.products }); return; }
       if (!response.ok) throw new Error(data.error || "Your Model Hunt could not be started.");
+      formElement.reset();
       setState({ kind: "success", message: data.message, referenceCode: data.referenceCode });
-      event.currentTarget.reset();
     } catch (error) {
       setState({ kind: "error", message: error instanceof Error ? error.message : "Please try again." });
     }

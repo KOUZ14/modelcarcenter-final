@@ -84,6 +84,9 @@ export async function GET(request: Request) {
     if (section === "tax_export") {
       return taxExportResponse(url.searchParams.get("year"));
     }
+    if (section === "community_export") {
+      return communityExportResponse();
+    }
     return Response.json(await loadAdminSection(section));
   } catch (error) {
     return routeError(error, "Admin data is temporarily unavailable.");
@@ -299,6 +302,13 @@ async function loadAdminSection(section: string) {
       .where(and(eq(products.status, "active"), eq(sellers.status, "active")))
       .limit(500);
     return { section, hunts, candidateProducts };
+  }
+  if (section === "community") {
+    const subscribers = await db
+      .select()
+      .from(communitySubscribers)
+      .orderBy(desc(communitySubscribers.createdAt));
+    return { section, subscribers, total: subscribers.length };
   }
   if (section === "orders") {
     const [orderRows, items, disputeRows, sellerAlertRows] = await Promise.all([
@@ -1644,6 +1654,35 @@ async function taxExportResponse(yearInput: string | null) {
     headers: {
       "Content-Type": "text/csv; charset=utf-8",
       "Content-Disposition": `attachment; filename="model-car-center-tax-${year}.csv"`,
+      "Cache-Control": "private, no-store",
+    },
+  });
+}
+
+async function communityExportResponse() {
+  const rows = await getDb()
+    .select({
+      email: communitySubscribers.email,
+      consentTimestamp: communitySubscribers.consentTimestamp,
+      createdAt: communitySubscribers.createdAt,
+    })
+    .from(communitySubscribers)
+    .orderBy(desc(communitySubscribers.createdAt));
+  const csv = [
+    ["email", "consent_timestamp", "created_at"],
+    ...rows.map((row) => [
+      row.email,
+      row.consentTimestamp,
+      row.createdAt,
+    ]),
+  ]
+    .map((row) => row.map(csvCell).join(","))
+    .join("\r\n");
+  const exportDate = new Date().toISOString().slice(0, 10);
+  return new Response(`\uFEFF${csv}\r\n`, {
+    headers: {
+      "Content-Type": "text/csv; charset=utf-8",
+      "Content-Disposition": `attachment; filename="model-car-center-community-${exportDate}.csv"`,
       "Cache-Control": "private, no-store",
     },
   });

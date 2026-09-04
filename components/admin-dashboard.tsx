@@ -22,6 +22,7 @@ const tabs = [
   "products",
   "import",
   "hunts",
+  "community",
   "orders",
   "tax",
   "resolution",
@@ -174,6 +175,7 @@ function AdminSection({
   if (tab === "products") return <Products data={data} action={action} />;
   if (tab === "import") return <Importer data={data} action={action} />;
   if (tab === "hunts") return <Hunts data={data} action={action} />;
+  if (tab === "community") return <Community data={data} />;
   if (tab === "orders") return <Orders data={data} action={action} />;
   if (tab === "tax") return <TaxCenter data={data} action={action} />;
   return <ResolutionCases data={data} action={action} />;
@@ -1428,6 +1430,99 @@ function Hunts({
           );
         })}
       </div>
+    </section>
+  );
+}
+
+type CommunitySubscriber = {
+  id: string;
+  email: string;
+  consentTimestamp: string;
+  createdAt: string;
+};
+
+function Community({ data }: { data: AdminData }) {
+  const subscribers = (data.subscribers as CommunitySubscriber[]) ?? [];
+  const [query, setQuery] = useState("");
+  const normalizedQuery = query.trim().toLowerCase();
+  const visible = normalizedQuery
+    ? subscribers.filter((subscriber) =>
+        subscriber.email.toLowerCase().includes(normalizedQuery),
+      )
+    : subscribers;
+  return (
+    <section className="admin-panel community-admin">
+      <div className="panel-heading">
+        <div>
+          <h2>Community subscribers</h2>
+          <p>
+            {subscribers.length.toLocaleString()} confirmed signup
+            {subscribers.length === 1 ? "" : "s"}, newest first.
+          </p>
+        </div>
+        <a
+          className="button dark small"
+          href="/api/admin?section=community_export"
+        >
+          Export CSV
+        </a>
+      </div>
+      <div className="admin-filters community-filters">
+        <label>
+          <span className="sr-only">Search subscriber emails</span>
+          <input
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search by email address"
+            autoComplete="off"
+          />
+        </label>
+        <span className="community-result-count" aria-live="polite">
+          Showing {visible.length.toLocaleString()} of{" "}
+          {subscribers.length.toLocaleString()}
+        </span>
+      </div>
+      {visible.length ? (
+        <div className="admin-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Email address</th>
+                <th>Joined</th>
+                <th>Consent recorded</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visible.map((subscriber) => (
+                <tr key={subscriber.id}>
+                  <td>
+                    <a href={`mailto:${subscriber.email}`}>
+                      {subscriber.email}
+                    </a>
+                  </td>
+                  <td>
+                    <time dateTime={subscriber.createdAt}>
+                      {shortDateTime(subscriber.createdAt)}
+                    </time>
+                  </td>
+                  <td>
+                    <time dateTime={subscriber.consentTimestamp}>
+                      {shortDateTime(subscriber.consentTimestamp)}
+                    </time>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="community-empty">
+          {subscribers.length
+            ? `No subscriber emails match “${query.trim()}”.`
+            : "No community signups yet."}
+        </p>
+      )}
     </section>
   );
 }
