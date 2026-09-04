@@ -45,8 +45,8 @@ export function SellerReputation({
         ? `${reputation.resolvedCases} of ${reputation.totalCases}`
         : "No cases",
       detail: reputation.totalCases
-        ? "Closed, resolved, or denied through the Resolution Center"
-        : "No Resolution Center case history",
+        ? "Closed, resolved, or denied through Customer Support"
+        : "No Customer Support case history",
     },
   ];
 
@@ -82,7 +82,7 @@ export function SellerReputation({
         </div>
         <p>
           These signals come from Model Car Center orders, shipment deadlines,
-          buyer-linked feedback, and Resolution Center outcomes. Sellers cannot
+          buyer-linked feedback, and Customer Support outcomes. Sellers cannot
           edit them.
         </p>
       </header>

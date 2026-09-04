@@ -7,7 +7,7 @@ import { getResolutionCenterData } from "@/lib/resolution";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
-  title: "Resolution & Protection Center",
+  title: "Customer Support",
   description: "Report and resolve Model Car Center order problems.",
   robots: { index: false, follow: false },
 };
@@ -32,4 +32,3 @@ export default async function ResolutionPage({
     </main>
   );
 }
-

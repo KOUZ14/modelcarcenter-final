@@ -25,7 +25,7 @@ export async function GET(request: Request) {
       data: await getResolutionCenterData(collector.user.id),
     });
   } catch (error) {
-    return routeError(error, "The resolution center is temporarily unavailable.");
+    return routeError(error, "Customer Support is temporarily unavailable.");
   }
 }
 
@@ -37,7 +37,7 @@ export async function POST(request: Request) {
     try {
       form = await request.formData();
     } catch {
-      throw new ValidationError("Submit a valid resolution-center form.");
+      throw new ValidationError("Submit a valid support request.");
     }
     const payload = Object.fromEntries(form.entries());
     const action = requiredString(payload.action, "action", 40);
@@ -101,9 +101,8 @@ export async function POST(request: Request) {
         ok: true,
         ...(await issueResolutionRefund(collector.user.id, payload)),
       });
-    throw new ValidationError("Unknown resolution-center action.");
+    throw new ValidationError("Unknown support action.");
   } catch (error) {
-    return routeError(error, "The resolution-center action could not be completed.");
+    return routeError(error, "The support action could not be completed.");
   }
 }
-

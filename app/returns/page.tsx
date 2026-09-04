@@ -13,7 +13,7 @@ export default function ReturnsPage() {
     <p>Each seller’s return-policy summary appears on its storefront and product pages. A delivered-order return or refund request must be opened through Model Car Center within three calendar days after carrier-confirmed delivery. Within that platform-wide window, a seller may allow change-of-mind returns, apply clearly disclosed conditions, or mark an item final sale when lawful. A final-sale label does not remove rights for an item damaged in transit, materially different from its listing, counterfeit, or otherwise protected by non-waivable law.</p>
 
     <h2>2. Report an order problem</h2>
-    <p>Open the authenticated <Link href="/resolution">Resolution &amp; Protection Center</Link> no later than three calendar days after carrier-confirmed delivery, choose the order, describe the issue, and add clear photographs or PDFs of the item, packaging, shipping label, and damage when relevant. Non-delivery uses the separate shipment/payment fallback in the <Link href="/protection">Buyer &amp; Seller Protection Rules</Link>. The case displays its status, seller response deadline, evidence deadline, and any return deadline.</p>
+    <p>Open <Link href="/resolution">Customer Support</Link> no later than three calendar days after carrier-confirmed delivery, choose the order, describe the issue, and add clear photographs or PDFs of the item, packaging, shipping label, and damage when relevant. Non-delivery uses the separate shipment/payment fallback in the <Link href="/protection">Buyer &amp; Seller Protection Rules</Link>. The case displays its status, seller response deadline, evidence deadline, and any return deadline.</p>
 
     <h2>3. Do not send an unauthorized return</h2>
     <p>Wait until the case displays a return authorization number, instructions, and downloadable label. Do not return an item to Model Car Center, a payment address, or an address printed on a package unless the case instructs you to do so. Preserve the item, original model packaging, certificates, accessories, inserts, and shipping materials in the condition received while the request is reviewed.</p>
@@ -36,7 +36,7 @@ export default function ReturnsPage() {
     <p>Approved partial and full refunds are issued through the case to the original payment method using Stripe. For an authorized return, the refund is normally initiated after the seller receives and reasonably inspects the item. The case records the refund amount and status. Once initiated, a bank or card network may take additional time to post the credit. Marketplace credit is not substituted where a cash or original-payment refund is required.</p>
 
     <h2>8. Payment disputes</h2>
-    <p>Please use the Resolution Center first so the evidence and response history stay with the order. Filing a chargeback does not expand or reduce legal rights, but the payment provider’s process may control the dispute while open. Model Car Center may provide the provider with relevant order, delivery, policy, case, and communication records.</p>
+    <p>Please use Customer Support first so the evidence and response history stay with the order. Filing a chargeback does not expand or reduce legal rights, but the payment provider’s process may control the dispute while open. Model Car Center may provide the provider with relevant order, delivery, policy, case, and communication records.</p>
 
     <h2>9. Legal rights</h2>
     <p>This policy and the Protection Rules supplement and do not limit non-waivable consumer rights.</p>

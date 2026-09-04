@@ -1133,7 +1133,7 @@ footer { padding-top: 70px; color: white; background: var(--ink); }
   .marketplace-empty-actions .button { width: 100%; }
 }
 
-/* Resolution & Protection Center */
+/* Customer Support */
 .resolution-page { background: #f2f0eb; }
 .resolution-hero { padding-block: clamp(62px, 8vw, 112px); color: white; background: #111112; }
 .resolution-hero-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(430px, .85fr); gap: clamp(55px, 8vw, 130px); align-items: end; }

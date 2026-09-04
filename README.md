@@ -246,7 +246,7 @@ Full admin refunds are available for orders with a remaining paid balance. Resol
 
 ## Resolution notifications
 
-Resolution Center updates queue transactional email for the affected party when a case is opened, the seller responds, either party adds evidence, a return is authorized, a case is escalated, or a refund is recorded. Escalations also notify the monitored support inbox. Each message links directly to the shared case timeline.
+Customer Support updates queue transactional email for the affected party when a case is opened, the seller responds, either party adds evidence, a return is authorized, a case is escalated, or a refund is recorded. Escalations also notify the monitored support inbox. Each message links directly to the shared case timeline.
 
 The worker checks once an hour for active seller-response, buyer-evidence, buyer-escalation, and return-shipment deadlines that are less than 24 hours away. It also releases eligible seller transfers three calendar days after carrier-confirmed delivery, while leaving any order with an active case on hold. Reminder records, case-event emails, transfers, and reversals are idempotent and failed financial operations are retried.
 

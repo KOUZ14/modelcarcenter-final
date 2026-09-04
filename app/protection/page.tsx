@@ -8,8 +8,8 @@ export const metadata: Metadata = {
 };
 
 export default function ProtectionPage() {
-  return <PolicyPage title="Buyer & Seller Protection Rules" intro="These rules govern Model Car Center’s order-level Resolution & Protection Center. They explain who is covered, what each party must do, the deadlines the product enforces, and how eligible remedies are issued.">
-    <p><Link href="/resolution"><b>Open the Resolution &amp; Protection Center →</b></Link></p>
+  return <PolicyPage title="Buyer & Seller Protection Rules" intro="These rules govern Model Car Center’s order-level Customer Support process. They explain who is covered, what each party must do, the deadlines the product enforces, and how eligible remedies are issued.">
+    <p><Link href="/resolution"><b>Open Customer Support →</b></Link></p>
 
     <h2>1. Orders covered</h2>
     <p>Protection applies to an order paid through Model Car Center checkout while the buyer and seller use the platform case record in good faith. Covered problems include non-delivery, carrier damage, a wrong or missing item, a material difference from the listing, and a reasonable authenticity concern. Coverage is limited to the remaining paid order balance and does not replace non-waivable rights under applicable law.</p>

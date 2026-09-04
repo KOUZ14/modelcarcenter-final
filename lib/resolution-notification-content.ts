@@ -56,7 +56,7 @@ function notificationCopy(input: ResolutionNotificationContentInput) {
       return {
         subject: `New resolution case ${caseRef} for ${input.orderNumber}`,
         heading: "A buyer opened a resolution case",
-        detail: `Review the reported ${protectionReasonLabel(input.reason).toLowerCase()} and respond by the deadline shown in the Resolution Center.`,
+        detail: `Review the reported ${protectionReasonLabel(input.reason).toLowerCase()} and respond by the deadline shown in Customer Support.`,
         action: "Review and respond",
       };
     case "response":

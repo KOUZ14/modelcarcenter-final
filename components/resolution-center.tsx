@@ -77,7 +77,7 @@ export function ResolutionCenter({
       <section className="resolution-hero">
         <div className="shell resolution-hero-grid">
           <div>
-            <p className="eyebrow">Order support · Buyer &amp; seller protection</p>
+            <p className="eyebrow">Customer Support · Buyer &amp; seller protection</p>
             <h1>Protection that stays with the order.</h1>
             <p>
               Report a problem, keep evidence and replies together, authorize a
@@ -106,7 +106,7 @@ export function ResolutionCenter({
         {message && <p className="admin-message" role="status">{message}</p>}
         {error && <p className="form-error" role="alert">{error}</p>}
 
-        <div className="resolution-tabs" role="tablist" aria-label="Resolution center views">
+        <div className="resolution-tabs" role="tablist" aria-label="Customer Support views">
           <button className={mode === "cases" ? "active" : ""} onClick={() => setMode("cases")} type="button">
             Cases <span>{data.cases.length}</span>
           </button>
