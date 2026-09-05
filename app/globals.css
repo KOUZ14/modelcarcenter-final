@@ -22,7 +22,7 @@ h2 { margin-bottom: 0; font-size: clamp(40px, 4.3vw, 68px); line-height: .98; le
 
 .site-header { position: absolute; z-index: 20; top: 0; left: 0; width: 100%; height: 86px; padding: 0 42px; color: var(--white); display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(255,255,255,.2); }
 .brand { display: inline-flex; align-items: center; gap: 12px; }
-.brand-mark { display: grid; place-items: center; height: 34px; min-width: 52px; padding: 0 8px; border: 1px solid currentColor; font-size: 11px; font-weight: 700; letter-spacing: .16em; }
+.brand-mark { display: grid; place-items: center; height: 36px; min-width: 52px; padding: 0 7px; color: #f7f6f3; background: var(--ink); border: 2px solid var(--accent); font-size: 11px; font-weight: 800; letter-spacing: .14em; }
 .brand-name { display: grid; font-size: 11px; line-height: 1.05; letter-spacing: .12em; }
 .brand-name b { font-weight: 800; }
 .main-nav { display: flex; align-items: center; gap: 34px; font-size: 14px; }
