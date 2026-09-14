@@ -23,6 +23,7 @@ import {
 } from "@/lib/account-rules";
 import { commitInventoryCsv, previewInventoryCsv } from "@/lib/csv-import";
 import { config } from "@/lib/config";
+import { productionReadiness } from "@/lib/production-readiness";
 import {
   notifyRestockSubscribers,
   parseProductAvailability,
@@ -107,6 +108,15 @@ export async function POST(request: Request) {
 }
 
 async function loadAdminSection(section: string) {
+  if (section === "production") {
+    const report = productionReadiness(config);
+    const adminConfigured = Boolean(process.env.ADMIN_EMAILS?.split(",").some((email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) && !email.includes("example.com")));
+    const bypassDisabled = process.env.ADMIN_DEV_BYPASS !== "true";
+    return { section, configurationReady: report.configurationReady && adminConfigured && bypassDisabled, checks: [...report.checks,
+      { id: "admin_allowlist", label: "Founder admin email is configured", passed: adminConfigured },
+      { id: "admin_bypass", label: "Development admin bypass is disabled", passed: bypassDisabled },
+    ] };
+  }
   const db = getDb();
   if (section === "overview") {
     const [

@@ -1,4 +1,5 @@
 import { config, requireConfig } from "./config.ts";
+import { assertLiveCheckoutConfigured } from "./production-readiness.ts";
 
 type StripeError = { error?: { message?: string; type?: string } };
 
@@ -7,6 +8,7 @@ async function stripeRequest<T>(
   init: { method?: string; body?: URLSearchParams; idempotencyKey?: string } = {},
 ): Promise<T> {
   const response = await fetch(`https://api.stripe.com${path}`, {
+    signal: AbortSignal.timeout(20_000),
     method: init.method ?? "GET",
     headers: {
       Authorization: `Bearer ${requireConfig("stripeSecretKey")}`,
@@ -131,6 +133,7 @@ export function buildCheckoutSessionBody(input: CheckoutSessionInput) {
 }
 
 export async function createCheckoutSession(input: CheckoutSessionInput) {
+  assertLiveCheckoutConfigured(config);
   const body = buildCheckoutSessionBody(input);
   return stripeRequest<StripeCheckoutSession>("/v1/checkout/sessions", {
     method: "POST",
@@ -423,6 +426,7 @@ export async function verifyStripeWebhook(rawBody: string, signatureHeader: stri
   return JSON.parse(rawBody) as {
     id: string;
     type: string;
+    livemode: boolean;
     data: { object: Record<string, unknown> };
   };
 }

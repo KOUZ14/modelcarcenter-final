@@ -5,6 +5,8 @@ import Image from "next/image";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { modelHuntMatches } from "@/lib/business";
 import { formatMoney as money } from "@/lib/format";
+import { ProductionReadiness } from "@/components/production-readiness";
+import type { ReadinessCheck } from "@/lib/production-readiness";
 import {
   EditableProductImage,
   ProductImageFields,
@@ -26,6 +28,7 @@ const tabs = [
   "orders",
   "tax",
   "resolution",
+  "production",
 ] as const;
 
 export function AdminDashboard({ adminEmail }: { adminEmail: string }) {
@@ -171,6 +174,7 @@ function AdminSection({
   action(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
 }) {
   if (tab === "overview") return <Overview data={data} />;
+  if (tab === "production") return <ProductionReadiness checks={(data.checks as ReadinessCheck[]) ?? []} configurationReady={data.configurationReady === true} />;
   if (tab === "sellers") return <Sellers data={data} action={action} />;
   if (tab === "products") return <Products data={data} action={action} />;
   if (tab === "import") return <Importer data={data} action={action} />;

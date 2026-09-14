@@ -1,4 +1,5 @@
-import { requireConfig } from "@/lib/config";
+import { config, requireConfig } from "@/lib/config";
+import { assertStripeEventMode } from "@/lib/production-readiness";
 import { processConnectAccountEvent } from "@/lib/orders";
 import { verifyStripeWebhook } from "@/lib/stripe";
 
@@ -16,6 +17,7 @@ export async function POST(request: Request) {
       signature,
       requireConfig("stripeConnectWebhookSecret"),
     );
+    assertStripeEventMode(event.livemode, config.stripeSecretKey);
     const result = await processConnectAccountEvent(event);
     return Response.json({ received: true, ...result });
   } catch (error) {

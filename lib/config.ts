@@ -37,6 +37,7 @@ export function parseFeeBasisPoints(
 }
 
 export const config = {
+  marketplaceMode: enumEnv("MARKETPLACE_MODE", "test", ["test", "live"]),
   siteUrl: textEnv("SITE_URL", "http://localhost:5173").replace(/\/$/, ""),
   supportEmail: textEnv("SUPPORT_EMAIL", "support@modelcarcenter.com"),
   emailFrom: textEnv("EMAIL_FROM", "Model Car Center <support@modelcarcenter.com>"),

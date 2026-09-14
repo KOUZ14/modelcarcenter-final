@@ -208,6 +208,7 @@ async function shippoRequest<T>(path: string, init: RequestInit = {}) {
   try {
     response = await fetch(`${SHIPPO_API}${path}`, {
       ...init,
+      signal: init.signal ?? AbortSignal.timeout(20_000),
       headers: {
         Authorization: `ShippoToken ${token}`,
         "Content-Type": "application/json",

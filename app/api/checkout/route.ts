@@ -5,12 +5,15 @@ import { getCurrentCollector } from "@/lib/collector-auth";
 import { isCurrentPolicyVersion, POLICY_VERSION } from "@/lib/legal";
 import { resolveCheckoutShipping } from "@/lib/checkout-shipping";
 import { calculateServerTotals } from "@/lib/business";
+import { config } from "@/lib/config";
+import { assertLiveCheckoutConfigured, LiveCheckoutUnavailable } from "@/lib/production-readiness";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
   let reservationId: string | null = null;
   try {
+    assertLiveCheckoutConfigured(config);
     const payload = await readJsonObject(request);
     if (!isCurrentPolicyVersion(payload.policyVersion)) {
       throw new Error("Accept the current marketplace policies before checkout.");
@@ -79,6 +82,9 @@ export async function POST(request: Request) {
     return Response.json({ url: session.url });
   } catch (error) {
     if (reservationId) await releaseReservation(reservationId).catch(console.error);
+    if (error instanceof LiveCheckoutUnavailable) {
+      return Response.json({ error: error.message }, { status: 503, headers: { "Cache-Control": "no-store" } });
+    }
     const message = error instanceof Error ? error.message : "Checkout could not be started.";
     const safe = /cart|product|inventory|available|seller|checkout|configured|payment/i.test(message)
       ? message

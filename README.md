@@ -65,12 +65,14 @@ Copy `.env.example` to `.env.local`. Never commit real values.
 | Variable | Purpose |
 | --- | --- |
 | `SITE_URL` | Public origin used in Checkout returns, email links, canonical URLs, and sitemap |
+| `MARKETPLACE_MODE` | `test` for development; `live` for real operation. Live checkout returns 503 until live credentials, email, and distinct webhook secrets pass configuration checks. |
 | `BETTER_AUTH_SECRET` | High-entropy secret (at least 32 characters) used to sign collector sessions and auth state |
 | `SUPPORT_EMAIL` | Customer-facing support and email reply-to address; use `support@modelcarcenter.com` |
 | `ADMIN_EMAILS` | Comma-separated ChatGPT-authenticated emails allowed into `/admin` |
 | `ADMIN_DEV_BYPASS` | Explicit local-only bypass; ignored when `NODE_ENV=production` |
 | `STRIPE_SECRET_KEY` | Platform secret key; test key during development |
 | `STRIPE_WEBHOOK_SECRET` | Signing secret for `/api/stripe/webhook` |
+| `STRIPE_CONNECT_WEBHOOK_SECRET` | Separate signing secret for `/api/stripe/webhook-connect`; must match a connected-account endpoint in the same Stripe mode |
 | `STRIPE_API_VERSION` | Pinned Stripe API version; default `2026-02-25.clover` |
 | `COLLECTOR_MARKETPLACE_FEE_BPS` | Collector marketplace commission on item subtotal in basis points; default `850` (8.5%) |
 | `PROFESSIONAL_MARKETPLACE_FEE_BPS` | Standard professional-store commission on item subtotal; default `700` (7%) |
@@ -312,6 +314,23 @@ npm run validate:artifact
 Tests cover search normalization, product availability modes, preorder release validation and ship anchors, server totals, fee calculation, the single-seller rule, Model Hunt validation, CSV validation/upsert planning, Stripe signature and event idempotency logic, inventory reservation/release/completion, safe auth redirects, resource ownership, seller-only fulfillment, wishlist deduplication, guest-data merging, verified legacy-record claims, moderation gates, image validation, high-value shipping rules, package validation, combined-shipping identity, handling reminders, tracking-state mapping, and the built marketplace artifact.
 
 ## Production launch checklist
+
+The public production origin is `https://modelcarcenter.com`. Set `SITE_URL`
+to that exact origin and `MARKETPLACE_MODE=live` in Sites runtime settings.
+Redeploy a saved version after changing runtime settings. Preserve existing
+authentication secrets; rotating them invalidates sessions.
+
+`/admin` → **Production** reports configuration checks without exposing secrets.
+`GET /api/health` checks the commerce database tables and returns a minimal,
+uncached status. In live mode, missing prerequisites produce HTTP 503 and
+checkout is blocked before inventory reservation or Stripe session creation.
+Neither check certifies provider activation, webhook delivery, tax setup, or
+successful fulfillment. Those require the operational checks below.
+
+Do not copy test connected-account IDs into live onboarding or replace webhook
+secrets with randomly generated values. Register each endpoint in Stripe live
+mode and use that endpoint's actual signing secret. Signed webhook events with
+a mode different from the configured Stripe API key are rejected.
 
 Before moving from test keys to live operation:
 

@@ -33,6 +33,7 @@ export async function sendEmail(input: SendEmailInput) {
     return { sent: false as const, reason: "not_configured" as const };
   }
   const response = await fetch("https://api.resend.com/emails", {
+    signal: AbortSignal.timeout(20_000),
     method: "POST",
     headers: {
       Authorization: `Bearer ${config.resendApiKey}`,
