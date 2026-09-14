@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import Image from "next/image";
+import { BrandLogo } from "@/components/brand-logo";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { modelHuntMatches } from "@/lib/business";
 import { formatMoney as money } from "@/lib/format";
@@ -91,11 +92,8 @@ export function AdminDashboard({ adminEmail }: { adminEmail: string }) {
     <div className="admin-shell">
       <header className="admin-header">
         <div>
-          <Link className="brand" href="/">
-            <span className="brand-mark">MCC</span>
-            <span className="brand-name">
-              MODEL CAR <b>CENTER</b>
-            </span>
+          <Link className="brand" href="/" aria-label="Model Car Center home">
+            <BrandLogo priority/>
           </Link>
           <span>Founder admin</span>
         </div>

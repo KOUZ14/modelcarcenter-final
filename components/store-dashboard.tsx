@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { BrandLogo } from "@/components/brand-logo";
 import { FormEvent, useMemo, useState } from "react";
 import { formatMoney, formatUtcDate, formatUtcDateTime } from "@/lib/format";
 import {
@@ -248,7 +249,7 @@ export function StoreDashboard({
     <div className="store-layout">
       <aside className="store-sidebar">
         <Link className="store-brand" href="/">
-          <span>MCC</span>
+          <BrandLogo priority/>
           <b>Store Console</b>
         </Link>
         <div className="store-identity">
