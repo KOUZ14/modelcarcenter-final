@@ -1824,6 +1824,12 @@ function TaxCenter({
     }
   }
   const reports = (data.reports as TaxYearReport[]) ?? [];
+  const excludedTestOrders = (data.excludedTestOrders as Array<{
+    id: string;
+    orderNumber: string;
+    year: number | null;
+    reason: string | null;
+  }>) ?? [];
   const currentYear = Number(data.currentYear ?? new Date().getFullYear());
   const profile = data.profile as TaxProfile;
   const tasks = (data.tasks as TaxTask[]) ?? [];
@@ -1838,6 +1844,7 @@ function TaxCenter({
     ...new Set([
       currentYear,
       ...reports.map((row) => row.year),
+      ...excludedTestOrders.flatMap((row) => row.year ? [row.year] : []),
       ...ledgerByYear.map((row) => row.year),
       ...((data.ledger as LedgerEntry[]) ?? []).map((row) => Number(row.occurredAt.slice(0, 4))),
       ...tasks.map((row) => Number((row.periodStart || row.dueAt).slice(0, 4))),
@@ -1846,6 +1853,7 @@ function TaxCenter({
   ].sort((a, b) => b - a);
   const [year, setYear] = useState(currentYear);
   const report = reports.find((row) => row.year === year);
+  const excludedForYear = excludedTestOrders.filter((row) => row.year === year);
   const totals = report?.totals ?? EMPTY_TAX_TOTALS;
   const ledgerSummary = ledgerByYear.find((row) => row.year === year) ?? {
     expensesCents: 0,
@@ -1946,15 +1954,23 @@ function TaxCenter({
       <section className="admin-panel tax-monthly-panel">
         <div className="panel-heading">
           <div><p className="eyebrow">Monthly reconciliation</p><h2>California filing support</h2></div>
-          <small>Orders are grouped by payment date in California time. Refunds adjust the original sale month. This is an order reconciliation view; verify refund timing and partial-refund tax in Stripe before filing. The CSV contains orders only.</small>
+          <small>Orders are grouped by payment date in California time. Refunds adjust the original sale month. This is an order reconciliation view; verify refund timing and partial-refund tax in Stripe before filing. The CSV contains orders only. Orders marked as tests are excluded from tax totals and the CSV.</small>
         </div>
+        {excludedForYear.length > 0 && (
+          <div role="note">
+            <p><b>{excludedForYear.length} test {excludedForYear.length === 1 ? "order excluded" : "orders excluded"} for {year}.</b> Order history is preserved.</p>
+            <ul>{excludedForYear.map((order) => (
+              <li key={order.id}>{order.orderNumber}{order.reason ? `: ${order.reason}` : ""}</li>
+            ))}</ul>
+          </div>
+        )}
         <div className="admin-table-wrap">
           <table>
             <thead><tr><th>Month</th><th>Orders</th><th>CA merchandise</th><th>CA shipping</th><th>CA tax collected</th><th>After full refunds</th><th>All refunds</th></tr></thead>
             <tbody>
               {report?.months.length ? report.months.map((month) => (
                 <tr key={month.month}><td><b>{month.label}</b></td><td>{month.orderCount}</td><td>{money(month.californiaMerchandiseCents, "usd")}</td><td>{money(month.californiaShippingCents, "usd")}</td><td>{money(month.californiaTaxCollectedCents, "usd")}</td><td>{money(month.californiaTaxAfterFullRefundsCents, "usd")}</td><td>{money(month.refundsCents, "usd")}</td></tr>
-              )) : <tr><td colSpan={7}>No paid orders recorded for {year}.</td></tr>}
+              )) : <tr><td colSpan={7}>No reportable paid orders for {year}.</td></tr>}
             </tbody>
           </table>
         </div>
@@ -2282,6 +2298,8 @@ function shortDateTime(value: string) {
 type AdminOrder = {
   id: string;
   orderNumber: string;
+  isTestOrder: boolean;
+  testOrderReason: string | null;
   sellerName: string;
   buyerEmail: string;
   buyerName: string;
@@ -2489,6 +2507,7 @@ function OrderPanel({
             {order.fulfillmentStatus}
           </span>
           <h2>{order.orderNumber}</h2>
+          {order.isTestOrder && <p><b>Test order — excluded from tax reports.</b>{order.testOrderReason ? ` ${order.testOrderReason}` : ""}</p>}
           <p>
             {order.sellerName} · {order.buyerName} · {order.buyerEmail}
           </p>

@@ -14,6 +14,7 @@ function order(overrides = {}) {
   return {
     id: String(overrides.orderNumber ?? "MCC-1001"),
     orderNumber: "MCC-1001",
+    isTestOrder: false,
     currency: "usd",
     subtotalCents: 10_000,
     shippingCents: 1_000,
@@ -62,6 +63,19 @@ test("shipping state parsing is defensive", () => {
   assert.equal(shippingState('{"address":{"state":"Ca"}}'), "CA");
   assert.equal(shippingState('{"state":"ny"}'), "NY");
   assert.equal(shippingState("bad-json"), null);
+});
+
+test("test orders never contribute tax totals or months, and genuine refunds remain", () => {
+  const testOrder = order({ isTestOrder: true, paymentStatus: "refunded", paidAt: "2026-08-20 00:38:09" });
+  assert.deepEqual(buildTaxYearReports([testOrder]), []);
+  const realOrders = [
+    order({ paidAt: "2026-09-01T12:00:00Z" }),
+    order({ paymentStatus: "refunded", refundedAmountCents: 11_900, paidAt: "2026-09-02T12:00:00Z" }),
+  ];
+  const reports = buildTaxYearReports([testOrder, ...realOrders]);
+  assert.deepEqual(reports, buildTaxYearReports(realOrders));
+  assert.equal(reports[0].totals.orderCount, 2);
+  assert.deepEqual(reports[0].months.map((row) => row.label), ["September"]);
 });
 
 test("readiness requires external confirmations and automatic tax", () => {

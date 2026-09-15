@@ -330,6 +330,8 @@ async function loadAdminSection(section: string) {
         .select({
           id: orders.id,
           orderNumber: orders.orderNumber,
+          isTestOrder: orders.isTestOrder,
+          testOrderReason: orders.testOrderReason,
           sellerName: sellers.storeName,
           buyerEmail: orders.buyerEmail,
           buyerName: orders.buyerName,
@@ -432,6 +434,8 @@ async function loadAdminSection(section: string) {
           .select({
             id: orders.id,
             orderNumber: orders.orderNumber,
+            isTestOrder: orders.isTestOrder,
+            testOrderReason: orders.testOrderReason,
             currency: orders.currency,
             subtotalCents: orders.subtotalCents,
             shippingCents: orders.shippingCents,
@@ -482,6 +486,12 @@ async function loadAdminSection(section: string) {
       automaticTaxEnabled: config.automaticTax,
       readiness: taxReadiness(profile, config.automaticTax),
       reports: buildTaxYearReports(taxOrders),
+      excludedTestOrders: taxOrders.filter((order) => order.isTestOrder).map((order) => ({
+        id: order.id,
+        orderNumber: order.orderNumber,
+        year: Number(taxDate(order.paidAt ?? order.createdAt)?.slice(0, 4)) || null,
+        reason: order.testOrderReason,
+      })),
       ledgerByYear: [...ledgerByYear.entries()].map(([year, summary]) => ({
         year,
         ...summary,
@@ -1660,7 +1670,10 @@ async function taxExportResponse(yearInput: string | null) {
       paymentStatus: orders.paymentStatus,
     })
     .from(orders)
-    .where(sql`${orders.paymentStatus} IN ('paid', 'partially_refunded', 'refunded')`)
+    .where(and(
+      eq(orders.isTestOrder, false),
+      sql`${orders.paymentStatus} IN ('paid', 'partially_refunded', 'refunded')`,
+    ))
     .orderBy(asc(orders.paidAt));
   const header = [
     "order_number",

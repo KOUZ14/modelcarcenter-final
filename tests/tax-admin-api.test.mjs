@@ -136,6 +136,40 @@ test("admin tax API persists and reloads profiles, deadlines, ledger, seller sta
     assert.equal((await get()).profile.businessStartedAt, "2026-05-22");
   });
 
+  await t.test("test-order migration changes only the confirmed record and adds an audit entry", async () => {
+    const migrationDb = new DatabaseSync(":memory:");
+    try {
+      for (const name of (await readdir(join(root, "drizzle"))).filter((name) => name.endsWith(".sql") && name < "0019").sort()) {
+        migrationDb.exec(await readFile(join(root, "drizzle", name), "utf8"));
+      }
+      migrationDb.exec("INSERT INTO sellers (id, slug, store_name, contact_name, contact_email) VALUES ('s', 's', 'Store', 'Owner', 'owner@example.test')");
+      const insert = migrationDb.prepare("INSERT INTO orders (id, order_number, seller_id, buyer_email, currency, stripe_checkout_session_id, subtotal_cents, shipping_cents, platform_fee_cents, total_cents, payment_status, refunded_amount_cents, paid_at) VALUES (?, ?, 's', 'buyer@example.test', 'usd', ?, 900, 10, 90, 910, 'refunded', ?, '2026-08-20 00:38:09')");
+      const id = "6af33a50-58fd-4c7a-9acc-191c457b4384";
+      insert.run(id, "MCC-20260820-1B5074", "cs_confirmed", 0);
+      insert.run("similar-real-order", "REAL-REFUND", "cs_real", 910);
+      const before = migrationDb.prepare("SELECT * FROM orders WHERE id = ?").get(id);
+      const migration = await readFile(join(root, "drizzle/0019_tax_test_orders.sql"), "utf8");
+      migrationDb.exec(migration);
+      const after = migrationDb.prepare("SELECT * FROM orders WHERE id = ?").get(id);
+      assert.equal(after.is_test_order, 1);
+      assert.match(after.test_order_reason, /Owner confirmed/);
+      for (const key of Object.keys(before).filter((key) => key !== "updated_at")) {
+        assert.equal(after[key], before[key], `${key} is preserved`);
+      }
+      const real = migrationDb.prepare("SELECT * FROM orders WHERE id = 'similar-real-order'").get();
+      assert.equal(real.is_test_order, 0);
+      assert.equal(real.refunded_amount_cents, 910);
+      const auditQuery = "SELECT * FROM tax_activity WHERE action = 'test_order_excluded'";
+      assert.equal(migrationDb.prepare(auditQuery).all().length, 1);
+      assert.equal(migrationDb.prepare(auditQuery).get().subject_id, id);
+      // A repeated data correction is idempotent; schema changes run once.
+      migrationDb.exec(migration.slice(migration.indexOf("-- The owner")));
+      assert.equal(migrationDb.prepare(auditQuery).all().length, 1);
+    } finally {
+      migrationDb.close();
+    }
+  });
+
   await t.test("calendar creation is repeatable and refresh preserves edits", async () => {
     assert.equal((await post({ action: "seed_tax_calendar", year: 2026 })).created, 8);
     assert.equal((await post({ action: "seed_tax_calendar", year: 2026 })).created, 0);
@@ -219,6 +253,27 @@ test("admin tax API persists and reloads profiles, deadlines, ledger, seller sta
     assert.doesNotMatch(await next.text(), /TEST-YEAR-END/);
   });
 
+  await t.test("tax reload and CSV exclude marked tests while preserving real sales during prelaunch", async () => {
+    const insert = sqlite.prepare("INSERT INTO orders (id, order_number, seller_id, buyer_email, currency, stripe_checkout_session_id, subtotal_cents, shipping_cents, platform_fee_cents, total_cents, payment_status, refunded_amount_cents, paid_at, is_test_order, test_order_reason) VALUES (?, ?, 'tax-seller', 'buyer@example.test', 'usd', ?, 900, 10, 90, 910, 'refunded', ?, ?, ?, ?)");
+    insert.run("marked-test", "EXCLUDED-TEST", "cs_excluded", 0, "2026-08-20 00:38:09", 1, "Owner confirmed test order");
+    insert.run("real-refund", "REAL-REFUND", "cs_refund", 910, "2026-06-20 00:38:09", 0, null);
+    const profile = (await get()).profile;
+    await post({ ...profile, action: "save_tax_profile", businessLaunchStatus: "prelaunch" });
+    const data = await get();
+    assert.equal(data.reports[0].totals.orderCount, 2);
+    assert.equal(data.reports[0].totals.refundsCents, 910);
+    assert.deepEqual(data.reports[0].months.map((row) => row.label), ["June", "December"]);
+    assert.deepEqual(data.excludedTestOrders, [{ id: "marked-test", orderNumber: "EXCLUDED-TEST", year: 2026, reason: "Owner confirmed test order" }]);
+    const csv = await (await route.GET(new Request("http://localhost/api/admin?section=tax_export&year=2026"))).text();
+    assert.doesNotMatch(csv, /EXCLUDED-TEST/);
+    assert.match(csv, /REAL-REFUND/);
+    assert.match(csv, /TEST-YEAR-END/);
+    const orders = await (await route.GET(new Request("http://localhost/api/admin?section=orders"))).json();
+    assert.equal(orders.orders.find((order) => order.id === "marked-test").isTestOrder, true);
+    assert.equal(sqlite.prepare("SELECT count(*) AS count FROM orders").get().count, 3);
+    await post({ ...profile, action: "save_tax_profile" });
+  });
+
   await t.test("tax UI renders the saved date, amounts, checklist, and calendar controls", async () => {
     const componentSource = await readFile(join(root, "components/admin-dashboard.tsx"), "utf8");
     const viewBuild = await build({
@@ -243,6 +298,8 @@ test("admin tax API persists and reloads profiles, deadlines, ledger, seller sta
     assert.match(html, /aria-busy="false"/);
     assert.match(html, /Payment recorded/);
     assert.match(html, /missing Stripe processing fees/);
+    assert.match(html, /1 test order excluded for 2026/);
+    assert.match(html, /EXCLUDED-TEST/);
     assert.doesNotMatch(html, /Invalid date|NaN/);
     const prelaunch = await get();
     prelaunch.profile = { ...prelaunch.profile, businessLaunchStatus: "prelaunch", businessStartedAt: null };
@@ -251,5 +308,9 @@ test("admin tax API persists and reloads profiles, deadlines, ledger, seller sta
     assert.match(beforeLaunchHtml, /Prelaunch — review/);
     assert.match(beforeLaunchHtml, /assigned returns even with no sales/);
     assert.doesNotMatch(beforeLaunchHtml, /Before business start — review/);
+    const noSalesHtml = renderToStaticMarkup(createElement(TaxCenter, { data: { ...prelaunch, reports: [] }, action: async () => ({ ok: true }) }));
+    assert.match(noSalesHtml, /No reportable paid orders for 2026/);
+    assert.match(noSalesHtml, /1 test order excluded for 2026/);
+    assert.doesNotMatch(noSalesHtml, /missing Stripe processing fees|Invalid date|NaN/);
   });
 });

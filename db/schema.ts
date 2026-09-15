@@ -764,6 +764,8 @@ export const orders = sqliteTable(
   {
     id: text("id").primaryKey(),
     orderNumber: text("order_number").notNull(),
+    isTestOrder: integer("is_test_order", { mode: "boolean" }).notNull().default(false),
+    testOrderReason: text("test_order_reason"),
     sellerId: text("seller_id")
       .notNull()
       .references(() => sellers.id),

@@ -1,6 +1,7 @@
 export type TaxOrderInput = {
   id: string;
   orderNumber: string;
+  isTestOrder: boolean;
   currency: string;
   subtotalCents: number;
   shippingCents: number;
@@ -219,6 +220,7 @@ export function buildTaxYearReports(orders: TaxOrderInput[]): TaxYearReport[] {
     { totals: TaxReportTotals; months: Map<number, TaxReportTotals> }
   >();
   for (const order of orders) {
+    if (order.isTestOrder) continue;
     if (!["paid", "partially_refunded", "refunded"].includes(order.paymentStatus))
       continue;
     const paidDate = taxDate(order.paidAt ?? order.createdAt);
