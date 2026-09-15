@@ -171,7 +171,7 @@ export default async function ProductPage({
                 </dd>
               </div>
               <div>
-                <dt>Included</dt>
+                <dt>Extras Included</dt>
                 <dd>{product.accessories || "Not specified"}</dd>
               </div>
               <div>

@@ -55,9 +55,8 @@ export function SellerReputation({
       <section className="reputation-compact" aria-label="Verified seller record">
         <div className="reputation-compact-heading">
           <div>
-            <p className="eyebrow">Seller transparency</p>
+            <p className="eyebrow">Seller Information</p>
             <h2>Verified seller record</h2>
-            <p>Marketplace activity, not self-reported claims</p>
           </div>
           <Link href={`/sellers/${sellerSlug}#reputation`}>Full history</Link>
         </div>

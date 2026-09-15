@@ -130,28 +130,35 @@ export function MarketplacePage({
   return (
     <main className="marketplace-page">
       <SiteHeader />
-      <section className="marketplace-hero">
+      <section className="marketplace-hero" aria-labelledby="marketplace-title">
         <div className="shell marketplace-hero-layout">
           <div>
-            <p className="eyebrow light">The collector marketplace</p>
-            <h1>Every live listing. One place.</h1>
-            <p>
-              Browse model cars from specialist stores and individual
-              collectors, then narrow the shelf by the details that matter.
-            </p>
+            <h1 id="marketplace-title">Marketplace</h1>
+            <p>Browse model cars from stores and collectors.</p>
           </div>
-          <form className="marketplace-search" onSubmit={runSearch}>
-            <label className="sr-only" htmlFor="marketplace-query">
-              Search all marketplace listings
+          <form
+            className="marketplace-search"
+            role="search"
+            aria-label="Marketplace"
+            onSubmit={runSearch}
+          >
+            <label htmlFor="marketplace-query">
+              Search by make, model, scale, or manufacturer
             </label>
-            <Icon name="search" />
-            <input
-              id="marketplace-query"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Make, model, scale, manufacturer, or keyword"
-            />
-            <button type="submit">Search all listings</button>
+            <div className="marketplace-search-controls">
+              <div className="marketplace-search-field">
+                <Icon name="search" />
+                <input
+                  id="marketplace-query"
+                  name="q"
+                  type="search"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="e.g. Porsche 911"
+                />
+              </div>
+              <button type="submit">Search</button>
+            </div>
           </form>
         </div>
       </section>
@@ -160,10 +167,7 @@ export function MarketplacePage({
         <div className="shell marketplace-layout">
           <aside className="marketplace-filters" id="filters">
             <div className="marketplace-filter-heading">
-              <div>
-                <p className="eyebrow">Refine the shelf</p>
-                <h2>Filters</h2>
-              </div>
+              <h2>Filters</h2>
               {filtered && (
                 <button type="button" onClick={clearFilters}>
                   Clear all
@@ -243,10 +247,7 @@ export function MarketplacePage({
           <div className="marketplace-results">
             <div className="marketplace-results-heading">
               <div>
-                <p className="eyebrow">
-                  {filtered ? "Your search" : "Available now"}
-                </p>
-                <h2>{filtered ? "Matching models" : "All listings"}</h2>
+                <h2>{filtered ? "Search results" : "All listings"}</h2>
                 {!loading && !error && (
                   <p className="marketplace-result-count" aria-live="polite">
                     {catalog.pagination.total} live listing
