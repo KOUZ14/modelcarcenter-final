@@ -10,6 +10,7 @@ import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
 import { SellerReputation } from "@/components/seller-reputation";
 import { getSellerReputation } from "@/lib/reputation";
+import { additionalShippingPolicy } from "@/lib/shipping-display";
 
 export const dynamic = "force-dynamic";
 
@@ -46,6 +47,10 @@ export default async function ProductPage({
 }) {
   const product = await getProductBySlug((await params).slug);
   if (!product) notFound();
+  const shippingNote = additionalShippingPolicy(
+    product.shippingPolicySummary,
+    product.handlingTimeBusinessDays,
+  );
   const [related, reputation] = await Promise.all([
     getRelatedProducts(product),
     getSellerReputation(product.sellerId),
@@ -210,15 +215,20 @@ export default async function ProductPage({
                 <dt>Shipping</dt>
                 <dd>
                   {product.shippingMode === "calculated"
-                    ? "Buyer chooses from calculated carrier services"
+                    ? "Shipping calculated at checkout."
                     : product.shippingMode === "free"
-                      ? "Free seller shipping"
-                      : `${formatMoney(product.defaultShippingCents, product.currency)} flat shipping`}
+                      ? "Free shipping."
+                      : `${formatMoney(product.defaultShippingCents, product.currency)} flat-rate shipping per order.`}
                   <br />
-                  Ships within {product.handlingTimeBusinessDays} business day
+                  Dispatches within {product.handlingTimeBusinessDays} business day
                   {product.handlingTimeBusinessDays === 1 ? "" : "s"}
-                  <br />
-                  {product.shippingPolicySummary}
+                  {product.availabilityType === "preorder" ? " after release" : ""}.
+                  {shippingNote && (
+                    <>
+                      <br />
+                      {shippingNote}
+                    </>
+                  )}
                 </dd>
               </div>
               <div>
