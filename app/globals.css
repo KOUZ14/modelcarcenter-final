@@ -25,7 +25,6 @@ h2 { margin-bottom: 0; font-size: clamp(40px, 4.3vw, 68px); line-height: .98; le
 /* Frame the original 782 x 319 image at x=130, y=101 with 4px of clear space around the artwork. */
 .brand-logo { position: relative; display: block; flex: 0 0 auto; width: 220px; aspect-ratio: 522 / 102; overflow: hidden; }
 .brand-logo img { position: absolute; top: -99.019608%; left: -24.904215%; display: block; width: 149.808429%; max-width: none; height: auto; }
-.site-header.inner .brand { padding: 10px 12px; background: var(--ink); }
 .footer-brand .brand-logo { width: 264px; }
 .main-nav { display: flex; align-items: center; gap: 34px; font-size: 14px; }
 .main-nav a { position: relative; }
@@ -208,7 +207,6 @@ footer { padding-top: 70px; color: white; background: var(--ink); }
   /* Keep the MCC monogram visible while leaving room for mobile navigation. */
   .site-header .brand-logo, .admin-header .brand-logo { width: 76px; aspect-ratio: 234 / 102; }
   .site-header .brand-logo img, .admin-header .brand-logo img { left: -55.555556%; width: 334.188034%; }
-  .site-header.inner .brand { padding: 8px; }
   .hero h1 { font-size: 61px; }
   .hero-copy { max-width: 95%; }
   .scale-grid, .product-grid, .benefit-grid, .brand-grid { grid-template-columns: 1fr; }
