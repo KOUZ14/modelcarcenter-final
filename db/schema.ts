@@ -615,6 +615,9 @@ export const communitySubscribers = sqliteTable(
 
 export const taxProfiles = sqliteTable("tax_profiles", {
   id: text("id").primaryKey(),
+  businessStartedAt: text("business_started_at"),
+  businessApprovedAt: text("business_approved_at"),
+  businessLaunchStatus: text("business_launch_status", { enum: ["not_set", "prelaunch", "launched"] }).notNull().default("not_set"),
   legalStructure: text("legal_structure", {
     enum: ["sole_proprietor"],
   })

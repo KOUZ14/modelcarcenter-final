@@ -56,8 +56,10 @@ import { registerShippoTracking } from "@/lib/shippo";
 import { recordOrderTrackingUpdate } from "@/lib/shipping";
 import {
   buildTaxYearReports,
+  isTaxDate,
   shippingState,
   soleProprietorPlanningCalendar,
+  taxDate,
   taxReadiness,
 } from "@/lib/tax-admin";
 import {
@@ -88,7 +90,9 @@ export async function GET(request: Request) {
     if (section === "community_export") {
       return communityExportResponse();
     }
-    return Response.json(await loadAdminSection(section));
+    return Response.json(await loadAdminSection(section), {
+      headers: { "Cache-Control": "private, no-store" },
+    });
   } catch (error) {
     return routeError(error, "Admin data is temporarily unavailable.");
   }
@@ -403,12 +407,11 @@ async function loadAdminSection(section: string) {
     const [profileRows, taskRows, ledgerRows, activityRows, sellerRows, taxOrders] =
       await Promise.all([
         db.select().from(taxProfiles).where(eq(taxProfiles.id, "primary")).limit(1),
-        db.select().from(taxTasks).orderBy(asc(taxTasks.dueAt)).limit(500),
+        db.select().from(taxTasks).orderBy(asc(taxTasks.dueAt)),
         db
           .select()
           .from(businessLedgerEntries)
-          .orderBy(desc(businessLedgerEntries.occurredAt))
-          .limit(1_000),
+          .orderBy(desc(businessLedgerEntries.occurredAt)),
         db.select().from(taxActivity).orderBy(desc(taxActivity.createdAt)).limit(80),
         db
           .select({
@@ -487,7 +490,7 @@ async function loadAdminSection(section: string) {
       ledger: ledgerRows,
       activity: activityRows,
       sellers: sellerRows,
-      currentYear: new Date().getUTCFullYear(),
+      currentYear: Number(taxDate()!.slice(0, 4)),
     };
   }
   if (section === "resolution") {
@@ -1227,6 +1230,9 @@ async function refundOrder(payload: Record<string, unknown>) {
 function defaultTaxProfile() {
   return {
     id: "primary",
+    businessStartedAt: null,
+    businessApprovedAt: null,
+    businessLaunchStatus: "not_set" as const,
     legalStructure: "sole_proprietor" as const,
     homeState: "CA",
     productTaxCode: "txcd_99999999",
@@ -1260,13 +1266,9 @@ function allowedValue<T extends string>(
 }
 
 function optionalDate(value: unknown, field: string) {
-  const cleaned = cleanText(value, 10);
+  const cleaned = typeof value === "string" ? value.trim() : value == null ? "" : String(value);
   if (!cleaned) return null;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(cleaned)) {
-    throw new ValidationError(`${field} must be a valid date.`);
-  }
-  const parsed = new Date(`${cleaned}T12:00:00Z`);
-  if (Number.isNaN(parsed.getTime())) {
+  if (!isTaxDate(cleaned)) {
     throw new ValidationError(`${field} must be a valid date.`);
   }
   return cleaned;
@@ -1295,6 +1297,9 @@ async function saveTaxProfile(
 ) {
   const values = {
     id: "primary",
+    businessStartedAt: optionalDate(payload.businessStartedAt, "Business start date"),
+    businessApprovedAt: optionalDate(payload.businessApprovedAt, "Business approval date"),
+    businessLaunchStatus: allowedValue(payload.businessLaunchStatus ?? "not_set", "launch status", ["not_set", "prelaunch", "launched"] as const),
     legalStructure: "sole_proprietor" as const,
     homeState: "CA",
     productTaxCode: "txcd_99999999",
@@ -1373,13 +1378,18 @@ async function createTaxTask(
     payload.amountDueCents === null || payload.amountDueCents === ""
       ? null
       : integer(payload.amountDueCents, "amountDueCents", 0, 1_000_000_000);
+  const periodStart = optionalDate(payload.periodStart, "Period start");
+  const periodEnd = optionalDate(payload.periodEnd, "Period end");
+  if (periodStart && periodEnd && periodStart > periodEnd) {
+    throw new ValidationError("Period end must be on or after period start.");
+  }
   await getDb().insert(taxTasks).values({
     id,
     kind,
     title,
     jurisdiction: cleanText(payload.jurisdiction, 100),
-    periodStart: optionalDate(payload.periodStart, "Period start"),
-    periodEnd: optionalDate(payload.periodEnd, "Period end"),
+    periodStart,
+    periodEnd,
     dueAt,
     amountDueCents,
     confirmationReference: "",
@@ -1420,17 +1430,26 @@ async function updateTaxTask(
       ? null
       : integer(payload.amountPaidCents, "amountPaidCents", 0, 1_000_000_000);
   const now = new Date().toISOString();
+  const dueAt = payload.dueAt === undefined ? task.dueAt : optionalDate(payload.dueAt, "Due date");
+  if (!dueAt) throw new ValidationError("Choose a due date.");
+  const amountDueCents = payload.amountDueCents === undefined
+    ? task.amountDueCents
+    : payload.amountDueCents === null || payload.amountDueCents === ""
+      ? null
+      : integer(payload.amountDueCents, "amountDueCents", 0, 1_000_000_000);
   await getDb()
     .update(taxTasks)
     .set({
       status,
+      dueAt,
+      amountDueCents,
       amountPaidCents,
       confirmationReference: cleanText(payload.confirmationReference, 300),
       notes: cleanText(payload.notes, 2_000),
       filedAt:
-        ["filed", "paid"].includes(status) && !task.filedAt
+        status === "filed" && !task.filedAt
           ? now
-          : status === "upcoming" || status === "ready"
+          : ["upcoming", "ready", "not_required"].includes(status)
             ? null
             : task.filedAt,
       paidAt:
@@ -1460,7 +1479,32 @@ async function seedTaxCalendar(
   const year = integer(payload.year, "year", 2024, 2100);
   const tasks = soleProprietorPlanningCalendar(year);
   let created = 0;
+  let updated = 0;
   for (const task of tasks) {
+    // Repair untouched legacy planning rows without overwriting recorded work.
+    const existing = await getDb().select().from(taxTasks)
+      .where(eq(taxTasks.calendarKey, task.calendarKey)).limit(1);
+    const previous = existing[0];
+    if (previous) {
+      const legacyNotes = [
+        "Planning date from the standard sole-proprietor calendar; confirm the amount and any holiday adjustment before paying.",
+        "California’s standard installment pattern is 30%, 40%, 0%, 30%. Confirm the amount using Form 540-ES.",
+        "Schedule C and Schedule SE flow through the individual return. Confirm any weekend, holiday, or extension adjustment.",
+      ];
+      if (previous.status === "upcoming" && previous.updatedAt === previous.createdAt &&
+        previous.amountDueCents == null && previous.amountPaidCents == null &&
+        !previous.filedAt && !previous.paidAt && !previous.confirmationReference &&
+        legacyNotes.includes(previous.notes) &&
+        (previous.dueAt !== task.dueAt || previous.periodStart !== task.periodStart ||
+          previous.periodEnd !== task.periodEnd || previous.notes !== task.notes)) {
+        const result = await getDb().update(taxTasks).set({
+          dueAt: task.dueAt, periodStart: task.periodStart, periodEnd: task.periodEnd,
+          notes: task.notes, updatedBy: actorEmail, updatedAt: new Date().toISOString(),
+        }).where(and(eq(taxTasks.id, previous.id), eq(taxTasks.updatedAt, previous.updatedAt)));
+        updated += Number((result as { meta?: { changes?: number } }).meta?.changes ?? 0);
+      }
+      continue;
+    }
     const result = await getDb()
       .insert(taxTasks)
       .values({
@@ -1476,10 +1520,10 @@ async function seedTaxCalendar(
     action: "calendar_seeded",
     subjectType: "tax_calendar",
     subjectId: String(year),
-    summary: `Added the ${year} sole-proprietor planning calendar (${created} new items).`,
+    summary: `Saved the ${year} sole-proprietor planning calendar (${created} new items, ${updated} refreshed).`,
     actorEmail,
   });
-  return { created };
+  return { created, updated };
 }
 
 async function createLedgerEntry(
@@ -1591,7 +1635,7 @@ async function saveSellerTaxStatus(
 }
 
 async function taxExportResponse(yearInput: string | null) {
-  const currentYear = new Date().getUTCFullYear();
+  const currentYear = Number(taxDate()!.slice(0, 4));
   const year = yearInput ? Number(yearInput) : currentYear;
   if (!Number.isInteger(year) || year < 2024 || year > 2100) {
     throw new ValidationError("Choose a valid export year.");
@@ -1637,8 +1681,7 @@ async function taxExportResponse(yearInput: string | null) {
   ];
   const csvRows = rows
     .filter((row) => {
-      const parsed = new Date(row.paidAt ?? row.createdAt);
-      return !Number.isNaN(parsed.getTime()) && parsed.getUTCFullYear() === year;
+      return Number(taxDate(row.paidAt ?? row.createdAt)?.slice(0, 4)) === year;
     })
     .map((row) => [
       row.orderNumber,
