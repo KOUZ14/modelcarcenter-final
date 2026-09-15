@@ -126,13 +126,6 @@ export default async function ProductPage({
               · Model: {formatCondition(product.modelCondition)}
             </p>
             <ProductPurchase product={product} />
-            {reputation && (
-              <SellerReputation
-                reputation={reputation}
-                sellerSlug={product.sellerSlug}
-                compact
-              />
-            )}
           </aside>
         </div>
         <section
@@ -238,6 +231,13 @@ export default async function ProductPage({
             </dl>
           </div>
         </section>
+        {reputation && (
+          <SellerReputation
+            reputation={reputation}
+            sellerSlug={product.sellerSlug}
+            compact
+          />
+        )}
         {related.length > 0 && (
           <section className="related-section">
             <div className="section-heading">
