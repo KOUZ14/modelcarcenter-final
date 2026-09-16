@@ -18,11 +18,10 @@ import {
   wishlistItems,
 } from "@/db/schema";
 import {
-  cartMergeDecision,
   mergeCartItems,
   uniqueWishlistIds,
 } from "./account-rules";
-import { loadAuthoritativeCart, type RequestedCartItem } from "./inventory";
+import { loadAuthoritativeCartItems, type RequestedCartItem } from "./inventory";
 import { POLICY_VERSION } from "./legal";
 import { getVerifiedFeedbackEligibility } from "./reputation-rules";
 import type { CartItem } from "./types";
@@ -98,6 +97,7 @@ const cartSelection = {
   releaseDate: products.releaseDate,
   shippingCents: sellers.defaultShippingCents,
   shippingMode: sellers.shippingMode,
+  sellerType: sellers.sellerType,
   quantity: cartItems.quantity,
 };
 
@@ -137,7 +137,7 @@ export async function getAccountCart(userId: string): Promise<CartItem[]> {
       availabilityType: row.availabilityType,
       releaseDate: row.releaseDate,
       shippingCents: row.shippingCents,
-      shippingMode: row.shippingMode,
+      shippingMode: row.sellerType === "collector" ? "calculated" as const : row.shippingMode,
       quantity: Math.min(
         row.quantity,
         Math.max(0, row.inventoryQuantity - row.reservedQuantity),
@@ -161,9 +161,9 @@ async function ensureCart(userId: string) {
 }
 
 function authoritativeToCart(
-  input: Awaited<ReturnType<typeof loadAuthoritativeCart>>,
+  input: Awaited<ReturnType<typeof loadAuthoritativeCartItems>>,
 ): CartItem[] {
-  return input.items.map((item) => ({
+  return input.map((item) => ({
     productId: item.id,
     slug: "",
     sellerId: item.sellerId,
@@ -178,7 +178,7 @@ function authoritativeToCart(
     availabilityType: item.availabilityType,
     releaseDate: item.releaseDate,
     shippingCents: item.shippingCents,
-    shippingMode: input.shippingMode,
+    shippingMode: item.sellerType === "collector" ? "calculated" : item.shippingMode,
     quantity: item.quantity,
   }));
 }
@@ -199,7 +199,7 @@ export async function saveAccountCart(
     ]);
     return [];
   }
-  const authoritative = await loadAuthoritativeCart(requested);
+  const authoritative = await loadAuthoritativeCartItems(requested);
   const d1 = getD1();
   const statements = [
     d1.prepare("DELETE FROM cart_items WHERE cart_id = ?").bind(cartId),
@@ -207,9 +207,9 @@ export async function saveAccountCart(
       .prepare(
         "UPDATE carts SET seller_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
       )
-      .bind(authoritative.seller.sellerId, cartId),
+      .bind(new Set(authoritative.map((item) => item.sellerId)).size === 1 ? authoritative[0].sellerId : null, cartId),
   ];
-  for (const item of authoritative.items) {
+  for (const item of authoritative) {
     statements.push(
       d1
         .prepare(
@@ -299,22 +299,10 @@ export async function mergeGuestData(
   let savedCart = await getAccountCart(userId);
   let guestCart: CartItem[] = [];
   if (input.cart.length) {
-    try {
-      guestCart = authoritativeToCart(await loadAuthoritativeCart(input.cart));
-    } catch {
-      guestCart = [];
-    }
-  }
-  if (cartMergeDecision(savedCart, guestCart) === "conflict") {
-    return {
-      conflict: true as const,
-      wishlist: await getWishlistIds(userId),
-      cart: savedCart,
-      guestCart,
-    };
+    guestCart = authoritativeToCart(await loadAuthoritativeCartItems(input.cart));
   }
   if (guestCart.length) {
-    const combined = mergeCartItems(savedCart, guestCart) ?? savedCart;
+    const combined = mergeCartItems(savedCart, guestCart);
     savedCart = await saveAccountCart(
       userId,
       combined.map(({ productId, quantity }) => ({ productId, quantity })),

@@ -18,6 +18,7 @@ test("cart preserves the full address, rejects late quotes, and refreshes after 
   const states = [], refs = [], effects = [];
   let stateIndex = 0, refIndex = 0, effectIndex = 0, zip = "", tree;
   const pending = [], navigations = [], listeners = new Map();
+  let shippingRequests = [];
   const fixture = {
     state(initial) {
       const index = stateIndex++;
@@ -36,8 +37,8 @@ test("cart preserves the full address, rejects late quotes, and refreshes after 
     },
     zip: () => [zip, setZip],
     marketplace: {
-      cart: [{ productId: "model", quantity: 1, priceCents: 10000, currency: "usd", shippingMode: "calculated", shippingCents: 0, availableQuantity: 3, sellerName: "Store", title: "Model" }],
-      authReady: true, collector: null, removeFromCart() {}, setQuantity() {}, clearCart() {},
+      cart: [{ productId: "model", sellerId: "store", quantity: 1, priceCents: 10000, currency: "usd", shippingMode: "calculated", shippingCents: 0, availableQuantity: 3, sellerName: "Store", title: "Model" }, { productId: "other", sellerId: "other-store", quantity: 1, priceCents: 5000, currency: "usd", shippingMode: "flat", shippingCents: 600, sellerName: "Other Store" }],
+      authReady: true, collector: null, removeFromCart() {}, setQuantity() {}, clearSellerCart() {},
     },
   };
   function setZip(value) { zip = value; }
@@ -52,7 +53,7 @@ test("cart preserves the full address, rejects late quotes, and refreshes after 
     addEventListener: (event, callback) => listeners.set(event, callback),
     removeEventListener: (event) => listeners.delete(event),
   };
-  globalThis.fetch = (url, init) => new Promise((resolve) => pending.push({ url, body: JSON.parse(init.body), resolve }));
+  globalThis.fetch = (url, init) => !init?.body ? Promise.resolve(Response.json({ requests: shippingRequests })) : new Promise((resolve) => pending.push({ url, body: JSON.parse(init.body), resolve }));
   t.after(async () => {
     effects.forEach((effect) => effect.cleanup?.());
     delete globalThis.__cartCheckoutTest;
@@ -105,9 +106,10 @@ test("cart preserves the full address, rejects late quotes, and refreshes after 
   render();
   assert.deepEqual(delivery().props.values, address);
   form().props.ref.current = { reportValidity: () => true };
-  find((node) => node.type === "input" && node.props.type === "checkbox").props.onChange({ target: { checked: true } });
+  find((node) => node.props?.className === "consent-check checkout-consent").props.children[0].props.onChange({ target: { checked: true } });
   render();
   const oldQuote = form().props.onSubmit({ preventDefault() {} });
+  assert.deepEqual(pending[0].body.items, [{ productId: "model", quantity: 1 }], "Shipping is quoted only for the selected seller");
   render();
   assert.equal(pay().props.disabled, true);
   const updated = { ...address, street2: "Unit 5" };
@@ -123,9 +125,12 @@ test("cart preserves the full address, rejects late quotes, and refreshes after 
   await oldQuote;
   render();
   const payment = pay().props.onClick();
+  void pay().props.onClick();
+  assert.equal(pending.length, 3, "Repeated clicks start only one payment");
   assert.equal(pending[2].url, "/api/checkout");
+  assert.deepEqual(pending[2].body.items, [{ productId: "model", quantity: 1 }, { productId: "other", quantity: 1 }], "One payment includes every selected seller");
   assert.deepEqual(pending[2].body.destination, updated);
-  assert.equal(pending[2].body.shippingSelection.quoteId, "new");
+  assert.deepEqual(pending[2].body.sellerSelections, [{ sellerId: "store", shippingSelection: { quoteId: "new", rateId: "new" } }, { sellerId: "other-store", shippingSelection: { rateId: "flat" } }]);
   pending[2].resolve(Response.json({ error: "Quote expired. Calculate fresh rates." }, { status: 400 }));
   await payment;
   render();
@@ -141,4 +146,52 @@ test("cart preserves the full address, rejects late quotes, and refreshes after 
   assert.equal(pay().props.disabled, true, "Changing quantity invalidates the prior shipping quote");
   listeners.get("pageshow")({ persisted: true });
   assert.deepEqual(navigations, ["reload"], "Browser back must refresh the restored payment and inventory state");
+
+  render();
+  const groups = find((node) => node.props?.className === "seller-cart-groups").props.children;
+  assert.equal(groups.length, 2);
+  assert.deepEqual(groups.map((group) => group.key), ["store", "other-store"]);
+
+  // A pending quote must block this seller, while other sellers remain payable.
+  fixture.marketplace.cart[0].shippingMode = "flat";
+  fixture.marketplace.collector = { id: "buyer" };
+  render();
+  await new Promise((resolve) => setImmediate(resolve));
+  render();
+  const requestButton = find((node) => node.type === "button" && node.props.children === "Request combined shipping quote");
+  const requestSent = requestButton.props.onClick();
+  const requestCall = pending.at(-1);
+  assert.equal(requestCall.body.action, "request");
+  shippingRequests = [{ id: "combined", sellerId: "store", viewerRole: "buyer", status: "pending", amountCents: null, expiresAt: new Date(Date.now() + 600000).toISOString(), destination: updated, items: [{ productId: "model", quantity: 2, priceCents: 10000 }], currency: "usd" }];
+  requestCall.resolve(Response.json({ id: "combined", requests: shippingRequests }));
+  await requestSent;
+  await new Promise((resolve) => setImmediate(resolve));
+  render();
+  assert.equal(pay().props.disabled, true, "Payment waits for the requested shipping quote");
+  assert.equal(JSON.parse(storage.get("mcc-shipping-choices-buyer")).store, "combined", "The choice survives return visits");
+  find((node) => node.type === "input" && node.props.type === "checkbox").props.onChange();
+  render();
+  assert.equal(pay().props.disabled, false, "A waiting seller can be left in the cart");
+  const payOther = pay().props.onClick();
+  assert.deepEqual(pending.at(-1).body.items, [{ productId: "other", quantity: 1 }]);
+  pending.at(-1).resolve(Response.json({ error: "Fixture failure" }, { status: 400 }));
+  await payOther;
+  render();
+  find((node) => node.type === "input" && node.props.type === "checkbox").props.onChange();
+  shippingRequests = [{ ...shippingRequests[0], status: "quoted", amountCents: 450, carrier: "USPS", service: "Ground", estimatedDays: 4 }];
+  listeners.get("focus")();
+  await new Promise((resolve) => setImmediate(resolve));
+  render();
+  assert.equal(pay().props.disabled, false, "The approved quote can be reviewed and paid");
+  const payQuote = pay().props.onClick();
+  assert.deepEqual(pending.at(-1).body.sellerSelections[0].shippingSelection, { combinedRequestId: "combined" });
+  pending.at(-1).resolve(Response.json({ error: "Fixture failure" }, { status: 400 }));
+  await payQuote;
+  fixture.marketplace.cart[0].quantity = 1;
+  render();
+  assert.equal(pay().props.disabled, true, "An item change invalidates the seller's quote");
+  find((node) => node.type === "input" && node.props.name === "shipping-source-store" && node.props.checked === false).props.onChange();
+  render();
+  assert.equal(pay().props.disabled, false, "Buyer can explicitly choose standard shipping");
+  assert.equal(fixture.marketplace.cart.length, 2, "Requests and payment failures preserve the cart");
 });

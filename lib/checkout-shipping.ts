@@ -17,6 +17,7 @@ import {
   requireCompleteShipFromAddress,
   sellerOriginSnapshot,
 } from "./ship-from-address";
+import { resolveCombinedShippingQuote } from "./combined-shipping";
 
 type AuthoritativeCart = Awaited<ReturnType<typeof loadAuthoritativeCart>>;
 
@@ -202,6 +203,9 @@ export async function resolveCheckoutShipping(
   destinationInput: unknown,
 ): Promise<ResolvedCheckoutShipping> {
   const destination = validateCheckoutDestination(destinationInput, config.shippingCountries);
+  if (selectionInput && typeof selectionInput === "object" && "combinedRequestId" in selectionInput) {
+    return resolveCombinedShippingQuote(cart, cleanText(selectionInput.combinedRequestId, 100), buyerUserId, destination);
+  }
   if (cart.shippingMode === "free")
     return resolvedSynthetic("free", 0, "Free shipping", destination);
   if (cart.shippingMode === "flat")

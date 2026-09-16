@@ -98,6 +98,7 @@ test("checkout reuses the quoted destination and closes old payment sessions bef
     await rmdir(scratch);
   });
   const mocks = {
+    consolidated: "export const startConsolidatedCheckout = () => { throw new Error('Legacy client must not invoke consolidated checkout'); };",
     db: "export const getDb = () => globalThis.__checkoutAddressTest.db;",
     config: `export const config = { siteUrl: 'https://shop.example', marketplaceMode: 'test', stripeSecretKey: 'sk_test_fixture', stripeApiVersion: '2026-02-25.clover', automaticTax: true, stripeTaxBehavior: 'exclusive', stripeShippingTaxCode: 'txcd_92010001', shippingCountries: ['US'], shippoInsuranceThresholdCents: 50000, shippoSignatureThresholdCents: 50000, shippoMaxLabelCostCents: 50000, shippoQuoteExpirationMinutes: 30 }; export const requireConfig = key => config[key];`,
     auth: "export const getCurrentCollector = async () => null;",
@@ -116,6 +117,7 @@ test("checkout reuses the quoted destination and closes old payment sessions bef
       builder.onResolve({ filter: /^(?:@\/|\.\/)/ }, ({ path }) => {
         let mock;
         if (path === "@/db") mock = "db";
+        else if (/\/consolidated-checkout$/.test(path)) mock = "consolidated";
         else if (/\/(config)(?:\.ts)?$/.test(path)) mock = "config";
         else if (/\/collector-auth$/.test(path)) mock = "auth";
         else if (/\/inventory(?:\.ts)?$/.test(path)) mock = "inventory";

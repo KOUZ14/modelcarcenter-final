@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { CartItem, ProductSummary } from "@/lib/types";
-import { cartSellerConflict } from "@/lib/business";
+import { removePurchasedItems } from "@/lib/cart-groups";
 import { authClient } from "@/lib/auth-client";
 import { CHECKOUT_ADDRESS_KEY, CHECKOUT_SESSION_KEY } from "@/lib/checkout-address";
 
@@ -23,6 +23,8 @@ type MarketplaceContextValue = {
   removeFromCart(productId: string): void;
   setQuantity(productId: string, quantity: number): void;
   clearCart(): void;
+  clearSellerCart(sellerId: string): void;
+  completeCheckout(sessionId: string, items: Array<{ productId: string | null; quantity: number }>): void;
   toggleWishlist(productId: string): void;
   wishlistHas(productId: string): boolean;
   signOut(): Promise<void>;
@@ -38,9 +40,9 @@ export function MarketplaceProvider({ children }: { children: React.ReactNode })
   const [wishlist, setWishlist] = useState<string[]>([]);
   const [collector, setCollector] = useState<Collector | null>(null);
   const [mode, setMode] = useState<"loading" | "guest" | "account">("loading");
-  const [pendingProduct, setPendingProduct] = useState<{ product: ProductSummary; quantity: number } | null>(null);
-  const [pendingMerge, setPendingMerge] = useState<{ saved: CartItem[]; guest: CartItem[] } | null>(null);
-  const dialogRef = useRef<HTMLDivElement>(null);
+  const [cartError, setCartError] = useState("");
+  const cartWrites = useRef(Promise.resolve());
+  const completedSessions = useRef(new Set<string>());
 
   useEffect(() => {
     let active = true;
@@ -83,17 +85,18 @@ export function MarketplaceProvider({ children }: { children: React.ReactNode })
         if (account.authenticated && account.user && account.profile) {
           setCollector({ id: account.user.id, email: account.user.email, displayName: account.profile.displayName, avatarUrl: account.profile.avatarUrl, store: account.store ?? null });
           const merge = await fetch("/api/account", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "merge", wishlist: guestWishlist, cart: guestCart.map((item) => ({ productId: item.productId, quantity: item.quantity })) }) });
-          const merged = await merge.json() as { conflict?: boolean; wishlist?: string[]; cart?: CartItem[]; guestCart?: CartItem[] };
+          const merged = await merge.json() as { wishlist?: string[]; cart?: CartItem[]; error?: string };
           if (!active) return;
+          if (!merge.ok || !merged.cart) throw new Error(merged.error || "Your saved cart could not be loaded.");
           setWishlist(merged.wishlist ?? []);
           setCart(merged.cart ?? []);
-          if (merged.conflict && merged.guestCart?.length) setPendingMerge({ saved: merged.cart ?? [], guest: merged.guestCart });
-          else clearGuestStorage();
+          clearGuestStorage();
           setMode("account");
           return;
         }
       } catch {
         // Account service failures must not block guest browsing or checkout.
+        if (active) setCartError("Your saved cart could not be synced. Items on this device are kept, and your saved account cart is unchanged. Reload to retry.");
       }
       if (guestCart.length) {
         try {
@@ -104,7 +107,7 @@ export function MarketplaceProvider({ children }: { children: React.ReactNode })
           });
           const data = (await response.json()) as { products?: ProductSummary[] };
           const fresh = new Map((data.products ?? []).map((product) => [product.id, product]));
-          guestCart = guestCart.flatMap((item) => {
+          if (response.ok && data.products) guestCart = guestCart.flatMap((item) => {
             const product = fresh.get(item.productId);
             return product && product.availableQuantity > 0
               ? [cartItemFromProduct(product, Math.min(item.quantity, product.availableQuantity))]
@@ -124,14 +127,6 @@ export function MarketplaceProvider({ children }: { children: React.ReactNode })
   }, []);
   useEffect(() => { if (mode === "guest") localStorage.setItem(CART_KEY, JSON.stringify(cart)); }, [cart, mode]);
   useEffect(() => { if (mode === "guest") localStorage.setItem(WISHLIST_KEY, JSON.stringify(wishlist)); }, [wishlist, mode]);
-  useEffect(() => {
-    if (!pendingProduct && !pendingMerge) return;
-    dialogRef.current?.focus();
-    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") { setPendingProduct(null); setPendingMerge(null); } };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [pendingProduct, pendingMerge]);
-
   const toCartItem = useCallback(
     (product: ProductSummary, quantity: number) =>
       cartItemFromProduct(product, quantity),
@@ -139,35 +134,54 @@ export function MarketplaceProvider({ children }: { children: React.ReactNode })
   );
   const persistCart = useCallback((next: CartItem[]) => {
     if (mode !== "account") return;
-    void fetch("/api/account", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "cart", items: next.map((item) => ({ productId: item.productId, quantity: item.quantity })) }) });
-  }, [mode]);
+    const checkoutMarkers = [...completedSessions.current].map((sessionId) => `mcc-completed-checkout-${collector?.id ?? "guest"}-${sessionId}`);
+    cartWrites.current = cartWrites.current.then(async () => {
+      const response = await fetch("/api/account", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "cart", items: next.map((item) => ({ productId: item.productId, quantity: item.quantity })) }) });
+      if (!response.ok) throw new Error("Cart sync failed.");
+      try { checkoutMarkers.forEach((key) => localStorage.setItem(key, "1")); } catch { /* Storage may be disabled. */ }
+      setCartError("");
+    }).catch(() => { setCartError("Your cart changes could not be saved to your account. Please retry before leaving this page."); });
+  }, [collector?.id, mode]);
   const addDirect = useCallback((product: ProductSummary, quantity: number) => {
     const existing = cart.find((item) => item.productId === product.id);
     const next = existing ? cart.map((item) => item.productId === product.id
-      ? { ...item, availableQuantity: product.availableQuantity, quantity: Math.min(product.availableQuantity, item.quantity + quantity) }
+      ? { ...item, availableQuantity: product.availableQuantity, quantity: Math.min(10, product.availableQuantity, item.quantity + quantity) }
       : item) : [...cart, toCartItem(product, quantity)];
     setCart(next);
     persistCart(next);
   }, [cart, persistCart, toCartItem]);
 
-  async function resolveMerge(choice: "keep" | "replace") {
-    if (!pendingMerge) return;
-    const response = await fetch("/api/account", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "merge_choice", choice, cart: pendingMerge.guest.map((item) => ({ productId: item.productId, quantity: item.quantity })) }) });
-    const body = await response.json() as { cart?: CartItem[] };
-    setCart(body.cart ?? (choice === "keep" ? pendingMerge.saved : pendingMerge.guest));
-    setPendingMerge(null);
-    clearGuestStorage();
-  }
-
   const value = useMemo<MarketplaceContextValue>(() => ({
     cart, wishlist, collector, authReady: mode !== "loading",
     addToCart(product, quantity = 1) {
-      if (cartSellerConflict(cart, product.sellerId)) { setPendingProduct({ product, quantity }); return false; }
+      if (mode === "loading") return false;
+      if (cart.length >= 25 && !cart.some((item) => item.productId === product.id)) {
+        setCartError("Your cart can hold up to 25 products. Check out a seller before adding more; your existing items are kept.");
+        return false;
+      }
       addDirect(product, quantity); return true;
     },
     removeFromCart(productId) { const next = cart.filter((item) => item.productId !== productId); setCart(next); persistCart(next); },
-    setQuantity(productId, quantity) { const next = cart.map((item) => item.productId === productId ? { ...item, quantity: Math.min(item.availableQuantity, Math.max(1, Math.trunc(quantity))) } : item); setCart(next); persistCart(next); },
+    setQuantity(productId, quantity) { const next = cart.map((item) => item.productId === productId ? { ...item, quantity: Math.min(10, item.availableQuantity, Math.max(1, Math.trunc(quantity))) } : item); setCart(next); persistCart(next); },
     clearCart() { setCart([]); persistCart([]); clearDeliveryDraft(); },
+    clearSellerCart(sellerId) {
+      const next = cart.filter((item) => item.sellerId !== sellerId);
+      setCart(next); persistCart(next);
+    },
+    completeCheckout(sessionId, items) {
+      if (mode === "loading" || completedSessions.current.has(sessionId)) return;
+      const key = `mcc-completed-checkout-${collector?.id ?? "guest"}-${sessionId}`;
+      try { if (localStorage.getItem(key)) return; } catch { /* In-memory guard still applies. */ }
+      completedSessions.current.add(sessionId);
+      const next = removePurchasedItems(cart, items);
+      setCart(next); persistCart(next);
+      try {
+        if (mode === "guest") {
+          localStorage.setItem(CART_KEY, JSON.stringify(next));
+          localStorage.setItem(key, "1");
+        }
+      } catch { /* Storage may be disabled. */ }
+    },
     toggleWishlist(productId) {
       const saved = !wishlist.includes(productId);
       setWishlist(saved ? [...wishlist, productId] : wishlist.filter((item) => item !== productId));
@@ -179,8 +193,7 @@ export function MarketplaceProvider({ children }: { children: React.ReactNode })
 
   return <MarketplaceContext.Provider value={value}>
     {children}
-    {pendingProduct && <div className="dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setPendingProduct(null); }}><div className="cart-dialog" role="dialog" aria-modal="true" aria-labelledby="seller-conflict-title" tabIndex={-1} ref={dialogRef}><button className="dialog-close" type="button" aria-label="Close" onClick={() => setPendingProduct(null)}>×</button><p className="eyebrow">One seller per checkout</p><h2 id="seller-conflict-title">Your cart has another seller.</h2><p>Your current cart contains products from another seller. Model Car Center currently checks out one seller at a time.</p><div className="dialog-actions"><button className="button outline" type="button" onClick={() => setPendingProduct(null)}>Keep current cart</button><button className="button dark" type="button" onClick={() => { const next = [toCartItem(pendingProduct.product, pendingProduct.quantity)]; setCart(next); persistCart(next); setPendingProduct(null); }}>Clear cart &amp; add new model</button></div></div></div>}
-    {pendingMerge && <div className="dialog-backdrop" role="presentation"><div className="cart-dialog" role="dialog" aria-modal="true" aria-labelledby="merge-conflict-title" tabIndex={-1} ref={dialogRef}><p className="eyebrow">Saved cart</p><h2 id="merge-conflict-title">You already have items from another seller in your saved cart.</h2><p>Choose which single-seller cart you want to keep. Neither cart will be changed until you decide.</p><div className="dialog-actions"><button className="button outline" type="button" onClick={() => void resolveMerge("keep")}>Keep saved cart</button><button className="button dark" type="button" onClick={() => void resolveMerge("replace")}>Replace saved cart with this cart</button></div></div></div>}
+    {cartError && <div className="cart-sync-notice" role="alert"><p>{cartError}</p>{mode === "account" && <button className="text-button" type="button" onClick={() => persistCart(cart)}>Retry saving cart</button>}</div>}
   </MarketplaceContext.Provider>;
 }
 
@@ -202,7 +215,7 @@ function cartItemFromProduct(product: ProductSummary, quantity: number): CartIte
     shippingCents: product.defaultShippingCents,
     shippingMode:
       product.sellerType === "collector" ? "calculated" : product.shippingMode,
-    quantity: Math.min(Math.max(1, quantity), product.availableQuantity),
+    quantity: Math.min(10, Math.max(1, quantity), product.availableQuantity),
   };
 }
 

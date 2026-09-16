@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { MessageCenter } from "@/components/message-center";
+import { CombinedShippingRequests } from "@/components/combined-shipping-requests";
 import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import { requireCollector } from "@/lib/collector-auth";
@@ -44,6 +45,7 @@ export default async function MessagesPage({
         </div>
       </section>
       <div className="shell messages-shell">
+        <CombinedShippingRequests />
         <MessageCenter initialData={data} />
       </div>
       <SiteFooter />

@@ -1,4 +1,4 @@
-import { and, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, eq, inArray, lt, or, sql } from "drizzle-orm";
 import { getD1, getDb } from "@/db";
 import {
   checkoutReservationItems,
@@ -19,7 +19,7 @@ import {
 
 export type RequestedCartItem = { productId: string; quantity: number };
 
-export async function loadAuthoritativeCart(items: RequestedCartItem[]) {
+export async function loadAuthoritativeCartItems(items: RequestedCartItem[]) {
   if (!Array.isArray(items) || items.length < 1 || items.length > 25) throw new Error("Cart must contain between 1 and 25 products.");
   const consolidated = new Map<string, number>();
   for (const item of items) {
@@ -27,6 +27,7 @@ export async function loadAuthoritativeCart(items: RequestedCartItem[]) {
       throw new Error("Cart contains an invalid product or quantity.");
     }
     consolidated.set(item.productId, (consolidated.get(item.productId) ?? 0) + item.quantity);
+    if (consolidated.get(item.productId)! > 10) throw new Error("Choose no more than 10 of each product.");
   }
   const db = getDb();
   const rows = await db
@@ -83,34 +84,45 @@ export async function loadAuthoritativeCart(items: RequestedCartItem[]) {
     .leftJoin(sellerAddresses, eq(products.shipFromAddressId, sellerAddresses.id))
     .where(inArray(products.id, [...consolidated.keys()]));
   if (rows.length !== consolidated.size) throw new Error("One or more products no longer exist.");
-  const sellerIds = new Set(rows.map((row) => row.sellerId));
-  if (sellerIds.size !== 1) throw new Error("Model Car Center currently checks out one seller at a time.");
-  const originKeys = new Set(
-    rows.map((row) => shipFromAddressKey(sellerOriginSnapshot(row))),
-  );
-  if (originKeys.size !== 1) {
-    throw new Error(
-      "These models ship from different locations. Check out items from one ship-from address at a time.",
-    );
-  }
   for (const row of rows) {
     const quantity = consolidated.get(row.id)!;
     if (row.status !== "active" || row.sellerStatus !== "active") throw new Error(`${row.title} is no longer available.`);
     if (row.availabilityType === "preorder" && !row.releaseDate)
       throw new Error(`${row.title} has an incomplete preorder release date.`);
     if (row.inventoryQuantity - row.reservedQuantity < quantity) throw new Error(`Only ${Math.max(0, row.inventoryQuantity - row.reservedQuantity)} of ${row.title} are currently available.`);
+    if (!row.sellerStripeAccountId || !row.stripeChargesEnabled || !row.stripePayoutsEnabled) {
+      throw new Error(`${row.sellerName} is not ready to accept marketplace payments.`);
+    }
+    if (!sellerAcceptedCurrentTerms(row)) {
+      throw new Error(`${row.sellerName} must accept the current Seller Terms before accepting marketplace payments.`);
+    }
+  }
+  return rows.map((row) => ({ ...row, quantity: consolidated.get(row.id)! }));
+}
+
+export async function loadAuthoritativeCart(items: RequestedCartItem[]) {
+  const rows = await loadAuthoritativeCartItems(items);
+  return sellerCartFromRows(rows);
+}
+
+export async function loadAuthoritativeCheckout(items: RequestedCartItem[]) {
+  const rows = await loadAuthoritativeCartItems(items);
+  if (new Set(rows.map((row) => row.currency.toLowerCase())).size !== 1) throw new Error("All items in one payment must use the same currency.");
+  const sellerIds = [...new Set(rows.map((row) => row.sellerId))].sort();
+  return sellerIds.map((sellerId) => sellerCartFromRows(rows.filter((row) => row.sellerId === sellerId)));
+}
+
+function sellerCartFromRows(rows: Awaited<ReturnType<typeof loadAuthoritativeCartItems>>) {
+  if (new Set(rows.map((row) => row.sellerId)).size !== 1) {
+    throw new Error("Choose items from one seller for this shipping request. Each seller has separate shipping.");
+  }
+  const originKeys = new Set(rows.map((row) => shipFromAddressKey(sellerOriginSnapshot(row))));
+  if (originKeys.size !== 1) {
+    throw new Error("These models ship from different locations. Check out items from one ship-from address at a time.");
   }
   const seller = rows[0];
-  if (!seller.sellerStripeAccountId || !seller.stripeChargesEnabled || !seller.stripePayoutsEnabled) {
-    throw new Error("This seller is not ready to accept marketplace payments.");
-  }
-  if (!sellerAcceptedCurrentTerms(seller)) {
-    throw new Error(
-      "This seller must accept the current Seller Terms before accepting marketplace payments.",
-    );
-  }
   if (new Set(rows.map((row) => row.currency)).size !== 1) throw new Error("All products in a checkout must use the same currency.");
-  const authoritativeItems = rows.map((row) => ({ ...row, quantity: consolidated.get(row.id)! }));
+  const authoritativeItems = rows;
   const fee = determineMarketplaceFee(seller);
   const shippingMode = seller.sellerType === "collector" ? "calculated" : seller.shippingMode;
   const defaultShippingCents =
@@ -140,6 +152,7 @@ export type ResolvedCheckoutShipping = {
   serviceToken: string | null;
   estimatedDays: number | null;
   quotedAddress: string | null;
+  combinedShippingRequestId?: string;
 };
 
 export async function reserveCart(
@@ -148,17 +161,33 @@ export async function reserveCart(
   policyVersion: string,
   shipping?: ResolvedCheckoutShipping,
 ) {
+  const reservation = buildCartReservation(input, buyerUserId, policyVersion, shipping);
+  try { await getD1().batch(reservation.statements); }
+  catch (error) {
+    console.error("Checkout reservation batch failed.", error);
+    throw new Error("Inventory changed while checkout was starting. Review your cart and try again.");
+  }
+  return { reservationId: reservation.reservationId, expiresAt: reservation.expiresAt };
+}
+
+export function buildCartReservation(
+  input: Awaited<ReturnType<typeof loadAuthoritativeCart>>,
+  buyerUserId: string | null,
+  policyVersion: string,
+  shipping?: ResolvedCheckoutShipping,
+  checkoutGroupId: string | null = null,
+  expiresAt = new Date(Date.now() + config.checkoutExpirationMinutes * 60_000),
+) {
   const d1 = getD1();
   const reservationId = crypto.randomUUID();
-  const expiresAt = new Date(Date.now() + config.checkoutExpirationMinutes * 60_000);
   const statements = [
     d1.prepare(`INSERT INTO checkout_reservations
       (id, seller_id, buyer_user_id, status, subtotal_cents, shipping_cents, shipping_mode,
        checkout_shipping_quote_id, selected_shipping_rate_id, selected_shipping_carrier,
        selected_shipping_service, selected_shipping_service_token, selected_shipping_estimated_days,
        quoted_shipping_address, ship_from_address, marketplace_fee_bps, platform_fee_cents, currency,
-       policy_version, policy_accepted_at, expires_at)
-      VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)`)
+       policy_version, policy_accepted_at, expires_at, checkout_group_id, combined_shipping_request_id)
+      VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?)`)
       .bind(
         reservationId,
         input.seller.sellerId,
@@ -179,16 +208,23 @@ export async function reserveCart(
         input.currency,
         policyVersion,
         expiresAt.toISOString(),
+        checkoutGroupId,
+        shipping?.combinedShippingRequestId ?? null,
       ),
     d1.prepare(`UPDATE sellers SET
       default_shipping_cents = CASE WHEN status = 'active' THEN default_shipping_cents ELSE -1 END
       WHERE id = ?`).bind(input.seller.sellerId),
   ];
+  if (shipping?.combinedShippingRequestId) {
+    statements.push(d1.prepare(`UPDATE combined_shipping_requests SET status = CASE
+      WHEN status = 'quoted' AND expires_at > ? THEN 'used' ELSE NULL END, updated_at = CURRENT_TIMESTAMP WHERE id = ?`)
+      .bind(new Date().toISOString(), shipping.combinedShippingRequestId));
+  }
   if (shipping?.checkoutShippingQuoteId) {
     statements.push(
-      d1.prepare(`UPDATE checkout_shipping_quotes SET status = 'used', updated_at = CURRENT_TIMESTAMP
-        WHERE id = ? AND status = 'active' AND expires_at > CURRENT_TIMESTAMP`)
-        .bind(shipping.checkoutShippingQuoteId),
+      d1.prepare(`UPDATE checkout_shipping_quotes SET status = CASE WHEN status = 'active' AND expires_at > ? THEN 'used' ELSE NULL END, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?`)
+        .bind(new Date().toISOString(), shipping.checkoutShippingQuoteId),
     );
   }
   for (const item of input.items) {
@@ -218,13 +254,7 @@ export async function reserveCart(
         ),
     );
   }
-  try {
-    await d1.batch(statements);
-  } catch (error) {
-    console.error("Checkout reservation batch failed.", error);
-    throw new Error("Inventory changed while checkout was starting. Review your cart and try again.");
-  }
-  return { reservationId, expiresAt };
+  return { reservationId, expiresAt, statements };
 }
 
 export async function attachStripeSession(reservationId: string, sessionId: string) {
@@ -239,9 +269,13 @@ export async function releaseReservation(reservationId: string) {
   const reservation = await db
     .select({ id: checkoutReservations.id })
     .from(checkoutReservations)
-    .where(and(eq(checkoutReservations.id, reservationId), eq(checkoutReservations.status, "pending")))
-    .limit(1);
-  if (!reservation[0]) return false;
+    .where(and(or(eq(checkoutReservations.id, reservationId), eq(checkoutReservations.checkoutGroupId, reservationId)), eq(checkoutReservations.status, "pending")));
+  if (!reservation.length) return false;
+  if (reservation.length > 1 || reservation[0].id !== reservationId) {
+    for (const row of reservation) await releaseReservation(row.id);
+    await getD1().prepare("UPDATE checkout_groups SET status = 'released' WHERE id = ? AND status = 'pending'").bind(reservationId).run();
+    return true;
+  }
   const items = await db
     .select({ productId: checkoutReservationItems.productId, quantity: checkoutReservationItems.quantity })
     .from(checkoutReservationItems)
@@ -254,6 +288,9 @@ export async function releaseReservation(reservationId: string) {
       .bind(item.quantity, item.productId, item.quantity, reservationId),
   );
   statements.push(
+    d1.prepare(`UPDATE combined_shipping_requests SET status = 'quoted', updated_at = CURRENT_TIMESTAMP
+      WHERE id = (SELECT combined_shipping_request_id FROM checkout_reservations WHERE id = ? AND status = 'pending') AND status = 'used'`).bind(reservationId),
+    d1.prepare("UPDATE checkout_reservations SET combined_shipping_request_id = NULL WHERE id = ? AND status = 'pending'").bind(reservationId),
     d1.prepare(`UPDATE checkout_reservations SET status = 'released', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'pending'`).bind(reservationId),
   );
   await d1.batch(statements);
@@ -263,10 +300,10 @@ export async function releaseReservation(reservationId: string) {
 export async function releaseStaleReservations(limit = 10) {
   const db = getDb();
   const stale = await db
-    .select({ id: checkoutReservations.id })
+    .select({ id: checkoutReservations.id, groupId: checkoutReservations.checkoutGroupId })
     .from(checkoutReservations)
     .where(and(eq(checkoutReservations.status, "pending"), lt(checkoutReservations.expiresAt, new Date().toISOString())))
     .limit(limit);
-  await Promise.all(stale.map((item) => releaseReservation(item.id)));
+  await Promise.all([...new Set(stale.map((item) => item.groupId ?? item.id))].map((id) => releaseReservation(id)));
   return stale.length;
 }

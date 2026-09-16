@@ -12,12 +12,13 @@ The professional-seller flow uses the same seller/product/order architecture: se
 - A protected **My Garage** for cross-device wishlists and carts, Model Hunts, orders, collector listings, sales, profile settings, and account deletion
 - A protected **Store Console** for approved professional sellers with store-scoped inventory CRUD, CSV imports, order fulfillment, storefront settings, and sales analytics
 - Conservative email-based claiming of legacy guest orders and Model Hunts: only a verified matching account can claim an unowned record
-- Conflict-aware guest-to-account migration: wishlists are deduplicated, same-seller carts merge, and different-seller carts require an explicit choice
+- Guest-to-account migration deduplicates wishlists and merges cart items across sellers without replacing existing items
 - D1-backed accounts, sessions, profiles, carts, wishlists, catalog, sellers, applications, Model Hunts, reservations, orders, snapshots, and Stripe event deduplication
 - Search across collector-relevant fields, filters, sorting, and pagination
 - Public product and seller storefront routes with truthful inventory, shipping, return, and professional/collector seller information
-- Single-seller carts enforced for both guests and signed-in collectors
-- Guest Stripe-hosted Checkout using Connect separate charges and delivery-gated seller transfers
+- Multi-seller carts with seller shipping totals, one delivery address, and one payment for selected sellers; unselected items remain in the cart
+- Guest Stripe-hosted Checkout using Connect separate charges and delivery-gated transfers for each seller order
+- Seller-approved combined shipping quotes before payment, with buyer requests and seller responses in Messages
 - Collector listing drafts, structured condition/details, R2 photo uploads, founder moderation, rejection feedback, and controlled edits/deactivation
 - Collector Stripe-hosted payout onboarding and a seller-only sales/fulfillment view
 - Atomic inventory reservation, release on expiration/failure, and webhook-only paid-order finalization
@@ -30,7 +31,7 @@ The professional-seller flow uses the same seller/product/order architecture: se
 - Development-only demo seed; production is never automatically populated
 - Sitemap, robots rules, product metadata/structured data, accessible forms, and working policy routes
 
-The marketplace intentionally does not include multi-vendor checkout, reviews, offers, auctions, messaging, or automated Shopify/eBay synchronization.
+The marketplace intentionally does not include offers, auctions, or automated Shopify/eBay synchronization.
 
 ## Prerequisites
 
@@ -207,7 +208,13 @@ Every new listing records model condition separately from packaging condition, o
 
 Individual collectors start the same Stripe-hosted onboarding from My Garage. They never enter bank or identity data into Model Car Center. Their draft cannot be submitted, and an admin cannot approve it, until Stripe reports both charges and payouts enabled.
 
-Checkout is server-authoritative. The browser sends only product IDs and quantities. The server reloads active products and the active seller from D1, checks available inventory, determines the seller's current fee program, calculates the commission against item subtotal only, reserves inventory and the exact fee snapshot transactionally, then creates a finite Stripe Checkout Session. New payments use separate charges and transfers: the platform charge is captured at checkout, while the seller transfer is released only after the carrier-confirmed delivery review window. Client-supplied fee values are ignored.
+Checkout is server-authoritative. The browser sends product IDs, quantities, one delivery address, and a shipping selection for each selected seller. The server reloads current products and sellers from D1, checks inventory and each seller's fee program, and reserves all selected inventory in one transaction. A checkout group links one finite Stripe Checkout Session to a reservation and order for each seller. Commission is calculated against each seller's item subtotal. Stripe line-item metadata associates actual shipping and taxes with each seller order; processing fees are apportioned to seller orders with exact cent totals. Transfers are released separately after each shipment's delivery review window. Client-supplied prices and fees are ignored, and older single-seller checkout sessions remain supported.
+
+Migration `0021_consolidated_checkout.sql` adds checkout groups, combined shipping requests, and per-reservation order uniqueness. Apply it before running the updated checkout routes. It preserves existing orders and reservations.
+
+Signed-in buyers buying at least two models from one seller can request a combined shipping quote from their cart. The seller receives an email and can quote a total price, carrier, service, and transit estimate or decline in Messages. Buyers receive an email when the seller responds. Requests expire after seven days; quotes expire after 48 hours and bind the buyer, current items, quantities, prices, package/origin details, and exact delivery address. A request does not reserve inventory. Buyers can wait, explicitly select standard shipping, or leave the seller unselected while paying for other sellers. Accepted quotes are claimed atomically with inventory and become reusable when an unpaid checkout is cancelled, provided the quote is still valid.
+
+Application refunds carry an order ID and an explicit remaining order amount, so refunding one seller never refunds sibling orders. Refunds created directly in Stripe without an order reference are allocated across remaining seller balances. A dispute on the shared charge holds every associated seller payout until resolved.
 
 The V1 marketplace rates are 8.5% for collector sellers and 7% for professional stores. An admin can explicitly designate a professional store for the 5% founding rate; the stored six-month start/end window is evaluated on every checkout, then expires automatically back to 7% without deleting the seller's founding history. Orders retain `marketplace_fee_bps` and `platform_fee_cents`, so later pricing changes never rewrite historical fees. There are no listing, monthly, subscription, or account-opening fees for V1.
 
@@ -313,7 +320,7 @@ npm run build
 npm run validate:artifact
 ```
 
-Tests cover search normalization, product availability modes, preorder release validation and ship anchors, server totals, fee calculation, the single-seller rule, Model Hunt validation, CSV validation/upsert planning, Stripe signature and event idempotency logic, inventory reservation/release/completion, safe auth redirects, resource ownership, seller-only fulfillment, wishlist deduplication, guest-data merging, verified legacy-record claims, moderation gates, image validation, high-value shipping rules, package validation, combined-shipping identity, handling reminders, tracking-state mapping, and the built marketplace artifact.
+Tests cover search normalization, product availability modes, preorder release validation and ship anchors, server totals, fee calculation, consolidated checkout with separate seller orders, Model Hunt validation, CSV validation/upsert planning, Stripe signature and event idempotency logic, inventory reservation/release/completion, safe auth redirects, resource ownership, seller-only fulfillment, wishlist deduplication, guest-data merging, verified legacy-record claims, moderation gates, image validation, high-value shipping rules, package validation, combined-shipping identity, handling reminders, tracking-state mapping, and the built marketplace artifact.
 
 ## Production launch checklist
 

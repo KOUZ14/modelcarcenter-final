@@ -68,10 +68,10 @@ test("product estimate API uses authoritative shipping data without creating che
     entryPoints: [join(root, "app/api/shipping/estimate/route.ts")], outfile: bundlePath,
     bundle: true, platform: "node", format: "esm", packages: "external",
     plugins: [{ name: "estimate-boundaries", setup(builder) {
-      builder.onResolve({ filter: /^(@\/db$|@\/lib\/inventory$|\.\/config$)/ }, ({ path }) => ({ path, namespace: "estimate-test" }));
+      builder.onResolve({ filter: /^(@\/db$|@\/lib\/inventory$|\.\/inventory$|\.\/config$)/ }, ({ path }) => ({ path, namespace: "estimate-test" }));
       builder.onLoad({ filter: /.*/, namespace: "estimate-test" }, ({ path }) => ({ contents:
         path === "@/db" ? 'export const getDb = () => { throw new Error("Estimates must not persist checkout quotes"); };' :
-        path === "@/lib/inventory" ? 'export async function loadAuthoritativeCart(items) { const state = globalThis.__shippingEstimateTest; state.requested = items; if (state.loadError) throw new Error(state.loadError); return state.cart; }' :
+        path.endsWith("/inventory") ? 'export async function loadAuthoritativeCart(items) { const state = globalThis.__shippingEstimateTest; state.requested = items; if (state.loadError) throw new Error(state.loadError); return state.cart; }' :
         'export const config = { shippoInsuranceThresholdCents: 20000, shippoSignatureThresholdCents: 50000, shippoMaxLabelCostCents: 20000, shippoApiVersion: "2018-02-08", shippingCountries: ["US"] }; export const requireConfig = () => "shippo_test_fixture";',
       }));
     } }],

@@ -122,6 +122,7 @@ test("delivery-gated transfers, case holds, partial refunds, and reversals recon
       database.prepare(`CREATE TABLE disputes (
         id TEXT PRIMARY KEY,
         order_id TEXT,
+        stripe_charge_id TEXT,
         status TEXT NOT NULL
       )`),
     ]);

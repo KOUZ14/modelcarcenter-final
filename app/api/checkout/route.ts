@@ -10,6 +10,7 @@ import { resolveCheckoutShipping } from "@/lib/checkout-shipping";
 import { calculateServerTotals } from "@/lib/business";
 import { config } from "@/lib/config";
 import { assertLiveCheckoutConfigured, LiveCheckoutUnavailable } from "@/lib/production-readiness";
+import { startConsolidatedCheckout } from "@/lib/consolidated-checkout";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +36,12 @@ export async function POST(request: Request) {
       return { productId: String(value.productId ?? ""), quantity: Number(value.quantity) };
     });
     await releaseStaleReservations();
+    if (payload.sellerSelections !== undefined) {
+      const result = await startConsolidatedCheckout(requested, payload.sellerSelections, payload.destination, collector?.user ?? null);
+      return Response.json({ url: result.url, reservationId: result.reservationId }, { headers: {
+        "Cache-Control": "no-store", "Set-Cookie": checkoutReturnCookie(result.reservationId, result.sessionId, result.returnToken),
+      } });
+    }
     const loadedCart = await loadAuthoritativeCart(requested);
     const connectedAccount = await retrieveStripeAccount(
       loadedCart.seller.sellerStripeAccountId!,

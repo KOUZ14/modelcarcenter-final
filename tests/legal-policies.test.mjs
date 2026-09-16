@@ -49,7 +49,7 @@ test("professional publishing and checkout enforce current Seller Terms", async 
     readFile(new URL("../app/sitemap.ts", import.meta.url), "utf8"),
   ]);
   assert.match(store, /sellerAcceptedCurrentTerms\(store\)/);
-  assert.match(inventory, /sellerAcceptedCurrentTerms\(seller\)/);
+  assert.match(inventory, /sellerAcceptedCurrentTerms\(row\)/);
   assert.match(route, /accept_seller_terms/);
   assert.match(catalog, /eq\(sellers\.sellerTermsVersion, POLICY_VERSION\)/);
   assert.match(catalog, /isNotNull\(sellers\.sellerTermsAcceptedAt\)/);

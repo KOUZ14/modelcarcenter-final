@@ -132,7 +132,8 @@ export async function POST(request: Request) {
 
 function parseCartItems(value: unknown) {
   if (!Array.isArray(value)) return [];
-  return value.slice(0, 25).map((entry) => {
+  if (value.length > 25) throw new ValidationError("Your cart can hold up to 25 products. Check out a seller before adding more.");
+  return value.map((entry) => {
     const item = entry && typeof entry === "object" ? entry as Record<string, unknown> : {};
     return { productId: String(item.productId ?? ""), quantity: Number(item.quantity) };
   });

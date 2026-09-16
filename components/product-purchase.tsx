@@ -7,7 +7,7 @@ import { useMarketplace } from "./marketplace-provider";
 import { Icon } from "./icons";
 
 export function ProductPurchase({ product }: { product: ProductSummary }) {
-  const { addToCart, toggleWishlist, wishlistHas, collector } = useMarketplace();
+  const { addToCart, toggleWishlist, wishlistHas, collector, cart, authReady } = useMarketplace();
   const [added, setAdded] = useState(false);
   const [emailOverride, setEmailOverride] = useState<string | null>(null);
   const [alertState, setAlertState] = useState<
@@ -54,7 +54,7 @@ export function ProductPurchase({ product }: { product: ProductSummary }) {
     </div>;
   }
   const preorder = product.availabilityType === "preorder";
-  return <div><div className="purchase-actions"><button className="button dark buy-button" type="button" onClick={() => { if (addToCart(product)) { setAdded(true); setTimeout(() => setAdded(false), 1800); } }}>{added ? <><Icon name="check"/> Added to cart</> : preorder ? "Preorder now" : "Add to cart"}</button><button className="button outline" type="button" aria-pressed={saved} onClick={() => toggleWishlist(product.id)}><Icon name="heart"/>{saved ? "Saved" : "Save model"}</button><Link className="button outline message-seller-button" href={`/messages?product=${encodeURIComponent(product.id)}`}><Icon name="message"/>Message seller</Link></div>{preorder && product.releaseDate && <p className="preorder-terms">Paid in full today. Expected to ship after {formatReleaseDate(product.releaseDate)}. Release dates may change.</p>}</div>;
+  return <div><p className="seller-checkout-notice" id={`seller-checkout-${product.id}`}>Shop several sellers in one checkout. Each seller has separate shipping.{cart.some((item) => item.sellerId !== product.sellerId) && <> Adding this model to {product.sellerName}&apos;s group keeps all your other items in your cart.</>}</p><div className="purchase-actions"><button className="button dark buy-button" type="button" disabled={!authReady} aria-describedby={`seller-checkout-${product.id}`} onClick={() => { if (addToCart(product)) { setAdded(true); setTimeout(() => setAdded(false), 1800); } }}>{added ? <><Icon name="check"/> Added to cart</> : preorder ? "Preorder now" : "Add to cart"}</button><button className="button outline" type="button" aria-pressed={saved} onClick={() => toggleWishlist(product.id)}><Icon name="heart"/>{saved ? "Saved" : "Save model"}</button><Link className="button outline message-seller-button" href={`/messages?product=${encodeURIComponent(product.id)}`}><Icon name="message"/>Message seller</Link></div>{preorder && product.releaseDate && <p className="preorder-terms">Paid in full today. Expected to ship after {formatReleaseDate(product.releaseDate)}. Release dates may change.</p>}</div>;
 }
 
 function formatReleaseDate(value: string) {

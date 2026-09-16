@@ -148,6 +148,13 @@
       "when": 1789523778772,
       "tag": "0020_seller_processing_fees",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "6",
+      "when": 1789574293386,
+      "tag": "0021_consolidated_checkout",
+      "breakpoints": true
     }
   ]
 }

@@ -6,6 +6,7 @@ import {
   retrieveCheckoutSession,
   stripeSettlementDetails,
 } from "./stripe.ts";
+import { allocateCents } from "./checkout-allocation.ts";
 
 const PROCESSING_RETRY_MINUTES = 15;
 const RELEASE_BATCH_SIZE = 50;
@@ -94,7 +95,7 @@ export async function processEligibleSellerTransfers(input: {
           )
           AND NOT EXISTS (
             SELECT 1 FROM disputes d
-            WHERE d.order_id = o.id
+            WHERE (d.order_id = o.id OR d.stripe_charge_id = o.stripe_charge_id)
               AND d.status NOT IN ('won', 'prevented', 'warning_closed')
           )
        ORDER BY o.payout_eligible_at, o.created_at
@@ -144,7 +145,7 @@ export async function processEligibleSellerTransfers(input: {
             )
             AND NOT EXISTS (
               SELECT 1 FROM disputes d
-              WHERE d.order_id = orders.id
+              WHERE (d.order_id = orders.id OR d.stripe_charge_id = orders.stripe_charge_id)
                 AND d.status NOT IN ('won', 'prevented', 'warning_closed')
             )`,
       )
@@ -273,7 +274,7 @@ async function reconcileProcessingFees(
   if (!gateway.retrieveSession) return;
   const pending = await database.prepare(`SELECT id, stripe_checkout_session_id AS sessionId,
       total_cents AS totalCents, tax_cents AS taxCents, currency,
-      platform_fee_cents AS platformFeeCents, stripe_charge_id AS chargeId
+      platform_fee_cents AS platformFeeCents, stripe_charge_id AS chargeId, checkout_group_id AS checkoutGroupId
     FROM orders WHERE processing_fee_payer = 'seller'
       AND payment_flow = 'separate' AND payment_processing_fee_cents IS NULL
       AND seller_proceeds_cents IS NULL AND stripe_transfer_id IS NULL
@@ -281,7 +282,7 @@ async function reconcileProcessingFees(
       AND payment_status IN ('paid', 'partially_refunded', 'refunded')
     ORDER BY updated_at, created_at LIMIT ?`).bind(limit).all<{
       id: string; sessionId: string; totalCents: number; taxCents: number;
-      currency: string; platformFeeCents: number; chargeId: string | null;
+      currency: string; platformFeeCents: number; chargeId: string | null; checkoutGroupId: string | null;
     }>();
   for (const order of pending.results ?? []) {
     try {
@@ -289,13 +290,27 @@ async function reconcileProcessingFees(
       const charge = typeof session.payment_intent === "object"
         ? session.payment_intent?.latest_charge : null;
       const chargeId = typeof charge === "string" ? charge : charge?.id;
+      let allocation: { totalCents: number; taxCents: number; paymentProcessingFeeCents: number | null } | undefined;
+      let expectedTotal = order.totalCents;
+      let expectedTax = order.taxCents;
+      if (order.checkoutGroupId) {
+        const siblings = await database.prepare("SELECT id, total_cents AS totalCents, tax_cents AS taxCents FROM orders WHERE checkout_group_id = ? ORDER BY checkout_reservation_id")
+          .bind(order.checkoutGroupId).all<{ id: string; totalCents: number; taxCents: number }>();
+        const rows = siblings.results ?? [];
+        expectedTotal = rows.reduce((sum, row) => sum + row.totalCents, 0);
+        expectedTax = rows.reduce((sum, row) => sum + row.taxCents, 0);
+        const fee = stripeSettlementDetails(session, 0).paymentProcessingFeeCents;
+        const shares = fee === null ? rows.map(() => null) : allocateCents(fee, rows.map((row) => row.totalCents));
+        allocation = { totalCents: order.totalCents, taxCents: order.taxCents, paymentProcessingFeeCents: shares[rows.findIndex((row) => row.id === order.id)] ?? null };
+        if (session.metadata?.checkout_group_id !== order.checkoutGroupId) throw new Error("Stripe settlement does not match this checkout group.");
+      }
       if (session.id !== order.sessionId || session.payment_status !== "paid" ||
-          session.amount_total !== order.totalCents || session.currency !== order.currency ||
-          (session.total_details?.amount_tax ?? 0) !== order.taxCents ||
+          session.amount_total !== expectedTotal || session.currency !== order.currency ||
+          (session.total_details?.amount_tax ?? 0) !== expectedTax ||
           session.metadata?.processing_fee_payer !== "seller" || chargeId !== order.chargeId) {
         throw new Error("Stripe settlement does not match this order.");
       }
-      const settlement = stripeSettlementDetails(session, order.platformFeeCents);
+      const settlement = stripeSettlementDetails(session, order.platformFeeCents, allocation);
       await database.prepare(`UPDATE orders SET payment_processing_fee_cents = ?,
           seller_proceeds_cents = ?, seller_transfer_last_error = NULL, updated_at = ?
         WHERE id = ? AND processing_fee_payer = 'seller' AND stripe_transfer_id IS NULL

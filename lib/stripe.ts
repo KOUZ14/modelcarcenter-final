@@ -3,6 +3,7 @@ import { assertLiveCheckoutConfigured } from "./production-readiness.ts";
 import { sellerProcessingDeduction, sellerProceedsAfterRefund } from "./seller-proceeds.ts";
 import { stripeShippingAddress } from "./checkout-address.ts";
 import type { NormalizedShippingAddress } from "./shipping-rules.ts";
+import type { CheckoutLine } from "./checkout-allocation.ts";
 export { sellerProceedsAfterRefund } from "./seller-proceeds.ts";
 
 type StripeError = { error?: { message?: string; type?: string } };
@@ -57,10 +58,11 @@ export type StripeCheckoutSession = {
 };
 
 export type CheckoutSessionInput = {
+  checkoutGroupId?: string;
   reservationId: string;
   sellerId: string;
   sellerStripeAccountId: string;
-  items: Array<{ title: string; description: string; imageUrl: string | null; priceCents: number; currency: string; quantity: number }>;
+  items: Array<{ title: string; description: string; imageUrl: string | null; priceCents: number; currency: string; quantity: number; reservationId?: string; shipping?: boolean }>;
   shippingCents: number;
   marketplaceFeeBps: number;
   platformFeeCents: number;
@@ -131,6 +133,8 @@ export function buildCheckoutSessionBody(input: CheckoutSessionInput) {
     });
   }
   input.items.forEach((item, index) => {
+    if (item.reservationId) body.set(`line_items[${index}][price_data][product_data][metadata][reservation_id]`, item.reservationId);
+    if (item.shipping) body.set(`line_items[${index}][price_data][product_data][tax_code]`, config.stripeShippingTaxCode);
     body.set(`line_items[${index}][price_data][currency]`, item.currency);
     body.set(`line_items[${index}][price_data][unit_amount]`, String(item.priceCents));
     body.set(`line_items[${index}][price_data][product_data][name]`, item.title);
@@ -156,6 +160,11 @@ export function buildCheckoutSessionBody(input: CheckoutSessionInput) {
       config.stripeTaxBehavior,
     );
     body.set(`line_items[${index}][quantity]`, "1");
+  }
+  if (input.checkoutGroupId) {
+    body.set("metadata[checkout_group_id]", input.checkoutGroupId);
+    body.set("payment_intent_data[metadata][checkout_group_id]", input.checkoutGroupId);
+    for (const key of ["metadata[seller_id]", "metadata[marketplace_fee_bps]", "payment_intent_data[metadata][seller_id]", "payment_intent_data[metadata][seller_stripe_account_id]"]) body.delete(key);
   }
   return body;
 }
@@ -252,9 +261,29 @@ export async function retrieveCheckoutSession(sessionId: string) {
   );
 }
 
+export async function retrieveCheckoutLines(sessionId: string) {
+  const result = await stripeRequest<{ data: CheckoutLine[]; has_more: boolean }>(`/v1/checkout/sessions/${encodeURIComponent(sessionId)}/line_items?limit=100&expand[]=data.price.product`);
+  if (result.has_more) throw new Error("Checkout contains more line items than the supported cart limit.");
+  return result.data;
+}
+
+export async function retrieveChargeRefunds(chargeId: string) {
+  type Refund = { id: string; amount: number; status: string; metadata?: Record<string, string> };
+  const refunds: Refund[] = [];
+  let after = "";
+  for (;;) {
+    const page = await stripeRequest<{ data: Refund[]; has_more: boolean }>(`/v1/refunds?charge=${encodeURIComponent(chargeId)}&limit=100${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`);
+    refunds.push(...page.data);
+    if (!page.has_more) return refunds;
+    if (!page.data.length) throw new Error("Stripe returned an incomplete refund list.");
+    after = page.data[page.data.length - 1].id;
+  }
+}
+
 export function stripeSettlementDetails(
   session: StripeCheckoutSession,
   expectedPlatformFeeCents: number,
+  allocation?: { totalCents: number; taxCents: number; paymentProcessingFeeCents: number | null },
 ) {
   const charge =
     typeof session.payment_intent === "object" && session.payment_intent
@@ -271,27 +300,28 @@ export function stripeSettlementDetails(
     );
   }
   const balanceTransaction = expandedCharge?.balance_transaction;
-  const paymentProcessingFeeCents =
+  const paymentProcessingFeeCents = allocation ? allocation.paymentProcessingFeeCents :
     balanceTransaction && typeof balanceTransaction === "object"
       ? balanceTransaction.fee
       : null;
-  const taxCents = Math.max(0, session.total_details?.amount_tax ?? 0);
+  const taxCents = Math.max(0, allocation?.taxCents ?? session.total_details?.amount_tax ?? 0);
+  const totalCents = allocation?.totalCents ?? session.amount_total;
   // Missing metadata identifies checkouts created under the previous fee policy.
   const processingFeePayer = session.metadata?.processing_fee_payer === "seller"
     ? "seller" as const : "platform" as const;
   const deduction = sellerProcessingDeduction({
     processingFeePayer,
-    totalCents: session.amount_total ?? 0,
+    totalCents: totalCents ?? 0,
     taxCents,
     platformFeeCents: expectedPlatformFeeCents,
     paymentProcessingFeeCents,
   });
   const sellerProceedsCents =
-    session.amount_total == null || deduction == null
+    totalCents == null || deduction == null
       ? null
       : Math.max(
           0,
-          session.amount_total - taxCents - expectedPlatformFeeCents - deduction,
+          totalCents - taxCents - expectedPlatformFeeCents - deduction,
         );
   return { processingFeePayer, paymentProcessingFeeCents, sellerProceedsCents };
 }
@@ -310,6 +340,10 @@ export async function createOrderRefund(input: {
   sellerTransferReversedCents?: number;
   sellerProceedsCents?: number | null;
 }) {
+  const refundedAmountCents = input.refundedAmountCents ?? 0;
+  const remainingCents = input.totalCents == null ? undefined : input.totalCents - refundedAmountCents;
+  const amountCents = input.amountCents ?? remainingCents;
+  if (input.paymentFlow === "separate" && (!Number.isSafeInteger(amountCents) || (amountCents ?? 0) < 1 || !Number.isSafeInteger(remainingCents) || amountCents! > remainingCents!)) throw new Error("A seller refund must fit within its remaining order amount.");
   let chargeId = input.chargeId;
   if (!chargeId) {
     const intent = await stripeRequest<{ latest_charge?: string | { id: string } | null }>(
@@ -326,12 +360,15 @@ export async function createOrderRefund(input: {
     body.set("reverse_transfer", "true");
     body.set("refund_application_fee", "true");
   }
-  if (input.amountCents != null) body.set("amount", String(input.amountCents));
+  if (amountCents != null) body.set("amount", String(amountCents));
   const refund = await stripeRequest<{ id: string; status: string }>("/v1/refunds", {
     method: "POST",
     body,
-    idempotencyKey:
-      input.idempotencyKey ??
+    // All refund entry points share one key per observed seller balance. Racing
+    // admin and seller requests cannot spend the same balance twice on a shared charge.
+    idempotencyKey: input.paymentFlow === "separate"
+      ? `seller-refund-${input.orderId}-${refundedAmountCents}`
+      : input.idempotencyKey ??
       `${input.amountCents == null ? "full" : `partial-${input.amountCents}`}-refund-${input.orderId}`,
   });
   let sellerTransferReversedCents = input.sellerTransferReversedCents ?? 0;

@@ -7,9 +7,11 @@ import { authClient } from "@/lib/auth-client";
 export function SignInForm({
   returnTo = "/account",
   initialError = "",
+  saveOrder = false,
 }: {
   returnTo?: string;
   initialError?: string;
+  saveOrder?: boolean;
 }) {
   const [email, setEmail] = useState("");
   const [state, setState] = useState<"idle" | "loading" | "sent" | "error">(
@@ -25,12 +27,14 @@ export function SignInForm({
         ? returnTo
         : "/account";
     const newUserCallbackURL = `${callbackURL}${callbackURL.includes("?") ? "&" : "?"}new=1`;
+    const errorParams = new URLSearchParams({ error: "invalid-link", returnTo: callbackURL });
+    if (saveOrder) errorParams.set("intent", "save-order");
     const result = await authClient.signIn.magicLink({
       email,
       name: email.split("@")[0] || "Collector",
       callbackURL,
       newUserCallbackURL,
-      errorCallbackURL: "/sign-in?error=invalid-link",
+      errorCallbackURL: `/sign-in?${errorParams}`,
     });
     if (result.error) {
       setState("error");
@@ -58,6 +62,8 @@ export function SignInForm({
         >
           Use another email
         </button>
+        {returnTo === "/cart" && <Link className="button outline" href="/cart">Continue as guest</Link>}
+        {saveOrder && <Link className="text-link" href="/marketplace">Continue browsing</Link>}
       </div>
     );
   return (
@@ -65,11 +71,13 @@ export function SignInForm({
       <p className="eyebrow">
         {returnTo.startsWith("/store") ? "Store account" : "Your account"}
       </p>
-      <h1>Sign in to Model Car Center</h1>
+      <h1>{saveOrder ? "Create your optional account" : "Sign in to Model Car Center"}</h1>
       <p>
-        Use one secure account for shopping and selling. Approved stores should
-        sign in with the contact email on their seller record.
+        {saveOrder
+          ? "Use the same email you used at checkout. After you verify the secure link, your guest orders will appear in My Garage. If you already have an account, the link signs you in."
+          : "Use one secure account for shopping and selling. Approved stores should sign in with the contact email on their seller record."}
       </p>
+      {saveOrder && <p>Your purchase is complete. This step is optional; tracking emails and support do not require an account.</p>}
       <label htmlFor="sign-in-email">
         Email address
         <input
@@ -99,6 +107,8 @@ export function SignInForm({
       <p className="form-note">
         No password needed. By continuing, you agree to the <Link href="/terms">Marketplace Terms</Link> and acknowledge the <Link href="/privacy">Privacy Policy</Link>. Browsing and guest checkout remain available without an account.
       </p>
+      {returnTo === "/cart" && <Link className="button outline" href="/cart">Continue as guest</Link>}
+      {saveOrder && <Link className="text-link" href="/marketplace">Skip and continue browsing</Link>}
     </form>
   );
 }

@@ -1,7 +1,8 @@
-import { and, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { getD1, getDb } from "@/db";
 import {
   checkoutReservationItems,
+  checkoutGroups,
   checkoutReservations,
   orderItems,
   orders,
@@ -12,6 +13,7 @@ import { sendPaidOrderEmails } from "./email";
 import { releaseReservation } from "./inventory";
 import {
   retrieveCheckoutSession,
+  retrieveCheckoutLines,
   reverseSellerTransfer,
   sellerTransferReversalTarget,
   stripeSettlementDetails,
@@ -27,6 +29,8 @@ import {
   disputeIsTerminal,
   disputePayoutDisposition,
 } from "./stripe-event-rules";
+import { allocateCheckoutLines } from "./checkout-allocation";
+import { reconcileCheckoutRefunds } from "./checkout-refunds";
 
 type StripeEvent = {
   id: string;
@@ -78,8 +82,8 @@ export async function processStripeEvent(event: StripeEvent) {
         charge.id
           ? eq(orders.stripeChargeId, charge.id)
           : eq(orders.stripePaymentIntentId, charge.payment_intent ?? ""),
-      )
-      .limit(1);
+      );
+    if (matchedOrders.length > 1 || matchedOrders[0]?.checkoutGroupId) return reconcileCheckoutRefunds(event, matchedOrders);
     const matchedOrder = matchedOrders[0];
     let sellerTransferReversedCents =
       matchedOrder?.sellerTransferReversedCents ?? 0;
@@ -368,7 +372,7 @@ async function handleDisputeEvent(event: StripeEvent) {
       ),
   ];
 
-  if (order && disposition === "cancel" && !order.stripeTransferId) {
+  if (order && disposition === "cancel") {
     statements.push(
       d1
         .prepare(`UPDATE orders SET
@@ -381,24 +385,19 @@ async function handleDisputeEvent(event: StripeEvent) {
             ELSE seller_transfer_last_error
           END,
           updated_at = CURRENT_TIMESTAMP
-          WHERE id = ?`)
-        .bind(`Stripe dispute ${dispute.id} was lost.`, order.id),
+          WHERE stripe_transfer_id IS NULL AND (stripe_charge_id = ? OR stripe_payment_intent_id = ?)`)
+        .bind(`Stripe dispute ${dispute.id} was lost.`, chargeId ?? "__missing_charge__", paymentIntentId ?? "__missing_intent__"),
     );
   }
-  if (
-    order &&
-    disposition === "release" &&
-    !order.stripeTransferId &&
-    order.sellerTransferStatus === "cancelled"
-  ) {
+  if (order && disposition === "release") {
     statements.push(
       d1
         .prepare(`UPDATE orders SET
           seller_transfer_status = 'pending',
           seller_transfer_last_error = NULL,
           updated_at = CURRENT_TIMESTAMP
-          WHERE id = ? AND seller_transfer_last_error LIKE 'Stripe dispute %'`)
-        .bind(order.id),
+          WHERE stripe_transfer_id IS NULL AND (stripe_charge_id = ? OR stripe_payment_intent_id = ?) AND seller_transfer_last_error LIKE 'Stripe dispute %'`)
+        .bind(chargeId ?? "__missing_charge__", paymentIntentId ?? "__missing_intent__"),
     );
   }
 
@@ -558,6 +557,7 @@ async function findSellerForConnectEvent(event: StripeEvent) {
 }
 
 async function finalizePaidCheckout(event: StripeEvent, session: StripeCheckoutSession) {
+  if (session.metadata?.checkout_group_id) return finalizeGroupedCheckout(event, session);
   const reservationId = session.metadata?.reservation_id;
   if (!reservationId) throw new Error("Paid Checkout Session is missing reservation metadata.");
   const db = getDb();
@@ -570,6 +570,37 @@ async function finalizePaidCheckout(event: StripeEvent, session: StripeCheckoutS
     await recordEvent(event);
     return { duplicateOrder: true };
   }
+  const planned = await preparePaidOrder(session, reservationId);
+  await getD1().batch([getD1().prepare("INSERT INTO stripe_events (id, type) VALUES (?, ?)").bind(event.id, event.type), ...planned.statements]);
+  await sendPaidOrderEmails(planned.email);
+  return { orderId: planned.orderId, orderNumber: planned.orderNumber };
+}
+
+async function finalizeGroupedCheckout(event: StripeEvent, session: StripeCheckoutSession) {
+  const groupId = session.metadata!.checkout_group_id;
+  const db = getDb();
+  const [group] = await db.select().from(checkoutGroups).where(eq(checkoutGroups.id, groupId)).limit(1);
+  if (!group || (group.stripeCheckoutSessionId && group.stripeCheckoutSessionId !== session.id)) throw new Error("Paid checkout group does not match this payment.");
+  if (group.status === "completed") { await recordEvent(event); return { duplicateOrder: true }; }
+  if (group.status !== "pending") throw new Error("Paid checkout has released reservations and needs reconciliation.");
+  const reservations = await db.select().from(checkoutReservations).where(eq(checkoutReservations.checkoutGroupId, groupId)).orderBy(asc(checkoutReservations.id));
+  if (!reservations.length || reservations.some((row) => row.status !== "pending") || session.amount_total == null || session.currency !== group.currency) throw new Error("Paid checkout reservations are incomplete.");
+  const processingFee = stripeSettlementDetails(session, reservations.reduce((sum, row) => sum + row.platformFeeCents, 0)).paymentProcessingFeeCents;
+  const allocations = allocateCheckoutLines(reservations, await retrieveCheckoutLines(session.id), session.amount_total, session.total_details?.amount_tax ?? 0, processingFee);
+  const planned = [];
+  for (const allocation of allocations) planned.push(await preparePaidOrder(session, allocation.reservationId, { totalCents: allocation.totalCents, taxCents: allocation.taxCents, paymentProcessingFeeCents: allocation.processingFeeCents }));
+  const d1 = getD1();
+  await d1.batch([
+    d1.prepare("INSERT INTO stripe_events (id, type) VALUES (?, ?)").bind(event.id, event.type),
+    ...planned.flatMap((row) => row.statements),
+    d1.prepare("UPDATE checkout_groups SET status = 'completed', stripe_checkout_session_id = ? WHERE id = ? AND status = 'pending'").bind(session.id, groupId),
+  ]);
+  for (const row of planned) await sendPaidOrderEmails(row.email);
+  return { orders: planned.map(({ orderId, orderNumber }) => ({ orderId, orderNumber })) };
+}
+
+async function preparePaidOrder(session: StripeCheckoutSession, reservationId: string, allocation?: { totalCents: number; taxCents: number; paymentProcessingFeeCents: number | null }) {
+  const db = getDb();
   const reservationRows = await db
     .select({
       id: checkoutReservations.id,
@@ -601,8 +632,7 @@ async function finalizePaidCheckout(event: StripeEvent, session: StripeCheckoutS
   const reservation = reservationRows[0];
   if (!reservation) throw new Error("Checkout reservation was not found.");
   if (reservation.status !== "pending") {
-    await recordEvent(event);
-    return { reservationAlreadyHandled: true };
+    throw new Error("Checkout reservation has already been handled.");
   }
   const items = await db
     .select()
@@ -623,11 +653,12 @@ async function finalizePaidCheckout(event: StripeEvent, session: StripeCheckoutS
   if (!buyerEmail) throw new Error("Paid Checkout Session is missing the buyer email.");
   const orderId = crypto.randomUUID();
   const orderNumber = makeOrderNumber();
-  const taxCents = session.total_details?.amount_tax ?? 0;
-  const totalCents = session.amount_total ?? reservation.subtotalCents + reservation.shippingCents + taxCents;
+  const taxCents = allocation?.taxCents ?? session.total_details?.amount_tax ?? 0;
+  const totalCents = allocation?.totalCents ?? session.amount_total ?? reservation.subtotalCents + reservation.shippingCents + taxCents;
   const settlement = stripeSettlementDetails(
     session,
     reservation.platformFeeCents,
+    allocation,
   );
   const paidAt = new Date();
   const preorderAnchor = preorderShipAnchor(
@@ -640,14 +671,17 @@ async function finalizePaidCheckout(event: StripeEvent, session: StripeCheckoutS
   const paymentFlow =
     session.metadata?.payment_flow === "separate" ? "separate" : "destination";
   const transferGroup =
-    paymentFlow === "separate" ? stripeTransferGroup(reservationId) : null;
+    paymentFlow === "separate" ? stripeTransferGroup(session.metadata?.checkout_group_id ?? reservationId) : null;
   const shipByAt = addBusinessDays(
     preorderAnchor && preorderAnchor > paidAt ? preorderAnchor : paidAt,
     reservation.handlingTimeBusinessDays,
   );
   const d1 = getD1();
   const pendingGuard = `EXISTS (SELECT 1 FROM checkout_reservations WHERE id = ? AND status = 'pending')`;
-  const statements = [d1.prepare("INSERT INTO stripe_events (id, type) VALUES (?, ?)").bind(event.id, event.type)];
+  const statements: D1PreparedStatement[] = [
+    // Fail the whole payment batch if cancellation or another webhook won the race.
+    d1.prepare(`UPDATE checkout_reservations SET status = CASE WHEN status = 'pending' THEN 'pending' ELSE NULL END WHERE id = ?`).bind(reservationId),
+  ];
   for (const item of items) {
     statements.push(
       d1.prepare(`UPDATE products SET
@@ -668,8 +702,8 @@ async function finalizePaidCheckout(event: StripeEvent, session: StripeCheckoutS
        selected_shipping_carrier, selected_shipping_service, selected_shipping_service_token,
        selected_shipping_estimated_days, marketplace_fee_bps, platform_fee_cents,
        processing_fee_payer, payment_processing_fee_cents, seller_proceeds_cents, tax_cents, total_cents,
-        payment_status, fulfillment_status, buyer_name, shipping_address, ship_from_address, paid_at, ship_by_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'paid', 'unfulfilled', ?, ?, ?, ?, ?)`)
+        payment_status, fulfillment_status, buyer_name, shipping_address, ship_from_address, paid_at, ship_by_at, checkout_group_id, checkout_reservation_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'paid', 'unfulfilled', ?, ?, ?, ?, ?, ?, ?)`)
       .bind(orderId, orderNumber, reservation.sellerId, reservation.buyerUserId, session.id, intent, charge,
         paymentFlow, transferGroup, paymentFlow === "separate" ? "pending" : "transferred", buyerEmail,
         session.currency ?? reservation.currency, reservation.subtotalCents, reservation.shippingCents,
@@ -680,7 +714,7 @@ async function finalizePaidCheckout(event: StripeEvent, session: StripeCheckoutS
         settlement.processingFeePayer, settlement.paymentProcessingFeeCents, settlement.sellerProceedsCents,
         taxCents, totalCents, shipping.name ?? "", JSON.stringify(shipping),
         reservation.shipFromAddress,
-        paidAt.toISOString(), shipByAt.toISOString()),
+        paidAt.toISOString(), shipByAt.toISOString(), session.metadata?.checkout_group_id ?? null, reservationId),
   );
   for (const item of items) {
     statements.push(
@@ -694,8 +728,7 @@ async function finalizePaidCheckout(event: StripeEvent, session: StripeCheckoutS
           item.availabilityTypeSnapshot, item.releaseDateSnapshot),
     );
   }
-  await d1.batch(statements);
-  await sendPaidOrderEmails({
+  const email = {
     orderNumber,
     sellerName: reservation.sellerName,
     sellerEmail: reservation.sellerEmail,
@@ -710,8 +743,8 @@ async function finalizePaidCheckout(event: StripeEvent, session: StripeCheckoutS
       availabilityType: item.availabilityTypeSnapshot,
       releaseDate: item.releaseDateSnapshot,
     })),
-  });
-  return { orderId, orderNumber };
+  };
+  return { orderId, orderNumber, statements, email };
 }
 
 function normalizeShipping(session: StripeCheckoutSession): ShippingAddress {
@@ -757,12 +790,19 @@ export async function getPublicOrderBySession(sessionId: string) {
     })
     .from(orders)
     .innerJoin(sellers, eq(orders.sellerId, sellers.id))
-    .where(and(eq(orders.stripeCheckoutSessionId, sessionId), eq(orders.paymentStatus, "paid")))
-    .limit(1);
+    .where(and(eq(orders.stripeCheckoutSessionId, sessionId), inArray(orders.paymentStatus, ["paid", "partially_refunded", "refunded"])))
+    .orderBy(asc(orders.checkoutReservationId));
   if (!orderRows[0]) return null;
   const items = await db
-    .select({ title: orderItems.productTitleSnapshot, quantity: orderItems.quantity, unitPriceCents: orderItems.unitPriceCents, imageUrl: orderItems.imageUrlSnapshot })
+    .select({ orderId: orderItems.orderId, productId: orderItems.productId, title: orderItems.productTitleSnapshot, quantity: orderItems.quantity, unitPriceCents: orderItems.unitPriceCents, imageUrl: orderItems.imageUrlSnapshot })
     .from(orderItems)
-    .where(eq(orderItems.orderId, orderRows[0].id));
-  return { ...orderRows[0], items };
+    .where(inArray(orderItems.orderId, orderRows.map((order) => order.id)));
+  const sellerOrders = orderRows.map((order) => ({ ...order, items: items.filter((item) => item.orderId === order.id) }));
+  return { ...orderRows[0],
+    subtotalCents: orderRows.reduce((sum, order) => sum + order.subtotalCents, 0),
+    shippingCents: orderRows.reduce((sum, order) => sum + order.shippingCents, 0),
+    taxCents: orderRows.reduce((sum, order) => sum + order.taxCents, 0),
+    totalCents: orderRows.reduce((sum, order) => sum + order.totalCents, 0),
+    items, orders: sellerOrders,
+  };
 }

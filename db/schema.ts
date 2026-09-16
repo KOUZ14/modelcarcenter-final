@@ -773,6 +773,8 @@ export const orders = sqliteTable(
       onDelete: "set null",
     }),
     stripeCheckoutSessionId: text("stripe_checkout_session_id").notNull(),
+    checkoutGroupId: text("checkout_group_id").references(() => checkoutGroups.id),
+    checkoutReservationId: text("checkout_reservation_id").references(() => checkoutReservations.id),
     stripePaymentIntentId: text("stripe_payment_intent_id"),
     stripeChargeId: text("stripe_charge_id"),
     stripeRefundId: text("stripe_refund_id"),
@@ -859,9 +861,10 @@ export const orders = sqliteTable(
   },
   (table) => [
     uniqueIndex("orders_number_unique").on(table.orderNumber),
-    uniqueIndex("orders_checkout_session_unique").on(
+    index("orders_checkout_session_idx").on(
       table.stripeCheckoutSessionId,
     ),
+    uniqueIndex("orders_checkout_reservation_unique").on(table.checkoutReservationId),
     uniqueIndex("orders_stripe_transfer_unique").on(table.stripeTransferId),
     index("orders_status_idx").on(table.paymentStatus, table.fulfillmentStatus),
     index("orders_transfer_release_idx").on(
@@ -1441,6 +1444,39 @@ export const sellerAlerts = sqliteTable(
   ],
 );
 
+export const checkoutGroups = sqliteTable("checkout_groups", {
+  id: text("id").primaryKey(),
+  stripeCheckoutSessionId: text("stripe_checkout_session_id").unique(),
+  status: text("status", { enum: ["pending", "completed", "released"] }).notNull().default("pending"),
+  currency: text("currency").notNull(),
+  totalBeforeTaxCents: integer("total_before_tax_cents").notNull(),
+  expiresAt: text("expires_at").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const combinedShippingRequests = sqliteTable("combined_shipping_requests", {
+  id: text("id").primaryKey(),
+  sellerId: text("seller_id").notNull().references(() => sellers.id),
+  buyerUserId: text("buyer_user_id").notNull().references(() => authUser.id, { onDelete: "cascade" }),
+  status: text("status", { enum: ["pending", "quoted", "declined", "cancelled", "used"] }).notNull().default("pending"),
+  items: text("items").notNull(),
+  cartFingerprint: text("cart_fingerprint").notNull(),
+  destinationAddress: text("destination_address").notNull(),
+  currency: text("currency").notNull(),
+  amountCents: integer("amount_cents"),
+  carrier: text("carrier"),
+  service: text("service"),
+  estimatedDays: integer("estimated_days"),
+  sellerNote: text("seller_note").notNull().default(""),
+  expiresAt: text("expires_at").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  index("combined_shipping_buyer_idx").on(table.buyerUserId, table.createdAt),
+  index("combined_shipping_seller_idx").on(table.sellerId, table.status),
+  check("combined_shipping_amount_valid", sql`${table.amountCents} IS NULL OR ${table.amountCents} >= 0`),
+]);
+
 export const checkoutReservations = sqliteTable(
   "checkout_reservations",
   {
@@ -1452,6 +1488,8 @@ export const checkoutReservations = sqliteTable(
       onDelete: "set null",
     }),
     stripeCheckoutSessionId: text("stripe_checkout_session_id"),
+    checkoutGroupId: text("checkout_group_id").references(() => checkoutGroups.id),
+    combinedShippingRequestId: text("combined_shipping_request_id").references(() => combinedShippingRequests.id, { onDelete: "set null" }),
     status: text("status", { enum: ["pending", "completed", "released"] })
       .notNull()
       .default("pending"),
@@ -1488,9 +1526,11 @@ export const checkoutReservations = sqliteTable(
       .default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => [
-    uniqueIndex("checkout_reservations_session_unique").on(
+    index("checkout_reservations_session_idx").on(
       table.stripeCheckoutSessionId,
     ),
+    index("checkout_reservations_group_idx").on(table.checkoutGroupId),
+    uniqueIndex("checkout_reservations_combined_shipping_unique").on(table.combinedShippingRequestId),
     index("checkout_reservations_status_idx").on(table.status, table.expiresAt),
     index("checkout_reservations_buyer_idx").on(table.buyerUserId),
     uniqueIndex("checkout_reservations_shipping_quote_unique").on(

@@ -5,7 +5,6 @@ import {
   canClaimGuestRecord,
   canClaimProfessionalStore,
   canFulfillSellerOrder,
-  cartMergeDecision,
   isCollectorListingAwaitingReview,
   mergeCartItems,
   ownsProduct,
@@ -93,10 +92,9 @@ test("wishlist merging removes duplicates and invalid identifiers", () => {
   assert.deepEqual(uniqueWishlistIds(["p1", "p1", "", 42, "p2"]), ["p1", "p2"]);
 });
 
-test("guest cart merging combines one seller and surfaces cross-seller conflicts", () => {
+test("guest cart merging preserves every seller and combines duplicate products", () => {
   const saved = [cartItem("p1", "seller-a", 2)];
   const guest = [cartItem("p1", "seller-a", 3), cartItem("p2", "seller-a", 1)];
-  assert.equal(cartMergeDecision(saved, guest), "merge");
   assert.deepEqual(
     mergeCartItems(saved, guest)?.map(({ productId, quantity }) => ({
       productId,
@@ -107,11 +105,9 @@ test("guest cart merging combines one seller and surfaces cross-seller conflicts
       { productId: "p2", quantity: 1 },
     ],
   );
-  assert.equal(
-    cartMergeDecision(saved, [cartItem("p3", "seller-b")]),
-    "conflict",
-  );
-  assert.equal(mergeCartItems(saved, [cartItem("p3", "seller-b")]), null);
+  assert.deepEqual(mergeCartItems(saved, [cartItem("p3", "seller-b")]), [...saved, cartItem("p3", "seller-b")]);
+  assert.equal(saved[0].quantity, 2, "Merging must not mutate the saved cart");
+  assert.equal(mergeCartItems(saved, [{ ...cartItem("p1", "seller-a", 3), availableQuantity: 4 }])[0].quantity, 4);
 });
 
 test("legacy records are claimable only by a verified matching email and only once", () => {
