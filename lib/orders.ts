@@ -21,6 +21,8 @@ import {
 import type { ShippingAddress } from "./types";
 import { addBusinessDays } from "./reputation-rules";
 import { preorderShipAnchor } from "./availability-rules";
+import { parseCheckoutShippingAddress } from "./shipping-rules";
+import { stripeShippingAddress } from "./checkout-address";
 import {
   disputeIsTerminal,
   disputePayoutDisposition,
@@ -583,6 +585,7 @@ async function finalizePaidCheckout(event: StripeEvent, session: StripeCheckoutS
       selectedShippingEstimatedDays:
         checkoutReservations.selectedShippingEstimatedDays,
       shipFromAddress: checkoutReservations.shipFromAddress,
+      quotedShippingAddress: checkoutReservations.quotedShippingAddress,
       marketplaceFeeBps: checkoutReservations.marketplaceFeeBps,
       platformFeeCents: checkoutReservations.platformFeeCents,
       currency: checkoutReservations.currency,
@@ -613,7 +616,9 @@ async function finalizePaidCheckout(event: StripeEvent, session: StripeCheckoutS
       ? session.payment_intent.latest_charge
       : session.payment_intent.latest_charge?.id ?? null
     : null;
-  const shipping = normalizeShipping(session);
+  const shipping = session.metadata?.delivery_address_source === "cart"
+    ? stripeShippingAddress(parseCheckoutShippingAddress(JSON.parse(reservation.quotedShippingAddress ?? "null")))
+    : normalizeShipping(session);
   const buyerEmail = session.customer_details?.email?.trim().toLowerCase();
   if (!buyerEmail) throw new Error("Paid Checkout Session is missing the buyer email.");
   const orderId = crypto.randomUUID();

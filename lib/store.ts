@@ -21,6 +21,8 @@ import {
 } from "@/db/schema";
 import { sendShipmentEmail } from "./email";
 import { config } from "./config";
+import { normalizeState } from "./address";
+import { validateShipFromFields } from "./validation";
 import { canClaimProfessionalStore } from "./account-rules";
 import { buildStoreAnalytics } from "./store-rules";
 import { determineMarketplaceFee } from "./fees";
@@ -435,6 +437,7 @@ export async function saveStoreProfile(
   payload: Record<string, unknown>,
 ) {
   assertStoreCanManage(store);
+  validateShipFromFields(payload);
   const rawWebsite = cleanText(payload.websiteUrl, 1_500);
   const websiteUrl = rawWebsite ? optionalHttpUrl(rawWebsite) : null;
   if (rawWebsite && !websiteUrl)
@@ -454,7 +457,7 @@ export async function saveStoreProfile(
     "shippingOriginCountry",
     2,
   ).toUpperCase();
-  const shippingOriginRegion = cleanText(payload.shippingOriginRegion, 80) || null;
+  const shippingOriginRegion = (shippingOriginCountry === "US" ? normalizeState(cleanText(payload.shippingOriginRegion, 80)) : cleanText(payload.shippingOriginRegion, 80)) || null;
   if (["US", "CA"].includes(shippingOriginCountry) && !shippingOriginRegion)
     throw new ValidationError("State or region is required for US and Canadian ship-from addresses.");
   const shippingMode = cleanText(payload.shippingMode, 20);

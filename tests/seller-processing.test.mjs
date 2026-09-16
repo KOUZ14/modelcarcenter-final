@@ -89,7 +89,15 @@ test("paid-order persistence and delayed fee reconciliation use actual fees with
     sqlite.prepare("INSERT INTO checkout_reservations (id, seller_id, subtotal_cents, shipping_cents, platform_fee_cents, marketplace_fee_bps, currency, expires_at) VALUES (?, 'seller', 20000, 1000, 1400, 700, 'usd', '2026-09-16')").run(id);
     sqlite.prepare("INSERT INTO checkout_reservation_items (id, reservation_id, product_id, product_title_snapshot, seller_sku_snapshot, scale_snapshot, manufacturer_snapshot, unit_price_cents, quantity) VALUES (?, ?, 'product', 'Model', 'sku', '1:18', 'Maker', 20000, 1)").run(id,id);
     const event = { id: `evt_${id}`, type: "checkout.session.completed", data: { object: {} } };
-    await finalizePaidCheckout(event, session(id,fee,payer));
+    const paidSession = session(id,fee,payer);
+    const delivery = { name: "Delivery Recipient", street1: "123 Main St", street2: "Unit 4", city: "Los Angeles", state: "CA", zip: "90012", country: "US" };
+    if (id === "new") {
+      sqlite.prepare("UPDATE checkout_reservations SET quoted_shipping_address = ? WHERE id = ?").run(JSON.stringify(delivery), id);
+      paidSession.metadata.delivery_address_source = "cart";
+      paidSession.customer_details.name = "Billing Cardholder";
+      paidSession.customer_details.address = { line1: "999 Billing Ave", state: "NY", postal_code: "10001", country: "US" };
+    }
+    await finalizePaidCheckout(event, paidSession);
     const order = sqlite.prepare("SELECT * FROM orders WHERE stripe_checkout_session_id = ?").get(`cs_${id}`);
     assert.equal(order.processing_fee_payer, payer ?? "platform");
     assert.equal(order.payment_processing_fee_cents, fee);
@@ -98,6 +106,13 @@ test("paid-order persistence and delayed fee reconciliation use actual fees with
     assert.equal(order.total_cents, 23000);
     assert.equal(order.marketplace_fee_bps, 700);
     assert.equal(order.platform_fee_cents, 1400);
+    if (id === "new") {
+      const shipping = JSON.parse(order.shipping_address);
+      assert.equal(shipping.name, delivery.name);
+      assert.equal(shipping.address.line1, delivery.street1);
+      assert.equal(shipping.address.line2, delivery.street2);
+      assert.equal(shipping.address.postal_code, delivery.zip, "Billing details must never replace the quoted delivery destination");
+    }
   }
   assert.equal(sqlite.prepare("SELECT inventory_quantity FROM products").get().inventory_quantity, 0);
   sqlite.exec("UPDATE orders SET fulfillment_status = 'delivered', payout_eligible_at = '2026-09-15T00:00:00.000Z' WHERE stripe_checkout_session_id = 'cs_pending'");

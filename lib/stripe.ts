@@ -1,6 +1,8 @@
 import { config, requireConfig } from "./config.ts";
 import { assertLiveCheckoutConfigured } from "./production-readiness.ts";
 import { sellerProcessingDeduction, sellerProceedsAfterRefund } from "./seller-proceeds.ts";
+import { stripeShippingAddress } from "./checkout-address.ts";
+import type { NormalizedShippingAddress } from "./shipping-rules.ts";
 export { sellerProceedsAfterRefund } from "./seller-proceeds.ts";
 
 type StripeError = { error?: { message?: string; type?: string } };
@@ -66,6 +68,9 @@ export type CheckoutSessionInput = {
   buyerUserId?: string | null;
   buyerEmail?: string | null;
   policyVersion: string;
+  deliveryAddress?: NormalizedShippingAddress;
+  checkoutCustomerId?: string;
+  returnToken?: string;
 };
 
 export function stripeTransferGroup(reservationId: string) {
@@ -76,7 +81,7 @@ export function buildCheckoutSessionBody(input: CheckoutSessionInput) {
   const body = new URLSearchParams({
     mode: "payment",
     success_url: `${config.siteUrl}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
-    cancel_url: `${config.siteUrl}/cart?checkout=cancelled`,
+    cancel_url: input.returnToken ? `${config.siteUrl}/api/checkout/return?reservation_id=${encodeURIComponent(input.reservationId)}` : `${config.siteUrl}/cart?checkout=cancelled`,
     client_reference_id: input.reservationId,
     submit_type: "pay",
     expires_at: String(Math.floor(input.expiresAt.getTime() / 1000)),
@@ -102,10 +107,29 @@ export function buildCheckoutSessionBody(input: CheckoutSessionInput) {
     body.set("metadata[buyer_user_id]", input.buyerUserId);
     body.set("payment_intent_data[metadata][buyer_user_id]", input.buyerUserId);
   }
-  if (input.buyerEmail) body.set("customer_email", input.buyerEmail);
-  config.shippingCountries.forEach((country, index) => {
-    body.set(`shipping_address_collection[allowed_countries][${index}]`, country);
-  });
+  if (input.returnToken) body.set("metadata[return_token]", input.returnToken);
+  if (input.deliveryAddress) {
+    if (!input.checkoutCustomerId) throw new Error("Checkout delivery address requires a dedicated Stripe customer.");
+    body.set("customer", input.checkoutCustomerId);
+    body.set("billing_address_collection", "auto");
+    body.set("metadata[delivery_address_source]", "cart");
+    const shipping = stripeShippingAddress(input.deliveryAddress);
+    body.set("payment_intent_data[shipping][name]", shipping.name);
+    for (const [key, value] of Object.entries(shipping.address)) {
+      body.set(`payment_intent_data[shipping][address][${key}]`, value);
+    }
+    // Hosted Checkout cannot re-quote carrier services on address changes.
+    // Keep this destination fixed; its Customer.shipping also drives Stripe Tax.
+    // https://docs.stripe.com/tax/checkout
+    body.set("custom_text[submit][message]", `Delivery to: ${[
+      shipping.name, ...Object.values(shipping.address),
+    ].filter(Boolean).join(", ").slice(0, 1050)}. To change the delivery address, return to your cart before paying.`);
+  } else {
+    if (input.buyerEmail) body.set("customer_email", input.buyerEmail);
+    config.shippingCountries.forEach((country, index) => {
+      body.set(`shipping_address_collection[allowed_countries][${index}]`, country);
+    });
+  }
   input.items.forEach((item, index) => {
     body.set(`line_items[${index}][price_data][currency]`, item.currency);
     body.set(`line_items[${index}][price_data][unit_amount]`, String(item.priceCents));
@@ -138,11 +162,38 @@ export function buildCheckoutSessionBody(input: CheckoutSessionInput) {
 
 export async function createCheckoutSession(input: CheckoutSessionInput) {
   assertLiveCheckoutConfigured(config);
-  const body = buildCheckoutSessionBody(input);
+  let checkoutCustomerId: string | undefined;
+  if (input.deliveryAddress) {
+    const shipping = stripeShippingAddress(input.deliveryAddress);
+    const customerBody = new URLSearchParams({
+      name: shipping.name,
+      "shipping[name]": shipping.name,
+      "metadata[reservation_id]": input.reservationId,
+    });
+    if (input.buyerEmail) customerBody.set("email", input.buyerEmail);
+    for (const [key, value] of Object.entries(shipping.address)) {
+      customerBody.set(`shipping[address][${key}]`, value);
+    }
+    // A customer per reservation prevents another tab/session from changing the
+    // tax destination of a payment page that is already open.
+    const customer = await stripeRequest<{ id: string }>("/v1/customers", {
+      method: "POST", body: customerBody,
+      idempotencyKey: `checkout-customer-${input.reservationId}`,
+    });
+    checkoutCustomerId = customer.id;
+  }
+  const body = buildCheckoutSessionBody({ ...input, checkoutCustomerId });
   return stripeRequest<StripeCheckoutSession>("/v1/checkout/sessions", {
     method: "POST",
     body,
     idempotencyKey: `checkout-${input.reservationId}`,
+  });
+}
+
+export async function expireCheckoutSession(sessionId: string) {
+  return stripeRequest<StripeCheckoutSession>(`/v1/checkout/sessions/${encodeURIComponent(sessionId)}/expire`, {
+    method: "POST", body: new URLSearchParams(),
+    idempotencyKey: `expire-${sessionId}`,
   });
 }
 

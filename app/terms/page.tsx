@@ -14,6 +14,7 @@ export default function TermsPage() {
     <p>These Marketplace Terms (the <b>“Terms”</b>) are a binding agreement between you and Model Car Center (<b>“Model Car Center,” “we,” “us,”</b> or <b>“our”</b>) governing the Model Car Center website, accounts, Model Hunt, marketplace checkout, and related services (collectively, the <b>“Service”</b>). By creating an account, submitting information, or completing checkout, you agree to these Terms and acknowledge our <Link href="/privacy">Privacy Policy</Link>. Our <Link href="/shipping">Shipping Policy</Link>, <Link href="/returns">Returns &amp; Refunds Policy</Link>, and any seller policy shown before purchase are incorporated into these Terms.</p>
 
     <h2>2. Eligibility</h2>
+    <p>Optional address suggestions use Google Maps. Use of those suggestions is also subject to the <a href="https://maps.google.com/help/terms_maps/" target="_blank" rel="noreferrer">Google Maps Additional Terms of Service</a>. You can choose manual address entry instead.</p>
     <p>You must be at least 18 years old and legally able to enter a contract to open an account, buy, or sell. The Service is not directed to children under 13. A person between 13 and 17 may browse only under a parent or legal guardian’s supervision; the parent or guardian must conduct any transaction.</p>
 
     <h2>3. Marketplace role</h2>

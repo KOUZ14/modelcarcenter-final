@@ -308,6 +308,20 @@ footer { padding-top: 70px; color: white; background: var(--ink); }
 .product-summary h1 { max-width: 570px; margin-bottom: 18px; font-size: clamp(42px, 4vw, 58px); line-height: .94; letter-spacing: -.05em; font-weight: 500; text-wrap: balance; }
 .vehicle-line { color: var(--muted); line-height: 1.5; }
 .detail-price { margin: 30px 0 8px; font-size: 32px; font-weight: 700; }
+.product-price-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 20px; margin: 30px 0 8px; }
+.product-price-row .detail-price { margin: 0; }
+.shipping-estimate-toggle { min-height: 44px; font-size: 13px; }
+.product-shipping-price { color: var(--muted); font-size: 13px; }
+.product-shipping-estimate { margin: 16px 0; padding: 16px; border: 1px solid var(--line); background: #f8f7f4; }
+.product-shipping-estimate label { display: block; margin-bottom: 8px; font-size: 12px; font-weight: 700; }
+.shipping-estimate-fields { display: flex; flex-wrap: wrap; gap: 10px; }
+.shipping-estimate-fields input { flex: 1 1 130px; width: 130px; min-width: 0; min-height: 44px; padding: 10px; border: 1px solid var(--line); background: white; font-size: 16px; }
+.shipping-estimate-fields button { min-height: 44px; }
+.product-shipping-estimate .form-note, .product-shipping-estimate .form-error { margin: 12px 0 0; line-height: 1.55; }
+.shipping-estimate-heading { margin: 16px 0 8px; font-size: 13px; font-weight: 700; }
+.shipping-estimate-results { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.shipping-estimate-results li { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; line-height: 1.5; }
+.shipping-estimate-results b { white-space: nowrap; }
 .stock-line { color: var(--muted); font-size: 13px; }
 .purchase-actions { display: flex; gap: 10px; margin: 26px 0 32px; }
 .purchase-actions { flex-wrap: wrap; }
@@ -410,6 +424,32 @@ footer { padding-top: 70px; color: white; background: var(--ink); }
 .checkout-shipping-form > label, .checkout-address-row label { display: grid; gap: 6px; color: #555; font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
 .checkout-shipping-form input:not([type="radio"]) { width: 100%; min-width: 0; min-height: 42px; padding: 9px 10px; background: white; border: 1px solid var(--line); font-size: 13px; text-transform: none; }
 .checkout-address-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(80px, .55fr); gap: 9px; }
+.address-fields { display: grid; min-width: 0; gap: 14px; }
+.address-fields .address-field { display: grid; min-width: 0; gap: 6px; }
+.address-fields .address-field[hidden] { display: none; }
+.address-fields .address-field label { display: block; margin: 0; color: #444; font-size: 12px; font-weight: 600; letter-spacing: 0; text-transform: none; }
+.address-required { color: #666; font-size: 11px; font-weight: 400; }
+.address-fields input:not([type="hidden"]), .address-fields select { width: 100%; min-width: 0; min-height: 46px; padding: 10px 12px; border: 1px solid #aaa69f; border-radius: 3px; background: #fff; color: #222; font: inherit; font-size: 14px; }
+.address-fields input:focus, .address-fields select:focus { border-color: #222; outline: 2px solid #222; outline-offset: 2px; }
+.address-fields [aria-invalid="true"] { border-color: #a0192b; }
+.address-fields .address-error { margin: 0; color: #941429; font-size: 12px; font-weight: 400; line-height: 1.45; letter-spacing: 0; text-transform: none; }
+.address-fields .address-help { margin: 7px 0 0; color: #666; font-size: 12px; line-height: 1.5; }
+.address-help a { text-decoration: underline; }
+.address-fields .address-link { justify-self: start; min-height: 36px; padding: 5px 0; text-align: left; font-size: 12px; line-height: 1.5; text-transform: none; letter-spacing: 0; }
+.address-row { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(95px, 1fr); gap: 12px; }
+.address-country { display: grid; gap: 5px; }
+.address-country > span { color: #666; font-size: 12px; }
+.address-country > strong { color: #333; font-size: 14px; font-weight: 500; }
+.address-search { position: relative; min-width: 0; }
+.address-suggestions { position: absolute; z-index: 20; top: 70px; inset-inline: 0; padding: 4px; background: white; border: 1px solid #aaa69f; border-radius: 3px; box-shadow: 0 8px 20px #0002; }
+.address-suggestions ul { list-style: none; margin: 0; padding: 0; }
+.address-suggestions button { display: block; width: 100%; min-height: 44px; padding: 10px; background: white; border: 0; text-align: left; color: #222; font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; cursor: pointer; }
+.address-suggestions button:hover, .address-suggestions button[aria-selected="true"] { background: #f0eee8; outline: 1px solid #aaa69f; }
+.address-attribution { display: block; padding: 8px 10px 4px; font: normal 400 12px sans-serif; color: #5e5e5e; letter-spacing: normal; white-space: nowrap; text-align: right; }
+@media (max-width: 600px) {
+  .address-fields input:not([type="hidden"]), .address-fields select { font-size: 16px; }
+  .address-row { grid-template-columns: minmax(0, 1fr); }
+}
 .shipping-options { display: grid; gap: 8px; min-width: 0; margin: 6px 0 0; padding: 12px; border: 1px solid #d2cfc9; }
 .shipping-options legend { padding-inline: 7px; font-size: 11px; font-weight: 700; }
 .shipping-option { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 10px; background: white; border: 1px solid var(--line); cursor: pointer; }

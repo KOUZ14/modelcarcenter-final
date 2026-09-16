@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { getProductBySlug, getRelatedProducts } from "@/lib/catalog";
 import { ProductGallery } from "@/components/product-gallery";
 import { ProductPurchase } from "@/components/product-purchase";
+import { ProductShippingEstimate } from "@/components/product-shipping-estimate";
 import { ProductCard } from "@/components/product-card";
 import { formatCondition, formatMoney } from "@/lib/format";
 import { SiteHeader } from "@/components/site-header";
@@ -117,9 +118,7 @@ export default async function ProductPage({
                 .filter(Boolean)
                 .join(" · ")}
             </p>
-            <p className="detail-price">
-              {formatMoney(product.priceCents, product.currency)}
-            </p>
+            <ProductShippingEstimate key={product.id} product={product} />
             <p className="stock-line">
               {product.availableQuantity < 1
                 ? "Sold out"

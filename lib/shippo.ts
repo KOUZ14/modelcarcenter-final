@@ -73,7 +73,7 @@ export class ShippoApiError extends Error {
   }
 }
 
-export async function createShippoShipment(input: {
+type ShipmentInput = {
   from: {
     name: string;
     company: string;
@@ -91,7 +91,26 @@ export async function createShippoShipment(input: {
   metadata: string;
   insuranceAmountCents: number;
   signatureRequired: boolean;
-}) {
+};
+
+export function createShippoShipment(input: ShipmentInput) {
+  return requestShippoShipment(input, false);
+}
+
+// Quote addresses may omit the street/city; they cannot be used to buy a label.
+// https://docs.goshippo.com/api-reference/addresses/create-a-new-address
+export function createShippoEstimate(
+  input: Omit<ShipmentInput, "to"> & { to: { zip: string; country: "US" } },
+) {
+  return requestShippoShipment(input, true);
+}
+
+async function requestShippoShipment(
+  input: Omit<ShipmentInput, "to"> & {
+    to: ShipmentInput["to"] | { zip: string; country: "US" };
+  },
+  estimate: boolean,
+) {
   const extra: Record<string, unknown> = {};
   if (input.insuranceAmountCents > 0) {
     extra.insurance = {
@@ -113,7 +132,7 @@ export async function createShippoShipment(input: {
       address_to: {
         ...input.to,
         is_residential: true,
-        validate: true,
+        validate: !estimate,
       },
       parcels: [
         {
@@ -136,7 +155,7 @@ export async function createShippoShipment(input: {
     .map(normalizeRate)
     .filter((rate): rate is ShippoRate => Boolean(rate))
     .sort((left, right) => left.amountCents - right.amountCents);
-  if (!rates.length)
+  if (!rates.length && !estimate)
     throw new ShippoApiError(messageFromShippo(shipment, "No carrier rates are available for this package and address."));
   return { shippoShipmentId: shipment.object_id, rates };
 }

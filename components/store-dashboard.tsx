@@ -5,7 +5,9 @@ import { SellerOrderAmounts } from "./seller-order-amounts";
 
 import Link from "next/link";
 import { BrandLogo } from "@/components/brand-logo";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useMemo, useRef, useState } from "react";
+import { AddressFields, type AddressFieldsHandle } from "./address-fields";
+import { SHIP_FROM_FIELD_NAMES, shipFromAddressValues } from "@/lib/address";
 import { formatMoney, formatUtcDate, formatUtcDateTime } from "@/lib/format";
 import {
   EditableProductImage,
@@ -233,11 +235,12 @@ export function StoreDashboard({
     });
     const body = (await response.json()) as Record<string, unknown> & {
       error?: string;
+      fields?: Record<string, string>;
     };
     if (!response.ok) {
       const nextError = body.error || "The store change could not be saved.";
       setError(nextError);
-      throw new Error(nextError);
+      throw Object.assign(new Error(nextError), { fields: body.fields });
     }
     setMessage(options.message ?? "Saved.");
     if (options.reload) window.location.reload();
@@ -1195,6 +1198,8 @@ function StoreSettings({
     options?: { reload?: boolean; message?: string },
   ): Promise<Record<string, unknown>>;
 }) {
+  const addressRef = useRef<AddressFieldsHandle>(null);
+  const [saveError, setSaveError] = useState("");
   const [acceptedSellerTerms, setAcceptedSellerTerms] = useState(false);
   const currentSellerTerms =
     store.sellerTermsVersion === POLICY_VERSION &&
@@ -1202,10 +1207,17 @@ function StoreSettings({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    await action(
-      { action: "save_store", ...Object.fromEntries(new FormData(event.currentTarget)) },
-      { reload: true, message: "Store profile updated." },
-    );
+    setSaveError("");
+    try {
+      await action(
+        { action: "save_store", ...Object.fromEntries(new FormData(event.currentTarget)) },
+        { reload: true, message: "Store profile updated." },
+      );
+    } catch (error) {
+      const fields = (error as { fields?: Record<string, string> }).fields;
+      if (fields) addressRef.current?.setErrors(fields);
+      setSaveError(error instanceof Error ? error.message : "The store could not be saved. Please try again.");
+    }
   }
 
   async function acceptTerms() {
@@ -1222,6 +1234,7 @@ function StoreSettings({
       <header className="store-page-heading"><div><p className="eyebrow">Storefront</p><h2>Store settings</h2><p>Update the public details and policies customers see.</p></div></header>
       <section className="store-panel store-settings">
         <form className="admin-form" onSubmit={submit}>
+          {saveError && <p className="form-error" role="alert">{saveError}</p>}
           <div className="form-row"><label>Store name<input name="storeName" required maxLength={120} disabled={disabled} defaultValue={store.storeName} /></label><label>Primary contact<input name="contactName" required maxLength={120} disabled={disabled} defaultValue={store.contactName} /></label></div>
           <label>Account email<input value={store.contactEmail} disabled /><span>Contact support to change the email that owns this store.</span></label>
           <label>Store description<textarea name="description" rows={5} maxLength={2000} disabled={disabled} defaultValue={store.description} /></label>
@@ -1229,12 +1242,8 @@ function StoreSettings({
           <div className="form-row"><label>Shipping model<select name="shippingMode" required disabled={disabled} defaultValue={store.shippingMode}><option value="calculated">Calculated carrier rates</option><option value="flat">Flat-rate shipping</option><option value="free">Free shipping</option></select></label><label>Handling time (business days)<input name="handlingTimeBusinessDays" type="number" min={1} max={10} required disabled={disabled} defaultValue={store.handlingTimeBusinessDays} /></label></div>
           <label>Flat-rate amount (USD)<input name="defaultShipping" inputMode="decimal" required disabled={disabled} defaultValue={(store.defaultShippingCents / 100).toFixed(2)} /><span>Used only when the shipping model is flat rate.</span></label>
           <h3>Ship-from address</h3>
-          <p className="form-note">This protected address is sent only to carriers for rates and labels.</p>
-          <label>Street address<input name="shippingOriginStreet1" required maxLength={200} disabled={disabled} defaultValue={store.shippingOriginStreet1 ?? ""} /></label>
-          <label>Apartment, suite, or unit<input name="shippingOriginStreet2" maxLength={200} disabled={disabled} defaultValue={store.shippingOriginStreet2 ?? ""} /></label>
-          <div className="form-row"><label>City<input name="shippingOriginCity" required maxLength={120} disabled={disabled} defaultValue={store.shippingOriginCity ?? ""} /></label><label>State or region<input name="shippingOriginRegion" required maxLength={80} disabled={disabled} defaultValue={store.shippingOriginRegion ?? ""} /></label></div>
-          <div className="form-row"><label>Postal code<input name="shippingOriginPostalCode" required maxLength={20} disabled={disabled} defaultValue={store.shippingOriginPostalCode ?? ""} /></label><label>Country code<input name="shippingOriginCountry" required maxLength={2} disabled={disabled} defaultValue={store.shippingOriginCountry} /></label></div>
-          <label>Carrier contact phone<input name="shippingOriginPhone" type="tel" required maxLength={50} disabled={disabled} defaultValue={store.shippingOriginPhone ?? ""} /></label>
+          <p className="form-note">Your ship-from address is private and is used for carrier rates and labels.</p>
+          <AddressFields ref={addressRef} fieldNames={SHIP_FROM_FIELD_NAMES} initialValues={shipFromAddressValues(store)} includePhone disabled={disabled} />
           <h3>Default package</h3>
           <div className="parcel-grid"><label>Length (in)<input name="defaultPackageLength" inputMode="decimal" required disabled={disabled} defaultValue={store.defaultPackageLength} /></label><label>Width (in)<input name="defaultPackageWidth" inputMode="decimal" required disabled={disabled} defaultValue={store.defaultPackageWidth} /></label><label>Height (in)<input name="defaultPackageHeight" inputMode="decimal" required disabled={disabled} defaultValue={store.defaultPackageHeight} /></label><label>Weight (lb)<input name="defaultPackageWeight" inputMode="decimal" required disabled={disabled} defaultValue={store.defaultPackageWeight} /></label></div>
           <label>Shipping policy<textarea name="shippingPolicySummary" rows={4} maxLength={1000} disabled={disabled} defaultValue={store.shippingPolicySummary} /></label>

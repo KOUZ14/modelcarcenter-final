@@ -11,6 +11,8 @@ import {
 import { ProductImageFields } from "@/components/product-image-fields";
 import { POLICY_VERSION } from "@/lib/legal";
 import { uploadProductPhotoFiles } from "@/lib/upload-client";
+import { AddressFields, type AddressFieldsHandle } from "./address-fields";
+import { countryName, SHIP_FROM_FIELD_NAMES, shipFromAddressValues } from "@/lib/address";
 
 type Initial = {
   product: Record<string, unknown>;
@@ -49,6 +51,7 @@ export function CollectorListingForm({
 }) {
   const product = initial?.product ?? {};
   const formRef = useRef<HTMLFormElement>(null);
+  const addressRef = useRef<AddressFieldsHandle>(null);
   const [productId, setProductId] = useState(String(product.id ?? ""));
   const [shipFromAddresses, setShipFromAddresses] = useState(
     initialShipFromAddresses,
@@ -100,9 +103,11 @@ export function CollectorListingForm({
       const body = (await response.json()) as {
         productId?: string;
         error?: string;
+        fields?: Record<string, string>;
         shipFromAddress?: ShipFromAddress;
       };
       if (!response.ok || !body.productId) {
+        if (body.fields) addressRef.current?.setErrors(body.fields);
         throw new Error(body.error || "The draft could not be saved.");
       }
       setProductId(body.productId);
@@ -461,7 +466,7 @@ export function CollectorListingForm({
               <strong>{selectedShipFromAddress.label}</strong>
               <span>{selectedShipFromAddress.street1}{selectedShipFromAddress.street2 ? `, ${selectedShipFromAddress.street2}` : ""}</span>
               <span>{selectedShipFromAddress.city}, {selectedShipFromAddress.region} {selectedShipFromAddress.postalCode}</span>
-              <span>{selectedShipFromAddress.country}</span>
+              <span>{countryName(selectedShipFromAddress.country)}</span>
               <input type="hidden" name="shippingOriginStreet1" value={selectedShipFromAddress.street1} />
               <input type="hidden" name="shippingOriginStreet2" value={selectedShipFromAddress.street2 ?? ""} />
               <input type="hidden" name="shippingOriginCity" value={selectedShipFromAddress.city} />
@@ -472,18 +477,8 @@ export function CollectorListingForm({
             </div>
           ) : (
             <div className="new-address-fields">
-              <label>Address name<input name="shipFromAddressLabel" required maxLength={80} placeholder="Home, office, storage unit…" defaultValue="Home" autoComplete="off" /></label>
-              <label>Street address<input name="shippingOriginStreet1" required maxLength={200} autoComplete="shipping address-line1" defaultValue={String(seller?.shippingOriginStreet1 ?? "")} /></label>
-              <label>Apartment, suite, or unit<input name="shippingOriginStreet2" maxLength={200} autoComplete="shipping address-line2" defaultValue={String(seller?.shippingOriginStreet2 ?? "")} /></label>
-              <div className="form-row">
-                <label>City<input name="shippingOriginCity" required maxLength={120} autoComplete="shipping address-level2" defaultValue={String(seller?.shippingOriginCity ?? "")} /></label>
-                <label>State or region<input name="shippingOriginRegion" required maxLength={80} autoComplete="shipping address-level1" defaultValue={String(seller?.shippingOriginRegion ?? "")} /></label>
-              </div>
-              <div className="form-row">
-                <label>Postal code<input name="shippingOriginPostalCode" required maxLength={20} autoComplete="shipping postal-code" defaultValue={String(seller?.shippingOriginPostalCode ?? "")} /></label>
-                <label>Country code<input name="shippingOriginCountry" required maxLength={2} autoComplete="shipping country" defaultValue={String(seller?.shippingOriginCountry ?? "US")} /></label>
-              </div>
-              <label>Carrier contact phone<input name="shippingOriginPhone" type="tel" required maxLength={50} autoComplete="tel" defaultValue={String(seller?.shippingOriginPhone ?? "")} /></label>
+              <label>Address name (optional)<input name="shipFromAddressLabel" maxLength={80} placeholder="Home, office, storage unit…" defaultValue="Home" autoComplete="off" /></label>
+              <AddressFields ref={addressRef} fieldNames={SHIP_FROM_FIELD_NAMES} initialValues={shipFromAddressValues(seller)} includePhone disabled={busy} />
             </div>
           )}
 

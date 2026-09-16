@@ -26,6 +26,7 @@ export default function PrivacyPage() {
     <p>We do not receive your full card number, bank account credentials, or identity-verification documents from Stripe. Stripe collects and processes those details under its own privacy notice. Shipping addresses may be considered sensitive personal information in some jurisdictions; we use them only for fulfillment, support, security, and legal compliance.</p>
 
     <h2>3. Sources of information</h2>
+    <p>If you use optional address autocomplete, the street address you type is sent to Google Maps to suggest and complete your address. Google&apos;s <a href="https://policies.google.com/privacy" target="_blank" rel="noreferrer">Privacy Policy</a> applies to that processing. Choose manual entry to enter an address without using this service.</p>
     <p>We collect information directly from you; automatically from your browser and device; from sellers and buyers involved in a transaction; from Stripe about checkout, payments, refunds, verification, and payout status; from authentication and email-delivery providers; and from public sources when reasonably needed to review a professional seller application or protect the marketplace.</p>
 
     <h2>4. How we use information</h2>

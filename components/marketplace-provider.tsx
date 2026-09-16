@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import type { CartItem, ProductSummary } from "@/lib/types";
 import { cartSellerConflict } from "@/lib/business";
 import { authClient } from "@/lib/auth-client";
+import { CHECKOUT_ADDRESS_KEY, CHECKOUT_SESSION_KEY } from "@/lib/checkout-address";
 
 type Collector = {
   id: string;
@@ -44,6 +45,21 @@ export function MarketplaceProvider({ children }: { children: React.ReactNode })
   useEffect(() => {
     let active = true;
     async function bootstrap() {
+      // Close an abandoned payment page before refreshing inventory on back/reload.
+      if (window.location.pathname === "/cart") {
+        try {
+          const reservationId = sessionStorage.getItem(CHECKOUT_SESSION_KEY);
+          const response = await fetch("/api/checkout/return", {
+            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reservationId }),
+          });
+          const data = await response.json() as { completedSessionId?: string };
+          if (data.completedSessionId) {
+            window.location.assign(new URL(`/checkout/success?session_id=${encodeURIComponent(data.completedSessionId)}`, window.location.origin).href);
+            return;
+          }
+          if (response.ok) sessionStorage.removeItem(CHECKOUT_SESSION_KEY);
+        } catch { /* Checkout retries cancellation before accepting another payment. */ }
+      }
       let guestCart: CartItem[] = [];
       let guestWishlist: string[] = [];
       try {
@@ -151,14 +167,14 @@ export function MarketplaceProvider({ children }: { children: React.ReactNode })
     },
     removeFromCart(productId) { const next = cart.filter((item) => item.productId !== productId); setCart(next); persistCart(next); },
     setQuantity(productId, quantity) { const next = cart.map((item) => item.productId === productId ? { ...item, quantity: Math.min(item.availableQuantity, Math.max(1, Math.trunc(quantity))) } : item); setCart(next); persistCart(next); },
-    clearCart() { setCart([]); persistCart([]); },
+    clearCart() { setCart([]); persistCart([]); clearDeliveryDraft(); },
     toggleWishlist(productId) {
       const saved = !wishlist.includes(productId);
       setWishlist(saved ? [...wishlist, productId] : wishlist.filter((item) => item !== productId));
       if (mode === "account") void fetch("/api/account", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "wishlist", productId, saved }) });
     },
     wishlistHas(productId) { return wishlist.includes(productId); },
-    async signOut() { await authClient.signOut(); clearGuestStorage(); router.push("/"); },
+    async signOut() { await authClient.signOut(); clearGuestStorage(); clearDeliveryDraft(); router.push("/"); },
   }), [addDirect, cart, collector, mode, persistCart, router, wishlist]);
 
   return <MarketplaceContext.Provider value={value}>
@@ -193,6 +209,10 @@ function cartItemFromProduct(product: ProductSummary, quantity: number): CartIte
 function clearGuestStorage() {
   localStorage.removeItem(CART_KEY);
   localStorage.removeItem(WISHLIST_KEY);
+}
+
+function clearDeliveryDraft() {
+  try { sessionStorage.removeItem(CHECKOUT_ADDRESS_KEY); sessionStorage.removeItem(CHECKOUT_SESSION_KEY); } catch { /* Storage may be disabled. */ }
 }
 
 export function useMarketplace() {

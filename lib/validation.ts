@@ -1,5 +1,6 @@
 import { normalizeSearch } from "./business.ts";
 import { isCurrentPolicyVersion } from "./legal.ts";
+import { addressErrors, normalizeState, SHIP_FROM_FIELD_NAMES, shipFromAddressValues, type AddressField } from "./address.ts";
 
 export class ValidationError extends Error {
   fields: Record<string, string>;
@@ -305,13 +306,14 @@ export function assertCollectibleListingReady(
 }
 
 export function parseCollectorListing(payload: Record<string, unknown>) {
+  validateShipFromFields(payload);
   const collectible = parseCollectibleDetails(payload);
   const packageLength = listingPackageDecimal(payload.packageLength, "package length", 108);
   const packageWidth = listingPackageDecimal(payload.packageWidth, "package width", 108);
   const packageHeight = listingPackageDecimal(payload.packageHeight, "package height", 108);
   const packageWeight = listingPackageDecimal(payload.packageWeight, "package weight", 150);
   const shippingOriginCountry = requiredString(payload.shippingOriginCountry || "US", "shippingOriginCountry", 2).toUpperCase();
-  const shippingOriginRegion = cleanText(payload.shippingOriginRegion, 80) || null;
+  const shippingOriginRegion = (shippingOriginCountry === "US" ? normalizeState(cleanText(payload.shippingOriginRegion, 80)) : cleanText(payload.shippingOriginRegion, 80)) || null;
   if (["US", "CA"].includes(shippingOriginCountry) && !shippingOriginRegion)
     throw new ValidationError("State or region is required for US and Canadian ship-from addresses.");
   return {
@@ -348,6 +350,15 @@ export function parseCollectorListing(payload: Record<string, unknown>) {
     shippingOriginPostalCode: requiredString(payload.shippingOriginPostalCode, "shippingOriginPostalCode", 20),
     shippingOriginPhone: requiredString(payload.shippingOriginPhone, "shippingOriginPhone", 50),
   };
+}
+
+export function validateShipFromFields(payload: Record<string, unknown>) {
+  const address = shipFromAddressValues(payload);
+  address.country = address.country.trim().toUpperCase();
+  const errors = addressErrors(address, { phone: true });
+  if (Object.keys(errors).length) throw new ValidationError("Check the highlighted address fields.",
+    Object.fromEntries(Object.entries(errors).map(([field, message]) => [SHIP_FROM_FIELD_NAMES[field as AddressField], message])),
+  );
 }
 
 function listingPackageDecimal(value: unknown, label: string, max: number) {

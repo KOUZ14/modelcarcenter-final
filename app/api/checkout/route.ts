@@ -1,6 +1,9 @@
 import { attachStripeSession, loadAuthoritativeCart, releaseReservation, releaseStaleReservations, reserveCart } from "@/lib/inventory";
 import { readJsonObject } from "@/lib/http";
-import { createCheckoutSession, retrieveStripeAccount } from "@/lib/stripe";
+import { createCheckoutSession, expireCheckoutSession, retrieveStripeAccount } from "@/lib/stripe";
+import { checkoutReturnCookie, closePreviousCheckout } from "@/lib/checkout-return";
+import { parseCheckoutShippingAddress } from "@/lib/shipping-rules";
+import { ValidationError } from "@/lib/validation";
 import { getCurrentCollector } from "@/lib/collector-auth";
 import { isCurrentPolicyVersion, POLICY_VERSION } from "@/lib/legal";
 import { resolveCheckoutShipping } from "@/lib/checkout-shipping";
@@ -12,11 +15,18 @@ export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
   let reservationId: string | null = null;
+  let sessionId: string | null = null;
   try {
     assertLiveCheckoutConfigured(config);
     const payload = await readJsonObject(request);
     if (!isCurrentPolicyVersion(payload.policyVersion)) {
       throw new Error("Accept the current marketplace policies before checkout.");
+    }
+    const previous = await closePreviousCheckout(request, payload.previousReservationId);
+    if (previous?.completedSessionId) {
+      return Response.json({ url: `${config.siteUrl}/checkout/success?session_id=${encodeURIComponent(previous.completedSessionId)}` }, {
+        headers: { "Cache-Control": "no-store", "Set-Cookie": checkoutReturnCookie(String(payload.previousReservationId)) },
+      });
     }
     const collector = await getCurrentCollector(request.headers).catch(() => null);
     const rawItems = Array.isArray(payload.items) ? payload.items : [];
@@ -38,6 +48,7 @@ export async function POST(request: Request) {
       loadedCart,
       payload.shippingSelection,
       collector?.user.id ?? null,
+      payload.destination,
     );
     const cart = {
       ...loadedCart,
@@ -54,6 +65,7 @@ export async function POST(request: Request) {
       shipping,
     );
     reservationId = reservation.reservationId;
+    const returnToken = crypto.randomUUID();
     const session = await createCheckoutSession({
       reservationId,
       sellerId: cart.seller.sellerId,
@@ -76,21 +88,27 @@ export async function POST(request: Request) {
       buyerUserId: collector?.user.id ?? null,
       buyerEmail: collector?.user.email ?? null,
       policyVersion: POLICY_VERSION,
+      deliveryAddress: parseCheckoutShippingAddress(JSON.parse(shipping.quotedAddress!)),
+      returnToken,
     });
+    sessionId = session.id;
     if (!session.url) throw new Error("Stripe did not return a checkout URL.");
     await attachStripeSession(reservationId, session.id);
-    return Response.json({ url: session.url });
+    return Response.json({ url: session.url, reservationId }, { headers: {
+      "Cache-Control": "no-store", "Set-Cookie": checkoutReturnCookie(reservationId, session.id, returnToken),
+    } });
   } catch (error) {
-    if (reservationId) await releaseReservation(reservationId).catch(console.error);
+    const closed = !sessionId || await expireCheckoutSession(sessionId).then(() => true).catch(() => false);
+    if (reservationId && closed) await releaseReservation(reservationId).catch(console.error);
     if (error instanceof LiveCheckoutUnavailable) {
       return Response.json({ error: error.message }, { status: 503, headers: { "Cache-Control": "no-store" } });
     }
     const message = error instanceof Error ? error.message : "Checkout could not be started.";
-    const safe = /cart|product|inventory|available|seller|checkout|configured|payment/i.test(message)
+    const safe = error instanceof ValidationError || /cart|product|inventory|available|seller|checkout|configured|payment/i.test(message)
       ? message
       : "Checkout could not be started. Please try again.";
     console.error(error);
-    return Response.json({ error: safe }, { status: 400 });
+    return Response.json({ error: safe, ...(error instanceof ValidationError ? { fields: error.fields } : {}) }, { status: 400, headers: { "Cache-Control": "no-store" } });
   }
 }
 

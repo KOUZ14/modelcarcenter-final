@@ -1,4 +1,5 @@
 import { ValidationError } from "./validation.ts";
+import { addressErrors, normalizeState } from "./address.ts";
 
 export type ParcelInput = {
   length: string;
@@ -16,6 +17,13 @@ export type NormalizedShippingAddress = {
   zip: string;
   country: string;
 };
+
+export function parseEstimateZip(value: unknown) {
+  const zip = typeof value === "string" ? value.trim() : "";
+  if (!/^\d{5}(?:-\d{4})?$/.test(zip))
+    throw new ValidationError("Enter a valid U.S. ZIP code, such as 90210 or 90210-1234.");
+  return zip;
+}
 
 export type ShippingRateRequirement = {
   carrier: string | null;
@@ -155,16 +163,10 @@ export function parseCheckoutShippingAddress(
     zip: clean(address.zip),
     country: clean(address.country).toUpperCase(),
   };
-  if (
-    !normalized.name ||
-    !normalized.street1 ||
-    !normalized.city ||
-    !normalized.zip ||
-    !normalized.country
-  )
-    throw new ValidationError("Complete the delivery name, street, city, postal code, and country.");
-  if (["US", "CA"].includes(normalized.country) && !normalized.state)
-    throw new ValidationError("State or province is required for this delivery address.");
+  if (normalized.country === "US") normalized.state = normalizeState(normalized.state);
+  const errors = addressErrors(normalized, { name: true });
+  if (Object.keys(errors).length)
+    throw new ValidationError("Complete the delivery address. Check the highlighted fields.", errors);
   return normalized;
 }
 

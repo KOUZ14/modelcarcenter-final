@@ -2,20 +2,60 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
+import { AddressFields, type AddressFieldsHandle } from "./address-fields";
 import { useMarketplace } from "./marketplace-provider";
 import { formatMoney as money } from "@/lib/format";
 import { POLICY_VERSION } from "@/lib/legal";
+import { useShippingZip } from "./use-shipping-zip";
+import { CHECKOUT_ADDRESS_KEY, CHECKOUT_SESSION_KEY, checkoutAddressKey, readCheckoutAddressDraft } from "@/lib/checkout-address";
+import type { NormalizedShippingAddress } from "@/lib/shipping-rules";
 
-export function CartPage() {
-  const { cart, removeFromCart, setQuantity, clearCart, collector } =
+export function CartPage({
+  automaticTax,
+  taxBehavior,
+}: {
+  automaticTax: boolean;
+  taxBehavior: "exclusive" | "inclusive";
+}) {
+  const { cart, removeFromCart, setQuantity, clearCart, collector, authReady } =
     useMarketplace();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [acceptedPolicies, setAcceptedPolicies] = useState(false);
   const [calculating, setCalculating] = useState(false);
+  const addressRef = useRef<AddressFieldsHandle>(null);
+  const addressForm = useRef<HTMLFormElement>(null);
+  const addressRevision = useRef(0);
+  const [shippingZip, setShippingZip] = useShippingZip();
+  const [destination, setDestination] = useState<NormalizedShippingAddress | null>(null);
+  useEffect(() => {
+    let active = true;
+    // Back/forward cache can restore the pre-redirect loading state. Reload to
+    // close its payment session and refresh stock before editing the destination.
+    const refreshOnReturn = (event: PageTransitionEvent) => {
+      if (event.persisted) window.location.reload();
+    };
+    window.addEventListener("pageshow", refreshOnReturn);
+    void Promise.resolve().then(() => {
+      let saved: string | null = null;
+      try { saved = sessionStorage.getItem(CHECKOUT_ADDRESS_KEY); } catch { /* Optional tab-local storage. */ }
+      if (active) {
+        const address = readCheckoutAddressDraft(saved);
+        setDestination(address);
+        if (saved) setShippingZip(address.zip);
+      }
+    });
+    return () => {
+      active = false;
+      addressRevision.current += 1;
+      window.removeEventListener("pageshow", refreshOnReturn);
+    };
+  }, [setShippingZip]);
+  const deliveryAddress = destination ? { ...destination, zip: shippingZip } : null;
   const [shippingQuote, setShippingQuote] = useState<{
     cartKey: string;
+    addressKey: string;
     quoteId: string;
     expiresAt: string;
     insuranceRequired?: boolean;
@@ -28,8 +68,17 @@ export function CartPage() {
     0,
   );
   const shippingMode = cart[0]?.shippingMode ?? "flat";
-  const cartKey = cart.map((item) => `${item.productId}:${item.quantity}`).join("|");
-  const activeShippingQuote = shippingQuote?.cartKey === cartKey ? shippingQuote : null;
+  const cartKey = JSON.stringify(cart.map((item) => [item.productId, item.quantity, item.priceCents, item.currency, item.shippingMode, item.shippingCents]));
+  const addressKey = deliveryAddress ? checkoutAddressKey(deliveryAddress) : "";
+  const activeShippingQuote = shippingQuote?.cartKey === cartKey && shippingQuote.addressKey === addressKey && Date.parse(shippingQuote.expiresAt) > Date.now() ? shippingQuote : null;
+  useEffect(() => {
+    if (!shippingQuote) return;
+    const timer = setTimeout(() => {
+      setShippingQuote(null);
+      setSelectedRateId("");
+    }, Math.max(0, Date.parse(shippingQuote.expiresAt) - Date.now()));
+    return () => clearTimeout(timer);
+  }, [shippingQuote]);
   const selectedRate = activeShippingQuote?.options.find(
     (option) => option.id === selectedRateId,
   );
@@ -38,13 +87,22 @@ export function CartPage() {
       ? 0
       : shippingMode === "flat"
         ? (cart[0]?.shippingCents ?? 0)
-        : (selectedRate?.amountCents ?? 0);
+        : (selectedRate?.amountCents ?? null);
+  const taxAddedAtCheckout = automaticTax && taxBehavior === "exclusive";
+  const taxExplanation = !automaticTax
+    ? "Tax is not collected at checkout."
+    : taxBehavior === "inclusive"
+      ? "Prices include applicable tax. The tax amount is calculated in Stripe Checkout before payment."
+      : "Applicable tax is calculated in Stripe Checkout and added before payment.";
   async function calculateShipping(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (shippingMode !== "calculated") { await checkout(); return; }
     setCalculating(true);
+    setShippingQuote(null);
+    setSelectedRateId("");
     setError("");
+    const revision = ++addressRevision.current;
     try {
-      const fields = Object.fromEntries(new FormData(event.currentTarget));
       const response = await fetch("/api/shipping/options", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -53,7 +111,7 @@ export function CartPage() {
             productId: item.productId,
             quantity: item.quantity,
           })),
-          destination: fields,
+          destination: deliveryAddress,
         }),
       });
       const data = (await response.json()) as {
@@ -63,11 +121,15 @@ export function CartPage() {
         insuranceRequired?: boolean;
         signatureRequired?: boolean;
         error?: string;
+        fields?: Record<string, string>;
       };
+      if (revision !== addressRevision.current) return;
+      if (data.fields) addressRef.current?.setErrors(data.fields);
       if (!response.ok || !data.quoteId || !data.expiresAt || !data.options?.length)
         throw new Error(data.error || "Shipping options could not be calculated.");
       setShippingQuote({
         cartKey,
+        addressKey,
         quoteId: data.quoteId,
         expiresAt: data.expiresAt,
         options: data.options,
@@ -76,22 +138,33 @@ export function CartPage() {
       });
       setSelectedRateId(data.options[0].id);
     } catch (reason) {
+      if (revision !== addressRevision.current) return;
       setShippingQuote(null);
       setSelectedRateId("");
       setError(reason instanceof Error ? reason.message : "Shipping options could not be calculated.");
     } finally {
-      setCalculating(false);
+      if (revision === addressRevision.current) setCalculating(false);
     }
   }
   async function checkout() {
+    if (loading || calculating || !acceptedPolicies || !deliveryAddress || !addressForm.current?.reportValidity()) return;
+    if (shippingMode === "calculated" && (!activeShippingQuote || !selectedRate)) {
+      setError("Calculate fresh shipping rates for your delivery address before checkout.");
+      return;
+    }
+    try { sessionStorage.setItem(CHECKOUT_ADDRESS_KEY, JSON.stringify(deliveryAddress)); } catch { /* Optional tab-local storage. */ }
     setLoading(true);
     setError("");
     try {
+      let previousReservationId: string | null = null;
+      try { previousReservationId = sessionStorage.getItem(CHECKOUT_SESSION_KEY); } catch { /* Storage may be disabled. */ }
       const response = await fetch("/api/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           policyVersion: POLICY_VERSION,
+          destination: deliveryAddress,
+          previousReservationId,
           items: cart.map((item) => ({
             productId: item.productId,
             quantity: item.quantity,
@@ -102,11 +175,17 @@ export function CartPage() {
               : { rateId: shippingMode },
         }),
       });
-      const data = (await response.json()) as { url?: string; error?: string };
+      const data = (await response.json()) as { url?: string; reservationId?: string; error?: string; fields?: Record<string, string> };
+      if (data.fields) addressRef.current?.setErrors(data.fields);
       if (!response.ok || !data.url)
         throw new Error(data.error || "Checkout could not be started.");
+      if (data.reservationId) {
+        try { sessionStorage.setItem(CHECKOUT_SESSION_KEY, data.reservationId); } catch { /* The Stripe return link still closes this session. */ }
+      }
       window.location.assign(data.url);
     } catch (reason) {
+      setShippingQuote(null);
+      setSelectedRateId("");
       setError(
         reason instanceof Error
           ? reason.message
@@ -177,6 +256,7 @@ export function CartPage() {
                 <label>
                   Quantity
                   <select
+                    disabled={loading}
                     value={item.quantity}
                     onChange={(event) =>
                       setQuantity(item.productId, Number(event.target.value))
@@ -194,6 +274,7 @@ export function CartPage() {
                   className="text-button"
                   type="button"
                   onClick={() => removeFromCart(item.productId)}
+                  disabled={loading}
                 >
                   Remove
                 </button>
@@ -204,35 +285,42 @@ export function CartPage() {
         </div>
         <aside className="cart-summary">
           <h2>Order summary</h2>
-          {shippingMode === "calculated" && (
-            <form className="checkout-shipping-form" onSubmit={calculateShipping}>
+          {deliveryAddress && (
+            <form ref={addressForm} className="checkout-shipping-form" onSubmit={calculateShipping}>
               <h3>Delivery address</h3>
-              <p>Enter the address you will confirm in Stripe to compare carrier services.</p>
-              <label>Full name<input name="name" autoComplete="shipping name" required /></label>
-              <label>Street address<input name="street1" autoComplete="shipping address-line1" required /></label>
-              <label>Apartment, suite, or unit<input name="street2" autoComplete="shipping address-line2" /></label>
-              <div className="checkout-address-row"><label>City<input name="city" autoComplete="shipping address-level2" required /></label><label>State<input name="state" autoComplete="shipping address-level1" required /></label></div>
-              <div className="checkout-address-row"><label>Postal code<input name="zip" autoComplete="shipping postal-code" required /></label><label>Country code<input name="country" autoComplete="shipping country" maxLength={2} defaultValue="US" required /></label></div>
-              <button className="button outline small" disabled={calculating}>{calculating ? "Calculating…" : activeShippingQuote ? "Refresh carrier options" : "Calculate carrier options"}</button>
+              <p>Enter your delivery address once. We’ll carry it into secure payment. Return to your cart to change it before paying.</p>
+              <AddressFields ref={addressRef} includeName disabled={loading} initialValues={deliveryAddress} values={deliveryAddress} onChange={(address) => {
+                addressRevision.current += 1;
+                setDestination(address);
+                setShippingZip(address.zip);
+                setShippingQuote(null);
+                setSelectedRateId("");
+                setCalculating(false);
+                setError("");
+                try { sessionStorage.setItem(CHECKOUT_ADDRESS_KEY, JSON.stringify(address)); } catch { /* Optional tab-local storage. */ }
+              }} />
+              {shippingMode === "calculated" && <button className="button outline small" disabled={loading || calculating || !authReady}>{calculating ? "Calculating…" : activeShippingQuote ? "Refresh carrier options" : "Calculate carrier options"}</button>}
               {activeShippingQuote && <fieldset className="shipping-options"><legend>Choose a carrier service</legend>{activeShippingQuote.options.map((option) => <label className="shipping-option" key={option.id}><input type="radio" name="shippingRate" value={option.id} checked={selectedRateId === option.id} onChange={() => setSelectedRateId(option.id)} /><span><b>{option.provider} {option.serviceLevel}</b><small>{option.estimatedDays == null ? option.durationTerms || "Carrier estimate unavailable" : `${option.estimatedDays} business day${option.estimatedDays === 1 ? "" : "s"}`}</small></span><b>{money(option.amountCents, option.currency)}</b></label>)}{(activeShippingQuote.insuranceRequired || activeShippingQuote.signatureRequired) && <p className="form-note">Protection is included automatically{activeShippingQuote.insuranceRequired ? " with insurance" : ""}{activeShippingQuote.signatureRequired ? " and signature confirmation" : ""}.</p>}</fieldset>}
             </form>
           )}
           <dl>
             <div>
-              <dt>Subtotal</dt>
+              <dt>Item subtotal</dt>
               <dd>{money(subtotal, cart[0].currency)}</dd>
             </div>
             <div>
-              <dt>{shippingMode === "calculated" ? "Selected carrier service" : shippingMode === "free" ? "Shipping" : "Seller flat-rate shipping"}</dt>
-              <dd>{shippingMode === "calculated" && !selectedRate ? "Choose a service" : shippingMode === "free" ? "Free" : money(shipping, cart[0].currency)}</dd>
+              <dt>Shipping</dt>
+              <dd>{shipping === null ? "Not calculated" : shipping === 0 ? "Free" : money(shipping, cart[0].currency)}</dd>
             </div>
-            <div className="total">
-              <dt>Total before tax</dt>
-              <dd>{money(subtotal + shipping, cart[0].currency)}</dd>
-            </div>
+            {shipping !== null && (
+              <div className="total">
+                <dt>{taxAddedAtCheckout ? "Total before tax" : "Total"}</dt>
+                <dd>{money(subtotal + shipping, cart[0].currency)}</dd>
+              </div>
+            )}
           </dl>
           <p>
-            Tax, when enabled, is calculated by Stripe Checkout. {shippingMode === "calculated" ? "The seller must use your selected service or an equal/faster service." : shippingMode === "free" ? "This store offers free shipping." : "This store uses a flat shipping rate."}
+            {taxExplanation} {shippingMode === "calculated" ? "The seller must use your selected service or an equal/faster service." : shippingMode === "free" ? "This store offers free shipping." : "This store uses a flat shipping rate."}
           </p>
           {cart.some((item) => item.availabilityType === "preorder") && (
             <p className="checkout-preorder-notice">
@@ -253,12 +341,12 @@ export function CartPage() {
           <button
             className="button dark checkout-button"
             type="button"
-            disabled={loading || !acceptedPolicies || (shippingMode === "calculated" && (!activeShippingQuote || !selectedRateId))}
+            disabled={loading || calculating || !authReady || !deliveryAddress || !acceptedPolicies || (shippingMode === "calculated" && (!activeShippingQuote || !selectedRate))}
             onClick={checkout}
           >
             {loading ? "Starting secure checkout…" : "Checkout with Stripe"}
           </button>
-          <button className="text-button" type="button" onClick={clearCart}>
+          <button className="text-button" type="button" disabled={loading} onClick={clearCart}>
             Clear cart
           </button>
         </aside>
