@@ -1698,6 +1698,7 @@ type TaxTotals = {
   platformFeesCents: number;
   platformFeesAfterFullRefundsCents: number;
   stripeFeesCents: number;
+  processingFeesRecoveredCents: number;
   sellerProceedsCents: number;
   netSellerTransferCents: number;
   californiaOrderCount: number;
@@ -1783,6 +1784,7 @@ const EMPTY_TAX_TOTALS: TaxTotals = {
   platformFeesCents: 0,
   platformFeesAfterFullRefundsCents: 0,
   stripeFeesCents: 0,
+  processingFeesRecoveredCents: 0,
   sellerProceedsCents: 0,
   netSellerTransferCents: 0,
   californiaOrderCount: 0,
@@ -1870,6 +1872,7 @@ function TaxCenter({
   const readyCount = readiness.filter((item) => item.ready).length;
   const marginProxy =
     totals.platformFeesAfterFullRefundsCents +
+    totals.processingFeesRecoveredCents +
     ledgerSummary.otherIncomeCents -
     totals.stripeFeesCents -
     ledgerSummary.expensesCents;
@@ -1935,9 +1938,9 @@ function TaxCenter({
         <TaxMetric label="California merchandise" value={money(totals.californiaMerchandiseCents, "usd")} detail={`${totals.californiaOrderCount} California orders, before refunds`} />
         <TaxMetric label="California tax collected" value={money(totals.californiaTaxCollectedCents, "usd")} detail={`${money(totals.californiaTaxAfterFullRefundsCents, "usd")} after full refunds`} />
         <TaxMetric label="Marketplace fees" value={money(totals.platformFeesAfterFullRefundsCents, "usd")} detail={`${money(totals.platformFeesCents, "usd")} before full-refund adjustments`} />
-        <TaxMetric label="Recorded Stripe fees" value={money(totals.stripeFeesCents, "usd")} detail="Processing cost recorded from Stripe" />
+        <TaxMetric label="Recorded Stripe fees" value={money(totals.stripeFeesCents, "usd")} detail={`${money(totals.processingFeesRecoveredCents, "usd")} recovered from sellers after refunds`} />
         <TaxMetric label="Manual business expenses" value={money(ledgerSummary.expensesCents, "usd")} detail="Excludes owner draws and personal tax payments" />
-        <TaxMetric label="Operating margin proxy" value={money(marginProxy, "usd")} detail="Fees + other income − Stripe fees − recorded expenses" tone={marginProxy < 0 ? "warning" : undefined} />
+        <TaxMetric label="Operating margin proxy" value={money(marginProxy, "usd")} detail="Commission + processing recovered + other income − Stripe fees − recorded expenses" tone={marginProxy < 0 ? "warning" : undefined} />
         <TaxMetric label="Income-tax reserve target" value={money(reserveTarget, "usd")} detail={`${((profile?.incomeTaxReserveBps ?? 0) / 100).toFixed(1)}% planning rate`} />
         <TaxMetric label="Owner draws" value={money(ledgerSummary.ownerDrawsCents, "usd")} detail="Tracked separately; not a business expense" />
       </div>
@@ -2311,6 +2314,7 @@ type AdminOrder = {
   marketplaceFeeBps: number;
   platformFeeCents: number;
   paymentProcessingFeeCents?: number | null;
+  processingFeePayer?: "platform" | "seller";
   sellerProceedsCents?: number | null;
   totalCents: number;
   paymentStatus: string;
@@ -2528,7 +2532,7 @@ function OrderPanel({
             Model Car Center fee ({feePercent(order.marketplaceFeeBps)}):{" "}
             <b>{money(order.platformFeeCents, order.currency)}</b>
             <br />
-            Stripe processing: {order.paymentProcessingFeeCents == null
+            Stripe processing ({order.processingFeePayer === "seller" ? "deducted from seller proceeds" : "paid by platform"}): {order.paymentProcessingFeeCents == null
               ? "not recorded"
               : money(order.paymentProcessingFeeCents, order.currency)}
             <br />

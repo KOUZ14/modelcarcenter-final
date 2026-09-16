@@ -3,6 +3,8 @@ import {
   reverseSellerTransfer,
   sellerProceedsAfterRefund,
   sellerTransferReversalTarget,
+  retrieveCheckoutSession,
+  stripeSettlementDetails,
 } from "./stripe.ts";
 
 const PROCESSING_RETRY_MINUTES = 15;
@@ -34,6 +36,7 @@ type TransferredOrder = {
 };
 
 export type SellerTransferGateway = {
+  retrieveSession?: typeof retrieveCheckoutSession;
   create(input: Parameters<typeof createSellerTransfer>[0]): ReturnType<typeof createSellerTransfer>;
   reverse(input: Parameters<typeof reverseSellerTransfer>[0]): ReturnType<typeof reverseSellerTransfer>;
 };
@@ -41,6 +44,7 @@ export type SellerTransferGateway = {
 const stripeTransferGateway: SellerTransferGateway = {
   create: createSellerTransfer,
   reverse: reverseSellerTransfer,
+  retrieveSession: retrieveCheckoutSession,
 };
 
 export async function processEligibleSellerTransfers(input: {
@@ -56,6 +60,7 @@ export async function processEligibleSellerTransfers(input: {
   ).toISOString();
   const limit = Math.min(RELEASE_BATCH_SIZE, Math.max(1, input.limit ?? RELEASE_BATCH_SIZE));
   const gateway = input.gateway ?? stripeTransferGateway;
+  await reconcileProcessingFees(input.database, gateway, nowIso, limit);
   const candidates = await input.database
     .prepare(
       `SELECT o.id, o.order_number AS orderNumber, o.seller_id AS sellerId,
@@ -258,6 +263,51 @@ export async function processEligibleSellerTransfers(input: {
     failed: failed + reconciliation.failed,
     reversals: reconciliation.reversed,
   };
+}
+
+// Stripe can publish the balance transaction after the paid Checkout event.
+// Keep proceeds unknown (and ineligible for transfer) until the actual fee arrives.
+async function reconcileProcessingFees(
+  database: D1Database, gateway: SellerTransferGateway, nowIso: string, limit: number,
+) {
+  if (!gateway.retrieveSession) return;
+  const pending = await database.prepare(`SELECT id, stripe_checkout_session_id AS sessionId,
+      total_cents AS totalCents, tax_cents AS taxCents, currency,
+      platform_fee_cents AS platformFeeCents, stripe_charge_id AS chargeId
+    FROM orders WHERE processing_fee_payer = 'seller'
+      AND payment_flow = 'separate' AND payment_processing_fee_cents IS NULL
+      AND seller_proceeds_cents IS NULL AND stripe_transfer_id IS NULL
+      AND seller_transfer_status IN ('pending', 'failed', 'cancelled')
+      AND payment_status IN ('paid', 'partially_refunded', 'refunded')
+    ORDER BY updated_at, created_at LIMIT ?`).bind(limit).all<{
+      id: string; sessionId: string; totalCents: number; taxCents: number;
+      currency: string; platformFeeCents: number; chargeId: string | null;
+    }>();
+  for (const order of pending.results ?? []) {
+    try {
+      const session = await gateway.retrieveSession(order.sessionId);
+      const charge = typeof session.payment_intent === "object"
+        ? session.payment_intent?.latest_charge : null;
+      const chargeId = typeof charge === "string" ? charge : charge?.id;
+      if (session.id !== order.sessionId || session.payment_status !== "paid" ||
+          session.amount_total !== order.totalCents || session.currency !== order.currency ||
+          (session.total_details?.amount_tax ?? 0) !== order.taxCents ||
+          session.metadata?.processing_fee_payer !== "seller" || chargeId !== order.chargeId) {
+        throw new Error("Stripe settlement does not match this order.");
+      }
+      const settlement = stripeSettlementDetails(session, order.platformFeeCents);
+      await database.prepare(`UPDATE orders SET payment_processing_fee_cents = ?,
+          seller_proceeds_cents = ?, seller_transfer_last_error = NULL, updated_at = ?
+        WHERE id = ? AND processing_fee_payer = 'seller' AND stripe_transfer_id IS NULL
+          AND payment_processing_fee_cents IS NULL AND seller_proceeds_cents IS NULL
+          AND seller_transfer_status IN ('pending', 'failed', 'cancelled')`)
+        .bind(settlement.paymentProcessingFeeCents, settlement.sellerProceedsCents, nowIso, order.id).run();
+    } catch (error) {
+      await database.prepare(`UPDATE orders SET seller_transfer_last_error = ?, updated_at = ?
+        WHERE id = ? AND stripe_transfer_id IS NULL AND payment_processing_fee_cents IS NULL`)
+        .bind(errorMessage(error), nowIso, order.id).run();
+    }
+  }
 }
 
 async function reconcileTransferReversals(input: {

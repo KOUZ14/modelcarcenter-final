@@ -141,6 +141,13 @@
       "when": 1789498658982,
       "tag": "0019_tax_test_orders",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "6",
+      "when": 1789523778772,
+      "tag": "0020_seller_processing_fees",
+      "breakpoints": true
     }
   ]
 }

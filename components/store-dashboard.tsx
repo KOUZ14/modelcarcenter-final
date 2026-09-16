@@ -1,5 +1,8 @@
 "use client";
 
+import { SellerFeeDisclosure } from "./seller-fee-disclosure";
+import { SellerOrderAmounts } from "./seller-order-amounts";
+
 import Link from "next/link";
 import { BrandLogo } from "@/components/brand-logo";
 import { FormEvent, useMemo, useState } from "react";
@@ -125,6 +128,7 @@ type StoreOrder = {
   taxCents: number;
   marketplaceFeeBps: number;
   platformFeeCents: number;
+  processingFeePayer: "platform" | "seller";
   paymentProcessingFeeCents: number | null;
   sellerProceedsCents: number | null;
   paymentFlow: "destination" | "separate";
@@ -308,6 +312,7 @@ export function StoreDashboard({
         )}
         {view === "inventory" && (
           <Inventory
+            marketplaceFeeBps={data.fee.marketplaceFeeBps}
             rows={data.inventory}
             initialProductId={initialProductId}
             disabled={suspended}
@@ -415,11 +420,13 @@ function StoreOverview({
 }
 
 function Inventory({
+  marketplaceFeeBps,
   rows,
   initialProductId,
   disabled,
   action,
 }: {
+  marketplaceFeeBps: number;
   rows: Product[];
   initialProductId?: string;
   disabled: boolean;
@@ -565,9 +572,11 @@ function Inventory({
         </div>
         {!visible.length && <p className="store-empty">No inventory matches those filters.</p>}
       </section>
+      <SellerFeeDisclosure marketplaceFeeBps={marketplaceFeeBps} />
       <InventoryImporter disabled={disabled} action={action} />
       {editing && (
         <ProductEditor
+          marketplaceFeeBps={marketplaceFeeBps}
           key={editing === "new" ? "new" : editing.id}
           product={editing === "new" ? null : editing}
           action={action}
@@ -579,11 +588,13 @@ function Inventory({
 }
 
 function ProductEditor({
+  marketplaceFeeBps,
   product,
   action,
   onClose,
 }: {
   product: Product | null;
+  marketplaceFeeBps: number;
   action(
     payload: Record<string, unknown>,
     options?: { reload?: boolean; message?: string },
@@ -741,6 +752,7 @@ function ProductEditor({
             <label>Price (USD)<input name="price" inputMode="decimal" required defaultValue={product ? (product.priceCents / 100).toFixed(2) : ""} /></label>
             <label>Inventory quantity<input name="inventoryQuantity" type="number" min={product?.reservedQuantity ?? 0} max={1000000} required defaultValue={product?.inventoryQuantity ?? 1} /></label>
           </div>
+          <p className="form-note">You pay {feePercent(marketplaceFeeBps)} commission on the item subtotal, plus actual payment processing on the full customer payment (including shipping and tax). Both are deducted from your proceeds. <Link href="/seller-terms#fees">Fee and payout terms</Link></p>
           <fieldset className="availability-fields">
             <legend>Availability</legend>
             <div className="form-row">
@@ -903,7 +915,7 @@ function Orders({
               <div>
                 <h4>Items</h4>
                 {order.items.map((item) => <p key={item.id}><b>{item.productTitleSnapshot}</b><br /><span>{item.sellerSkuSnapshot} · {item.quantity} × {formatMoney(item.unitPriceCents, order.currency)}</span>{item.availabilityTypeSnapshot === "preorder" && item.releaseDateSnapshot && <><br /><span className="order-preorder-date">Preorder · Expected release {date(item.releaseDateSnapshot)}</span></>}</p>)}
-                <dl className="store-order-totals"><div><dt>Items</dt><dd>{formatMoney(order.subtotalCents, order.currency)}</dd></div><div><dt>Shipping</dt><dd>{formatMoney(order.shippingCents, order.currency)}</dd></div>{order.taxCents > 0 && <div><dt>Tax</dt><dd>{formatMoney(order.taxCents, order.currency)}</dd></div>}<div><dt>Model Car Center fee ({feePercent(order.marketplaceFeeBps)})</dt><dd>−{formatMoney(order.platformFeeCents, order.currency)}</dd></div><div><dt>Payment processing</dt><dd>{order.paymentProcessingFeeCents == null ? "Recorded by Stripe after settlement" : `${formatMoney(order.paymentProcessingFeeCents, order.currency)} paid separately by Model Car Center`}</dd></div><div><dt>Seller proceeds</dt><dd>{order.sellerProceedsCents == null ? "Not recorded for this order" : formatMoney(order.sellerProceedsCents, order.currency)}</dd></div><div><dt>Payout</dt><dd>{sellerPayoutLabel(order)}</dd></div></dl>
+                <SellerOrderAmounts order={order} /><p><b>Payout:</b> {sellerPayoutLabel(order)}</p>
               </div>
               <div>
                 <h4>Ship to</h4><p><b>{order.buyerName || "Customer"}</b><br />{formatAddress(order.shippingAddress)}</p><p><a href={`mailto:${order.buyerEmail}`}>{order.buyerEmail}</a></p>
@@ -1149,7 +1161,7 @@ function AnalyticsView({ analytics }: { analytics: Analytics }) {
       <header className="store-page-heading"><div><p className="eyebrow">Performance</p><h2>Store analytics</h2><p>Lifetime totals and a rolling six-month sales view.</p></div></header>
       <div className="metric-grid store-metrics analytics-metrics">
         <article><span>Gross sales</span><b>{formatMoney(analytics.grossSalesCents)}</b><small>Before marketplace fees</small></article>
-        <article><span>Net item sales</span><b>{formatMoney(analytics.netSalesCents)}</b><small>{formatMoney(analytics.platformFeesCents)} in fees</small></article>
+        <article><span>Item sales after commission</span><b>{formatMoney(analytics.netSalesCents)}</b><small>Before processing, refunds, and fulfillment costs; see orders for your proceeds.</small></article>
         <article><span>Average order</span><b>{formatMoney(analytics.averageOrderCents)}</b><small>{analytics.paidOrders} paid orders</small></article>
         <article><span>Inventory value</span><b>{formatMoney(analytics.inventoryValueCents)}</b><small>Available units at list price</small></article>
       </div>
@@ -1247,7 +1259,7 @@ function StoreSettings({
                 checked={acceptedSellerTerms}
                 onChange={(event) => setAcceptedSellerTerms(event.target.checked)}
               />
-              <span>I am authorized to accept the <Link href="/seller-terms">Seller Terms</Link> for this store.</span>
+              <span>I am authorized to accept the <Link href="/seller-terms">Seller Terms</Link> for this store, including deductions for marketplace commission and actual payment processing.</span>
             </label>
             <button
               className="button dark small"
@@ -1260,7 +1272,7 @@ function StoreSettings({
           </>
         )}
       </section>
-      <section className="store-panel payout-status"><p className="eyebrow">Selling fees</p><h3>{fee.rateKind === "founding_professional" ? "Founding Seller Rate" : "Professional Store Rate"} — {feePercent(fee.marketplaceFeeBps)} marketplace fee</h3>{fee.foundingPromotionActive && <p>Your promotional rate is active. It automatically becomes the {feePercent(fee.standardMarketplaceFeeBps)} standard professional rate when the six-month period ends.</p>}<p><b>Payment processing is charged separately.</b> Model Car Center holds seller proceeds until three days after carrier-confirmed delivery, then releases them to Stripe if no case is open. Recorded order details show processing costs and payout status separately from your marketplace fee.</p><p>No listing fees. No monthly fees to sell.</p></section>
+      <section className="store-panel payout-status"><p className="eyebrow">Selling fees</p><h3>{fee.rateKind === "founding_professional" ? "Founding Seller Rate" : "Professional Store Rate"} — {feePercent(fee.marketplaceFeeBps)} marketplace fee</h3>{fee.foundingPromotionActive && <p>Your promotional rate is active. It automatically becomes the {feePercent(fee.standardMarketplaceFeeBps)} standard professional rate when the six-month period ends.</p>}<SellerFeeDisclosure marketplaceFeeBps={fee.marketplaceFeeBps} /><p>Seller proceeds become eligible for release three days after carrier-confirmed delivery if no case is open and the actual processing fee is available. Stripe controls bank-payout timing after release.</p></section>
     </div>
   );
 }
@@ -1341,6 +1353,7 @@ function sellerPayoutLabel(order: StoreOrder) {
   if (order.sellerTransferStatus === "failed") return "Release will be retried";
   if (order.sellerTransferStatus === "cancelled") return "Cancelled";
   if (order.sellerTransferStatus === "reversed") return "Reversed for refund";
+  if (order.processingFeePayer === "seller" && order.paymentProcessingFeeCents == null) return "Held — awaiting actual Stripe processing fee";
   return order.payoutEligibleAt
     ? `Held through ${date(order.payoutEligibleAt)}`
     : "Held until three days after delivery";

@@ -1311,3 +1311,13 @@ footer { padding-top: 70px; color: white; background: var(--ink); }
   .case-timeline p { align-items: flex-start; flex-direction: column; gap: 5px; }
   .resolution-form { padding: 26px 20px; }
 }
+
+.seller-fee-disclosure { padding: 20px; border: 1px solid var(--line); background: var(--paper, #faf9f6); font-size: 14px; line-height: 1.6; }
+.seller-fee-disclosure p { margin: 0 0 12px; }
+.seller-fee-disclosure p:last-child { margin-bottom: 0; }
+.seller-fee-disclosure ul { padding-left: 20px; margin: 0 0 12px; }
+.seller-fee-disclosure li + li { margin-top: 8px; }
+.seller-fee-disclosure details { margin: 12px 0; }
+.seller-fee-disclosure summary { cursor: pointer; font-weight: 700; }
+.seller-fee-disclosure .store-order-totals div, .seller-order-amounts div { gap: 16px; align-items: baseline; }
+.seller-fee-disclosure dd, .seller-order-amounts dd { margin: 0; text-align: right; overflow-wrap: anywhere; }

@@ -1,5 +1,7 @@
 "use client";
 
+import { SellerOrderAmounts } from "./seller-order-amounts";
+
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -675,19 +677,16 @@ function Sales({
               <br />
               {formatAddress(sale.shippingAddress)}
             </p>
-            <p>
-              Sale price {formatMoney(Number(sale.subtotalCents), String(sale.currency))}
-              {" · "}Model Car Center fee ({Number(sale.marketplaceFeeBps) / 100}%){" "}
-              {formatMoney(Number(sale.platformFeeCents), String(sale.currency))}
-              {" · "}Payment processing{" "}
-              {sale.paymentProcessingFeeCents == null
-                ? "recorded separately after Stripe settlement"
-                : `${formatMoney(Number(sale.paymentProcessingFeeCents), String(sale.currency))} paid separately by Model Car Center`}
-              {" · "}Seller proceeds{" "}
-              {sale.sellerProceedsCents == null
-                ? "not recorded for this order"
-                : formatMoney(Number(sale.sellerProceedsCents), String(sale.currency))}
-            </p>
+            <SellerOrderAmounts order={{
+              currency: String(sale.currency), subtotalCents: Number(sale.subtotalCents),
+              shippingCents: Number(sale.shippingCents), taxCents: Number(sale.taxCents),
+              totalCents: Number(sale.totalCents), marketplaceFeeBps: Number(sale.marketplaceFeeBps),
+              platformFeeCents: Number(sale.platformFeeCents),
+              processingFeePayer: sale.processingFeePayer === "seller" ? "seller" : "platform",
+              paymentProcessingFeeCents: sale.paymentProcessingFeeCents == null ? null : Number(sale.paymentProcessingFeeCents),
+              sellerProceedsCents: sale.sellerProceedsCents == null ? null : Number(sale.sellerProceedsCents),
+              refundedAmountCents: Number(sale.refundedAmountCents), paymentStatus: String(sale.paymentStatus),
+            }} />
             <p><b>Payout:</b> {collectorPayoutLabel(sale)}</p>
             <p>
               <span className={`status ${String(sale.fulfillmentStatus)}`}>
@@ -877,6 +876,7 @@ function collectorPayoutLabel(sale: GarageData["sales"][number]) {
   if (sale.sellerTransferStatus === "failed") return "Release will be retried";
   if (sale.sellerTransferStatus === "cancelled") return "Cancelled";
   if (sale.sellerTransferStatus === "reversed") return "Reversed for refund";
+  if (sale.processingFeePayer === "seller" && sale.paymentProcessingFeeCents == null) return "Held — awaiting actual Stripe processing fee";
   return sale.payoutEligibleAt
     ? `Held through ${date(String(sale.payoutEligibleAt))}`
     : "Held until three days after delivery";

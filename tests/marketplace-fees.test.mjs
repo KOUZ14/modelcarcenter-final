@@ -145,6 +145,7 @@ test("Stripe Checkout keeps funds on-platform for a later seller transfer", () =
   assert.equal(body.get("payment_intent_data[application_fee_amount]"), null);
   assert.equal(body.get("metadata[marketplace_fee_bps]"), "500");
   assert.equal(body.get("metadata[payment_flow]"), "separate");
+  assert.equal(body.get("metadata[processing_fee_payer]"), "seller");
   assert.equal(body.get("payment_intent_data[transfer_data][destination]"), null);
   assert.equal(body.get("payment_intent_data[transfer_group]"), "MCC_reservation-1");
   assert.equal(
@@ -177,6 +178,7 @@ test("seller settlement withholds marketplace tax and records processing separat
     700,
   );
   assert.deepEqual(settlement, {
+    processingFeePayer: "platform",
     paymentProcessingFeeCents: 358,
     sellerProceedsCents: 9_800,
   });

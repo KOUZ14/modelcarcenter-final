@@ -662,9 +662,9 @@ async function finalizePaidCheckout(event: StripeEvent, session: StripeCheckoutS
        buyer_email, currency, subtotal_cents, shipping_cents, shipping_mode,
        selected_shipping_carrier, selected_shipping_service, selected_shipping_service_token,
        selected_shipping_estimated_days, marketplace_fee_bps, platform_fee_cents,
-       payment_processing_fee_cents, seller_proceeds_cents, tax_cents, total_cents,
+       processing_fee_payer, payment_processing_fee_cents, seller_proceeds_cents, tax_cents, total_cents,
         payment_status, fulfillment_status, buyer_name, shipping_address, ship_from_address, paid_at, ship_by_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'paid', 'unfulfilled', ?, ?, ?, ?, ?)`)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'paid', 'unfulfilled', ?, ?, ?, ?, ?)`)
       .bind(orderId, orderNumber, reservation.sellerId, reservation.buyerUserId, session.id, intent, charge,
         paymentFlow, transferGroup, paymentFlow === "separate" ? "pending" : "transferred", buyerEmail,
         session.currency ?? reservation.currency, reservation.subtotalCents, reservation.shippingCents,
@@ -672,7 +672,7 @@ async function finalizePaidCheckout(event: StripeEvent, session: StripeCheckoutS
         reservation.selectedShippingService, reservation.selectedShippingServiceToken,
         reservation.selectedShippingEstimatedDays,
         reservation.marketplaceFeeBps, reservation.platformFeeCents,
-        settlement.paymentProcessingFeeCents, settlement.sellerProceedsCents,
+        settlement.processingFeePayer, settlement.paymentProcessingFeeCents, settlement.sellerProceedsCents,
         taxCents, totalCents, shipping.name ?? "", JSON.stringify(shipping),
         reservation.shipFromAddress,
         paidAt.toISOString(), shipByAt.toISOString()),

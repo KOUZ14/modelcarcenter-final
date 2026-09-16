@@ -23,6 +23,7 @@ function order(overrides = {}) {
     refundedAmountCents: 0,
     platformFeeCents: 1_000,
     paymentProcessingFeeCents: 375,
+    processingFeePayer: "platform",
     sellerProceedsCents: 10_000,
     sellerTransferAmountCents: 10_000,
     sellerTransferReversedCents: 0,

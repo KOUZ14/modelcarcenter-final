@@ -1,5 +1,7 @@
 import { config, requireConfig } from "./config.ts";
 import { assertLiveCheckoutConfigured } from "./production-readiness.ts";
+import { sellerProcessingDeduction, sellerProceedsAfterRefund } from "./seller-proceeds.ts";
+export { sellerProceedsAfterRefund } from "./seller-proceeds.ts";
 
 type StripeError = { error?: { message?: string; type?: string } };
 
@@ -84,8 +86,10 @@ export function buildCheckoutSessionBody(input: CheckoutSessionInput) {
     "metadata[policy_version]": input.policyVersion,
     "metadata[policy_accepted_at]": new Date().toISOString(),
     "metadata[payment_flow]": "separate",
+    "metadata[processing_fee_payer]": "seller",
     "payment_intent_data[transfer_group]": stripeTransferGroup(input.reservationId),
     "payment_intent_data[metadata][payment_flow]": "separate",
+    "payment_intent_data[metadata][processing_fee_payer]": "seller",
     "payment_intent_data[metadata][seller_id]": input.sellerId,
     "payment_intent_data[metadata][seller_stripe_account_id]": input.sellerStripeAccountId,
     "payment_intent_data[metadata][reservation_id]": input.reservationId,
@@ -221,14 +225,24 @@ export function stripeSettlementDetails(
       ? balanceTransaction.fee
       : null;
   const taxCents = Math.max(0, session.total_details?.amount_tax ?? 0);
+  // Missing metadata identifies checkouts created under the previous fee policy.
+  const processingFeePayer = session.metadata?.processing_fee_payer === "seller"
+    ? "seller" as const : "platform" as const;
+  const deduction = sellerProcessingDeduction({
+    processingFeePayer,
+    totalCents: session.amount_total ?? 0,
+    taxCents,
+    platformFeeCents: expectedPlatformFeeCents,
+    paymentProcessingFeeCents,
+  });
   const sellerProceedsCents =
-    session.amount_total == null
+    session.amount_total == null || deduction == null
       ? null
       : Math.max(
           0,
-          session.amount_total - taxCents - expectedPlatformFeeCents,
+          session.amount_total - taxCents - expectedPlatformFeeCents - deduction,
         );
-  return { paymentProcessingFeeCents, sellerProceedsCents };
+  return { processingFeePayer, paymentProcessingFeeCents, sellerProceedsCents };
 }
 
 export async function createOrderRefund(input: {
@@ -337,22 +351,6 @@ export function sellerTransferReversalTarget(input: {
   return Math.min(
     input.sellerTransferAmountCents,
     Math.max(0, input.sellerTransferAmountCents - netSellerProceeds),
-  );
-}
-
-export function sellerProceedsAfterRefund(input: {
-  totalCents: number;
-  refundedAmountCents: number;
-  sellerProceedsCents: number;
-}) {
-  if (input.totalCents < 1 || input.sellerProceedsCents < 1) return 0;
-  const remaining = Math.max(
-    0,
-    input.totalCents - Math.max(0, input.refundedAmountCents),
-  );
-  return Math.min(
-    input.sellerProceedsCents,
-    Math.round((input.sellerProceedsCents * remaining) / input.totalCents),
   );
 }
 

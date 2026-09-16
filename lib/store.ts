@@ -147,6 +147,7 @@ export async function getStoreDashboardData(userId: string) {
         taxCents: orders.taxCents,
         marketplaceFeeBps: orders.marketplaceFeeBps,
         platformFeeCents: orders.platformFeeCents,
+        processingFeePayer: orders.processingFeePayer,
         paymentProcessingFeeCents: orders.paymentProcessingFeeCents,
         sellerProceedsCents: orders.sellerProceedsCents,
         paymentFlow: orders.paymentFlow,

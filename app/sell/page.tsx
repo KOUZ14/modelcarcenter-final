@@ -40,12 +40,12 @@ export default function SellPage() {
                 the same account you use to buy, save, and hunt.
               </p>
               <p className="seller-payment-note">
-                <strong>Payment processing is charged separately.</strong>
+                <strong>You also pay the actual payment-processing fee, deducted from your proceeds.</strong>
               </p>
               <ul className="seller-benefits">
                 <li>No listing fees</li>
                 <li>No monthly fees</li>
-                <li>You only pay a marketplace fee when your model sells</li>
+                <li>Commission applies to the item subtotal, excluding shipping and tax</li>
               </ul>
               <div className="seller-actions">
                 <Link className="button dark" href="/sell/model">
@@ -62,7 +62,7 @@ export default function SellPage() {
                 growing inventory and orders.
               </p>
               <p className="seller-payment-note">
-                <strong>Payment processing is charged separately.</strong>
+                <strong>You also pay the actual payment-processing fee, deducted from your proceeds.</strong>
               </p>
               <ul className="seller-benefits">
                 <li>No listing fees</li>
@@ -122,10 +122,10 @@ export default function SellPage() {
               applies automatically.
             </p>
             <p>
-              No listing fees. No monthly fees. Payment processing is separate.
+              No listing fees. No monthly fees. Sellers also pay actual payment processing.
             </p>
           </div>
-          <SellerApplicationForm />
+          <SellerApplicationForm marketplaceFeeBps={config.professionalMarketplaceFeeBps} />
         </section>
       </div>
       <SiteFooter />

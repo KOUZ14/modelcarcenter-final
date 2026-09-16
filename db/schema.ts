@@ -824,6 +824,7 @@ export const orders = sqliteTable(
       .default(1000),
     platformFeeCents: integer("platform_fee_cents").notNull(),
     paymentProcessingFeeCents: integer("payment_processing_fee_cents"),
+    processingFeePayer: text("processing_fee_payer", { enum: ["platform", "seller"] }).notNull().default("platform"),
     sellerProceedsCents: integer("seller_proceeds_cents"),
     taxCents: integer("tax_cents").notNull().default(0),
     totalCents: integer("total_cents").notNull(),

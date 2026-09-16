@@ -1,3 +1,5 @@
+import { processingFeesRecovered } from "./seller-proceeds.ts";
+
 export type TaxOrderInput = {
   id: string;
   orderNumber: string;
@@ -9,6 +11,7 @@ export type TaxOrderInput = {
   totalCents: number;
   refundedAmountCents: number;
   platformFeeCents: number;
+  processingFeePayer: "platform" | "seller";
   paymentProcessingFeeCents: number | null;
   sellerProceedsCents: number | null;
   sellerTransferAmountCents: number;
@@ -32,6 +35,7 @@ export type TaxReportTotals = {
   platformFeesCents: number;
   platformFeesAfterFullRefundsCents: number;
   stripeFeesCents: number;
+  processingFeesRecoveredCents: number;
   sellerProceedsCents: number;
   netSellerTransferCents: number;
   californiaOrderCount: number;
@@ -139,6 +143,7 @@ function emptyTotals(): TaxReportTotals {
     platformFeesCents: 0,
     platformFeesAfterFullRefundsCents: 0,
     stripeFeesCents: 0,
+    processingFeesRecoveredCents: 0,
     sellerProceedsCents: 0,
     netSellerTransferCents: 0,
     californiaOrderCount: 0,
@@ -187,6 +192,7 @@ function addOrder(totals: TaxReportTotals, order: TaxOrderInput) {
     ? 0
     : order.platformFeeCents;
   totals.stripeFeesCents += order.paymentProcessingFeeCents ?? 0;
+  totals.processingFeesRecoveredCents += processingFeesRecovered(order);
   if (order.paymentProcessingFeeCents == null) totals.missingStripeFeeCount += 1;
   totals.sellerProceedsCents += order.sellerProceedsCents ?? 0;
   totals.netSellerTransferCents += Math.max(

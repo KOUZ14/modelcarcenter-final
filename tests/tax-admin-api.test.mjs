@@ -313,4 +313,16 @@ test("admin tax API persists and reloads profiles, deadlines, ledger, seller sta
     assert.match(noSalesHtml, /1 test order excluded for 2026/);
     assert.doesNotMatch(noSalesHtml, /missing Stripe processing fees|Invalid date|NaN/);
   });
+
+  await t.test("seller processing recovery survives report reload and CSV identifies the payer", async () => {
+    sqlite.exec("INSERT INTO orders (id, order_number, seller_id, buyer_email, currency, stripe_checkout_session_id, subtotal_cents, shipping_cents, platform_fee_cents, tax_cents, total_cents, processing_fee_payer, payment_processing_fee_cents, seller_proceeds_cents, payment_status, paid_at, shipping_address) VALUES ('seller-fee-order', 'SELLER-PROCESSING', 'tax-seller', 'buyer@example.test', 'usd', 'cs_seller_fee', 20000, 1000, 1400, 2000, 23000, 'seller', 697, 18903, 'paid', '2028-02-01T12:00:00Z', '{\"address\":{\"state\":\"CA\"}}')");
+    const totals = (await get()).reports.find(report => report.year === 2028).totals;
+    assert.equal(totals.processingFeesRecoveredCents, 697);
+    assert.equal(totals.stripeFeesCents, 697);
+    assert.equal(totals.platformFeesAfterFullRefundsCents, 1400);
+    const csv = await (await route.GET(new Request("http://localhost/api/admin?section=tax_export&year=2028"))).text();
+    assert.match(csv, /"stripe_fee_cents","processing_fee_payer","seller_proceeds_cents"/);
+    assert.match(csv, /"697","seller","18903"/);
+    assert.equal(sqlite.prepare("SELECT processing_fee_payer FROM orders WHERE id = 'tax-order'").get().processing_fee_payer, "platform");
+  });
 });

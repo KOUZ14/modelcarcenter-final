@@ -1,4 +1,6 @@
 "use client";
+import { SellerFeeDisclosure } from "./seller-fee-disclosure";
+
 
 import Link from "next/link";
 import { FormEvent, useRef, useState } from "react";
@@ -328,9 +330,8 @@ export function CollectorListingForm({
         </p>
         <p>
           <b>{marketplaceFeeBps / 100}% Model Car Center marketplace fee.</b>{" "}
-          Payment processing is charged separately. There are no listing fees
-          or monthly fees; the marketplace fee applies only when your model
-          sells.
+          You also pay actual payment processing, deducted from your proceeds.
+          No listing or monthly fees.
         </p>
       </div>
 
@@ -408,6 +409,7 @@ export function CollectorListingForm({
             <label>Price (USD)<input name="price" inputMode="decimal" required defaultValue={product.priceCents == null ? "" : (Number(product.priceCents) / 100).toFixed(2)} /></label>
             <label>Quantity<input name="quantity" type="number" min={1} max={100} required defaultValue={String(product.inventoryQuantity ?? 1)} /></label>
           </div>
+          <SellerFeeDisclosure marketplaceFeeBps={marketplaceFeeBps} />
           </div>
         </details>
 
@@ -503,7 +505,7 @@ export function CollectorListingForm({
             </span>
           </summary>
           <div className="listing-section-content">
-          <p>Upload 4–8 original photos. Do not reuse another seller's photos.</p>
+          <p>Upload 4–8 original photos. Do not reuse another seller&apos;s photos.</p>
           <ProductImageFields images={images} primaryImageUrl={primaryImageUrl} files={files} disabled={busy} onFilesChange={setFiles} onRemove={productId ? removeImage : undefined} onRemoveLegacy={productId ? removeLegacyImage : undefined} onReorder={productId ? reorderImages : undefined} />
           <RequiredPhotoChecklist product={product} />
           </div>
@@ -521,7 +523,7 @@ export function CollectorListingForm({
             <p>{stripeReady ? "Stripe payouts are ready. Submitted listings are reviewed before going live." : "You can keep drafting now. Complete secure Stripe-hosted payout onboarding before submission."}</p>
             <label className="consent-check">
               <input type="checkbox" checked={acceptedSellerTerms} onChange={(event) => setAcceptedSellerTerms(event.target.checked)} />
-              <span>I agree to the current <Link href="/seller-terms">Seller Terms</Link>, including the marketplace fee, fulfillment rules, and return obligations.</span>
+              <span>I agree to the current <Link href="/seller-terms">Seller Terms</Link>, including deductions for marketplace commission and actual payment processing, fulfillment rules, and return obligations.</span>
             </label>
             {!stripeReady && <button className="button outline small" type="button" disabled={busy || !acceptedSellerTerms} onClick={() => void startOnboarding()}>Complete Stripe onboarding</button>}
           </div>
