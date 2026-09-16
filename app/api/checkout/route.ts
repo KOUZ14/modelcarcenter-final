@@ -1,6 +1,6 @@
 import { attachStripeSession, loadAuthoritativeCart, releaseReservation, releaseStaleReservations, reserveCart } from "@/lib/inventory";
 import { readJsonObject } from "@/lib/http";
-import { createCheckoutSession, expireCheckoutSession, retrieveStripeAccount } from "@/lib/stripe";
+import { assertSellerPaymentsReady, createCheckoutSession, expireCheckoutSession } from "@/lib/stripe";
 import { checkoutReturnCookie, closePreviousCheckout } from "@/lib/checkout-return";
 import { parseCheckoutShippingAddress } from "@/lib/shipping-rules";
 import { ValidationError } from "@/lib/validation";
@@ -43,14 +43,7 @@ export async function POST(request: Request) {
       } });
     }
     const loadedCart = await loadAuthoritativeCart(requested);
-    const connectedAccount = await retrieveStripeAccount(
-      loadedCart.seller.sellerStripeAccountId!,
-    );
-    if (!connectedAccount.charges_enabled || !connectedAccount.payouts_enabled) {
-      throw new Error(
-        "This seller's Stripe account is not ready to accept marketplace payments.",
-      );
-    }
+    await assertSellerPaymentsReady(loadedCart.seller.sellerStripeAccountId!, loadedCart.seller.sellerName);
     const shipping = await resolveCheckoutShipping(
       loadedCart,
       payload.shippingSelection,

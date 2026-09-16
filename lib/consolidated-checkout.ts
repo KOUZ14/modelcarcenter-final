@@ -1,7 +1,7 @@
 import { getD1 } from "@/db";
 import { loadAuthoritativeCheckout, buildCartReservation, releaseReservation, type RequestedCartItem } from "./inventory";
 import { resolveCheckoutShipping } from "./checkout-shipping";
-import { createCheckoutSession, expireCheckoutSession, retrieveStripeAccount, type CheckoutSessionInput } from "./stripe";
+import { assertSellerPaymentsReady, createCheckoutSession, expireCheckoutSession, type CheckoutSessionInput } from "./stripe";
 import { calculateServerTotals } from "./business";
 import { validateCheckoutDestination } from "./checkout-address";
 import { config } from "./config";
@@ -26,8 +26,7 @@ export async function startConsolidatedCheckout(
   const resolved = [];
   for (const cart of carts) {
     if (!selections.has(cart.seller.sellerId)) throw new ValidationError("Choose shipping for every selected seller.");
-    const account = await retrieveStripeAccount(cart.seller.sellerStripeAccountId!);
-    if (!account.charges_enabled || !account.payouts_enabled) throw new ValidationError(`${cart.seller.sellerName} cannot accept payments right now. Your cart is kept.`);
+    await assertSellerPaymentsReady(cart.seller.sellerStripeAccountId!, cart.seller.sellerName);
     const shipping = await resolveCheckoutShipping(cart, selections.get(cart.seller.sellerId), buyer?.id ?? null, destination);
     const totals = calculateServerTotals(cart.items, shipping.amountCents, cart.fee.marketplaceFeeBps);
     const reservation = buildCartReservation({ ...cart, totals }, buyer?.id ?? null, POLICY_VERSION, shipping, groupId, expiresAt);

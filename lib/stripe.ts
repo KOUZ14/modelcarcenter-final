@@ -4,9 +4,28 @@ import { sellerProcessingDeduction, sellerProceedsAfterRefund } from "./seller-p
 import { stripeShippingAddress } from "./checkout-address.ts";
 import type { NormalizedShippingAddress } from "./shipping-rules.ts";
 import type { CheckoutLine } from "./checkout-allocation.ts";
+import { ValidationError } from "./validation.ts";
 export { sellerProceedsAfterRefund } from "./seller-proceeds.ts";
 
-type StripeError = { error?: { message?: string; type?: string } };
+type StripeError = { error?: { message?: string; type?: string; code?: string; param?: string } };
+
+export class StripeApiError extends Error {
+  readonly status: number;
+  readonly code: string | null;
+  readonly requestId: string | null;
+  constructor(
+    message: string,
+    status: number,
+    code: string | null,
+    requestId: string | null,
+  ) {
+    super(message);
+    this.name = "StripeApiError";
+    this.status = status;
+    this.code = code;
+    this.requestId = requestId;
+  }
+}
 
 async function stripeRequest<T>(
   path: string,
@@ -25,7 +44,16 @@ async function stripeRequest<T>(
   });
   const data = (await response.json()) as T & StripeError;
   if (!response.ok) {
-    throw new Error(data.error?.message || `Stripe request failed with status ${response.status}.`);
+    const message = (data.error?.message || `Stripe request failed with status ${response.status}.`)
+      .replaceAll(requireConfig("stripeSecretKey"), "[redacted]")
+      .replace(/\b(?:sk|rk|pk)_(?:live|test)_[A-Za-z0-9_]+/g, "[redacted]");
+    const requestId = response.headers.get("request-id");
+    console.error("Stripe API request failed", {
+      path: path.split("?")[0], status: response.status,
+      type: data.error?.type, code: data.error?.code,
+      param: data.error?.param, requestId, message,
+    });
+    throw new StripeApiError(message, response.status, data.error?.code ?? null, requestId);
   }
   return data;
 }
@@ -253,6 +281,24 @@ export async function createAccountOnboardingLink(
 
 export async function retrieveStripeAccount(accountId: string) {
   return stripeRequest<StripeAccount>(`/v1/accounts/${encodeURIComponent(accountId)}`);
+}
+
+export async function assertSellerPaymentsReady(accountId: string, sellerName: string) {
+  let account: StripeAccount;
+  try {
+    account = await retrieveStripeAccount(accountId);
+  } catch (error) {
+    if (error instanceof StripeApiError) {
+      if (error.code === "resource_missing" || error.code === "account_invalid") {
+        throw new ValidationError(`${sellerName}'s payment connection needs attention. The seller must complete payment setup before checkout. Your cart is kept.`);
+      }
+      throw new Error("Payments are temporarily unavailable. Please try again later.");
+    }
+    throw error;
+  }
+  if (!account.charges_enabled || !account.payouts_enabled) {
+    throw new ValidationError(`${sellerName} cannot accept payments right now. The seller must complete payment setup. Your cart is kept.`);
+  }
 }
 
 export async function retrieveCheckoutSession(sessionId: string) {
