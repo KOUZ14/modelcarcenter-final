@@ -289,6 +289,9 @@ export async function assertSellerPaymentsReady(accountId: string, sellerName: s
     account = await retrieveStripeAccount(accountId);
   } catch (error) {
     if (error instanceof StripeApiError) {
+      if (/was a test account created with a testmode key/i.test(error.message)) {
+        throw new ValidationError(`${sellerName} still has a test payment account. The seller must complete live payment setup before checkout. Your cart is kept.`);
+      }
       if (error.code === "resource_missing" || error.code === "account_invalid") {
         throw new ValidationError(`${sellerName}'s payment connection needs attention. The seller must complete payment setup before checkout. Your cart is kept.`);
       }

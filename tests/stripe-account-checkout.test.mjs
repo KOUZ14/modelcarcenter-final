@@ -22,6 +22,12 @@ test("checkout handles unavailable seller accounts without hiding diagnostics or
 
   await assertSellerPaymentsReady("acct_fixture", "Apex");
 
+  status = 400;
+  body = { error: { type: "api_error", message: "The account acct_fixture was a test account created with a testmode key, and therefore can only be used with testmode keys." } };
+  await assert.rejects(() => assertSellerPaymentsReady("acct_fixture", "Apex"), (error) =>
+    error instanceof ValidationError && /Apex.*test payment account.*complete live payment setup/.test(error.message));
+
+  status = 200;
   body = { charges_enabled: true, payouts_enabled: false };
   await assert.rejects(() => assertSellerPaymentsReady("acct_fixture", "Apex"), (error) =>
     error instanceof ValidationError && /Apex.*complete payment setup.*cart is kept/.test(error.message));
