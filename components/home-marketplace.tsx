@@ -147,35 +147,6 @@ export function HomeMarketplace() {
           </div>
         </div>
       </section>
-      <section className="section shell" id="scales">
-        <div className="section-heading split-heading">
-          <div>
-            <p className="eyebrow">Start with the shelf</p>
-            <h2>Browse by scale</h2>
-          </div>
-          <p>Jump straight to the size you collect most.</p>
-        </div>
-        <div className="scale-grid">
-          {scales.map((item, index) => (
-            <button
-              key={item}
-              type="button"
-              onClick={() => {
-                const selectedScale = item === "Other scales" ? "" : item;
-                router.push(
-                  selectedScale
-                    ? `/marketplace?scale=${encodeURIComponent(selectedScale)}`
-                    : "/marketplace",
-                );
-              }}
-            >
-              <span>{String(index + 1).padStart(2, "0")}</span>
-              <b>{item}</b>
-              <Icon name="arrow" />
-            </button>
-          ))}
-        </div>
-      </section>
       <section className="section inventory-section" id="inventory">
         <div className="shell">
           <div className="section-heading inventory-heading">
@@ -343,6 +314,35 @@ export function HomeMarketplace() {
               </button>
             </div>
           )}
+        </div>
+      </section>
+      <section className="section shell" id="scales">
+        <div className="section-heading split-heading">
+          <div>
+            <p className="eyebrow">Start with the shelf</p>
+            <h2>Browse by scale</h2>
+          </div>
+          <p>Jump straight to the size you collect most.</p>
+        </div>
+        <div className="scale-grid">
+          {scales.map((item, index) => (
+            <button
+              key={item}
+              type="button"
+              onClick={() => {
+                const selectedScale = item === "Other scales" ? "" : item;
+                router.push(
+                  selectedScale
+                    ? `/marketplace?scale=${encodeURIComponent(selectedScale)}`
+                    : "/marketplace",
+                );
+              }}
+            >
+              <span>{String(index + 1).padStart(2, "0")}</span>
+              <b>{item}</b>
+              <Icon name="arrow" />
+            </button>
+          ))}
         </div>
       </section>
       <section className="section value-section">
