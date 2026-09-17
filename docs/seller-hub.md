@@ -2,6 +2,8 @@
 
 The professional seller workspace remains at `/store`. Its main navigation is Overview, Inventory, Demand, Opportunities, Orders, Marketing, and Analytics, with Settings and buyer messages retained. `view`, `filter`, and `edit` query parameters preserve navigation and support direct links. Existing inventory editing, imports, shipping labels, tracking, and seller settings remain available.
 
+Page and section headings use straightforward names for the feature or content, such as Overview, Opportunities, Analytics, and Payout summary. Avoid slogans, metaphors, motivational copy, and rhetorical questions in headings. Supporting descriptions should explain what the page shows or lets the user do.
+
 ## Data and definitions
 
 - Overview sales are lifetime gross item sales for paid and partially refunded orders. Fully refunded and unpaid orders are excluded. These are not accounting revenue or profit.

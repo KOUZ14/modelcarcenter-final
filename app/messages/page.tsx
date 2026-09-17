@@ -36,7 +36,7 @@ export default async function MessagesPage({
         <div className="shell messages-hero-layout">
           <div>
             <p className="eyebrow">Buyer · Seller</p>
-            <h1>Collector conversations.</h1>
+            <h1>Messages</h1>
           </div>
           <p>
             Ask about condition, shipping, or anything else you need

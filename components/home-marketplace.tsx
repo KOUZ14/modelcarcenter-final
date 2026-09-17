@@ -110,11 +110,11 @@ export function HomeMarketplace() {
         />
         <div className="hero-shade" />
         <div id="main-content" tabIndex={-1} className="hero-content shell">
-          <p className="eyebrow light">Find. Buy. Sell. Hunt.</p>
+          <p className="eyebrow light">Model Car Center</p>
           <h1>
-            Every seller.
+            Buy and sell
             <br />
-            One search.
+            model cars
           </h1>
           <p className="hero-copy">
             Find model cars from independent sellers and fellow collectors in
@@ -293,7 +293,7 @@ export function HomeMarketplace() {
           ) : (
             <div className="no-results">
               <p className="eyebrow">Not in current inventory</p>
-              <h3>Can&apos;t find it? Start a Model Hunt.</h3>
+              <h3>No matching models</h3>
               <p>
                 Tell us exactly what you need. We&apos;ll email you if a
                 matching product is added and confirmed by our team.
@@ -349,11 +349,7 @@ export function HomeMarketplace() {
         <div className="shell value-layout">
           <div className="value-title">
             <p className="eyebrow light">Why Model Car Center</p>
-            <h2>
-              Spend less time searching.
-              <br />
-              More time collecting.
-            </h2>
+            <h2>Marketplace features</h2>
           </div>
           <div className="benefit-grid">
             {[
@@ -412,11 +408,7 @@ export function HomeMarketplace() {
         <div className="shell wanted-layout">
           <div className="wanted-copy">
             <p className="eyebrow light">Model Hunt</p>
-            <h2>
-              Can&apos;t find it?
-              <br />
-              Start a Model Hunt.
-            </h2>
+            <h2>Find a specific model</h2>
             <p>
               Describe the model you want. We&apos;ll first check current
               inventory, then keep your request active so our team can confirm a
@@ -433,11 +425,7 @@ export function HomeMarketplace() {
         </div>
         <div className="seller-copy">
           <p className="eyebrow">Sell with Model Car Center</p>
-          <h2>
-            Reach more collectors.
-            <br />
-            Keep selling your way.
-          </h2>
+          <h2>Sell model cars</h2>
           <p>
             Keep your existing store. Model Car Center gives you another sales
             channel.
@@ -464,8 +452,8 @@ export function HomeMarketplace() {
       <section className="community-section">
         <div className="shell community-inner">
           <div>
-            <p className="eyebrow">The collection is just getting started</p>
-            <h2>Join the center of model car collecting.</h2>
+            <p className="eyebrow">Email updates</p>
+            <h2>Marketplace news</h2>
             <p>
               Get new inventory, seller announcements, and Model Hunt updates.
             </p>

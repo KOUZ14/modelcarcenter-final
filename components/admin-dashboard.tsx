@@ -1853,7 +1853,7 @@ function TaxCenter({
       <section className="tax-command-bar">
         <div>
           <p className="eyebrow">California sole proprietor</p>
-          <h2>One place for every tax deadline, dollar, and proof point.</h2>
+          <h2>Tax &amp; compliance overview</h2>
           <p>
             Order figures come from your checkout records. Checklist confirmations,
             filings, payments, expenses, and owner draws are private admin records.
@@ -1883,7 +1883,7 @@ function TaxCenter({
       <section className="tax-section-heading">
         <div>
           <p className="eyebrow">Order-derived reporting</p>
-          <h2>{year} financial picture</h2>
+          <h2>{year} financial summary</h2>
         </div>
         <div className="tax-year-actions">
           <label>
@@ -2240,7 +2240,7 @@ function TaxActivity({ rows }: { rows: TaxActivityRow[] }) {
 function TaxReferencePanel() {
   return (
     <aside className="tax-reference-panel">
-      <div><p className="eyebrow light">Owner rules</p><h2>Keep these boundaries clear.</h2></div>
+      <div><p className="eyebrow light">Owner rules</p><h2>Accounting guidelines</h2></div>
       <ul><li>Sales tax is a liability, not revenue.</li><li>Seller proceeds are not owner income.</li><li>Owner draws are not deductible expenses.</li><li>Partially refunded orders require a Stripe Tax adjustment check.</li><li>The margin proxy is a planning view, not a completed tax return.</li></ul>
       <nav aria-label="Official tax references"><a href="https://www.cdtfa.ca.gov/industry/MPFAct.htm" target="_blank" rel="noreferrer">CDTFA marketplace guide</a><a href="https://www.irs.gov/publications/p334" target="_blank" rel="noreferrer">IRS sole-proprietor guide</a><a href="https://www.ftb.ca.gov/file/business/types/sole-proprietorship.html" target="_blank" rel="noreferrer">California sole-proprietor guide</a><a href="https://docs.stripe.com/tax/tax-for-marketplaces" target="_blank" rel="noreferrer">Stripe marketplace tax setup</a></nav>
     </aside>

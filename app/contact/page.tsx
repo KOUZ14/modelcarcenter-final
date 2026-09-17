@@ -13,7 +13,7 @@ export default function Page() {
       <SiteHeader />
       <div id="main-content" tabIndex={-1} className="inner-page shell contact-page">
         <p className="eyebrow">Support</p>
-        <h1>How can we help?</h1>
+        <h1>Contact support</h1>
         <p>Guest orders are welcome. You don&apos;t need to sign in or create an account for order tracking or support.</p>
         <h2>Track a guest order</h2>
         <p>Check the email you used at checkout for your order confirmation. We&apos;ll send carrier tracking to the same address when it&apos;s available. Use those tracking details to follow your delivery without signing in.</p>

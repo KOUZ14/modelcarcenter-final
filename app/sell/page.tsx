@@ -22,11 +22,7 @@ export default function SellPage() {
       <div id="main-content" tabIndex={-1} className="inner-page shell">
         <section className="sell-intro">
           <p className="eyebrow">Two ways to sell</p>
-          <h1>
-            Your collection or your store.
-            <br />
-            One collector marketplace.
-          </h1>
+          <h1>Sell model cars</h1>
           <p>
             Individual collectors can list their own models. Approved stores
             get a dedicated console for inventory, fulfillment, and analytics.
@@ -107,7 +103,7 @@ export default function SellPage() {
         <section className="application-section" id="professional-application">
           <div>
             <p className="eyebrow">Professional seller application</p>
-            <h2>Tell us about your store.</h2>
+            <h2>Seller application</h2>
             <p>
               Applying does not guarantee approval. We review each store before
               listings can become active.

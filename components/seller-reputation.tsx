@@ -80,7 +80,7 @@ export function SellerReputation({
       <header>
         <div>
           <p className="eyebrow">Verified marketplace record</p>
-          <h2>Reputation you can inspect</h2>
+          <h2>Seller reputation</h2>
         </div>
         <p>
           These signals come from Model Car Center orders, shipment deadlines,
@@ -101,7 +101,7 @@ export function SellerReputation({
         <div className="verified-feedback-heading">
           <div>
             <p className="eyebrow">Buyer feedback</p>
-            <h3>From completed purchases</h3>
+            <h3>Verified purchase reviews</h3>
           </div>
           <span>Verified purchase only</span>
         </div>

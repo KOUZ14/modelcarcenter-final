@@ -78,7 +78,7 @@ export function ResolutionCenter({
         <div className="shell resolution-hero-grid">
           <div>
             <p className="eyebrow">Customer Support · Buyer &amp; seller protection</p>
-            <h1>Protection that stays with the order.</h1>
+            <h1>Customer Support</h1>
             <p>
               Report a problem, keep evidence and replies together, authorize a
               tracked return, and follow every deadline through resolution.
@@ -145,7 +145,7 @@ export function ResolutionCenter({
         ) : (
           <div className="resolution-empty">
             <p className="eyebrow">No cases</p>
-            <h2>Nothing needs resolving.</h2>
+            <h2>No support cases</h2>
             <p>Your order-level problem reports and seller cases will appear here with their deadlines and full history.</p>
             <button className="button dark" type="button" onClick={() => setMode("report")}>Report an order problem</button>
           </div>
@@ -196,7 +196,7 @@ function ReportProblem({
         <input type="hidden" name="action" value="open_case" />
         <div>
           <p className="eyebrow">Start a case</p>
-          <h2>Tell us what went wrong.</h2>
+          <h2>Report an order problem</h2>
           <p>The report, evidence, seller response, and outcome stay attached to this order.</p>
         </div>
         <label>
@@ -399,7 +399,7 @@ function BuyerActions({ item, busy, submit }: { item: ResolutionCase; busy: bool
   const mayEscalate = item.status !== "awaiting_seller" || item.sellerResponseOverdue;
   return (
     <section className="case-actions">
-      <div className="case-section-heading"><div><p className="eyebrow">Buyer actions</p><h3>Keep the case moving</h3></div></div>
+      <div className="case-section-heading"><div><p className="eyebrow">Buyer actions</p><h3>Case actions</h3></div></div>
       <div className="case-action-grid buyer-actions">
         {item.status === "return_authorized" && (
           <form onSubmit={submit}>

@@ -762,7 +762,7 @@ function ProfileForm({
   return (
     <div className="garage-section">
       <p className="eyebrow">Profile</p>
-      <h2>Your collector identity</h2>
+      <h2>Profile settings</h2>
       <form className="admin-form" onSubmit={submit}>
         <label>
           Display name
