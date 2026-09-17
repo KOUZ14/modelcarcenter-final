@@ -4,6 +4,11 @@ import { SellerFeeDisclosure } from "./seller-fee-disclosure";
 import { SellerOrderAmounts } from "./seller-order-amounts";
 
 import Link from "next/link";
+import { CatalogModelPicker } from "./catalog-model-picker";
+import { useRouter } from "next/navigation";
+import { HubOverview, HubDemand, HubOpportunities, HubMarketing, HubAnalytics } from "./seller-hub-panels";
+import { hubViews, inventoryViews, orderViews, matchesInventoryView, matchesOrderView, type HubView, type HubNavigate, type SellerHubMetrics } from "@/lib/seller-hub";
+import type { SellerHubDemand } from "@/lib/seller-hub-data";
 import { BrandLogo } from "@/components/brand-logo";
 import { useDialogFocus } from "./use-dialog-focus";
 import { FormEvent, useMemo, useRef, useState } from "react";
@@ -58,6 +63,8 @@ type Store = {
 };
 
 type Product = {
+  catalogProductId?: string | null;
+  conditionNotes?: string;
   id: string;
   sellerSku: string;
   title: string;
@@ -102,6 +109,7 @@ type Product = {
   images: EditableProductImage[];
   keywords: string;
   updatedAt: string;
+  createdAt: string;
 };
 
 type OrderItem = {
@@ -181,7 +189,7 @@ type Analytics = {
   }>;
 };
 
-type StoreData = {
+export type StoreData = {
   store: Store;
   fee: {
     marketplaceFeeBps: number;
@@ -192,6 +200,8 @@ type StoreData = {
   inventory: Product[];
   orders: StoreOrder[];
   analytics: Analytics;
+  hub: SellerHubMetrics;
+  demand: SellerHubDemand;
   shipping: {
     configured: boolean;
     insuranceThresholdCents: number;
@@ -199,18 +209,20 @@ type StoreData = {
   };
 };
 
-const tabs = ["overview", "inventory", "orders", "analytics", "settings"] as const;
-type Tab = (typeof tabs)[number];
+const tabs = hubViews;
+type Tab = HubView;
 
 export function StoreDashboard({
   data,
   initialView,
   initialProductId,
+  initialFilter,
   email,
 }: {
   data: StoreData;
   initialView: string;
   initialProductId?: string;
+  initialFilter?: string;
   email: string;
 }) {
   const firstView = tabs.includes(initialView as Tab)
@@ -218,7 +230,8 @@ export function StoreDashboard({
     : initialProductId
       ? "inventory"
       : "overview";
-  const [view, setView] = useState<Tab>(firstView);
+  const view = firstView;
+  const router = useRouter();
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const suspended = data.store.status === "suspended";
@@ -248,17 +261,19 @@ export function StoreDashboard({
     return body;
   }
 
-  function selectView(next: Tab) {
-    setView(next);
-    history.replaceState(null, "", `/store?view=${next}`);
-  }
+  const selectView: HubNavigate = (next, filter, edit) => {
+    const params = new URLSearchParams({ view: next });
+    if (filter) params.set("filter", filter);
+    if (edit) params.set("edit", edit);
+    router.push(`/store?${params.toString()}`);
+  };
 
   return (
-    <div className="store-layout">
+    <div className="store-layout seller-hub">
       <aside className="store-sidebar">
         <Link className="store-brand" href="/">
           <BrandLogo priority/>
-          <b>Store Console</b>
+          <b>Seller Hub</b>
         </Link>
         <div className="store-identity">
           <p className="eyebrow">Professional seller</p>
@@ -268,11 +283,12 @@ export function StoreDashboard({
             {data.store.status}
           </span>
         </div>
-        <nav aria-label="Store console sections">
+        <nav aria-label="Seller Hub sections">
           {tabs.map((tab) => (
             <button
               key={tab}
               className={view === tab ? "active" : ""}
+              aria-current={view === tab ? "page" : undefined}
               onClick={() => selectView(tab)}
             >
               {tab[0].toUpperCase() + tab.slice(1)}
@@ -312,19 +328,30 @@ export function StoreDashboard({
           </p>
         )}
         {view === "overview" && (
-          <StoreOverview data={data} selectView={selectView} />
+          <HubOverview data={data} navigate={selectView} />
         )}
+        {view === "demand" && <HubDemand data={data} navigate={selectView} filter={initialFilter} />}
+        {view === "opportunities" && <HubOpportunities data={data} navigate={selectView} />}
+        {view === "marketing" && <HubMarketing data={data} navigate={selectView} filter={initialFilter} />}
         {view === "inventory" && (
           <Inventory
+            key={`inventory-${initialFilter}-${initialProductId}`}
             marketplaceFeeBps={data.fee.marketplaceFeeBps}
             rows={data.inventory}
             initialProductId={initialProductId}
+            queue={inventoryViews.some(([value]) => value === initialFilter) ? initialFilter! : "all"}
+            slowIds={data.hub.slowIds}
+            navigate={selectView}
             disabled={suspended}
             action={action}
           />
         )}
         {view === "orders" && (
           <Orders
+            key={`orders-${initialFilter}`}
+            initialFilter={initialFilter}
+            returnOrderIds={data.demand.returnOrderIds}
+            navigate={selectView}
             rows={data.orders}
             store={data.store}
             shipping={data.shipping}
@@ -332,7 +359,7 @@ export function StoreDashboard({
             action={action}
           />
         )}
-        {view === "analytics" && <AnalyticsView analytics={data.analytics} />}
+        {view === "analytics" && <HubAnalytics data={data} navigate={selectView}><AnalyticsView analytics={data.analytics} /></HubAnalytics>}
         {view === "settings" && (
           <StoreSettings
             store={data.store}
@@ -346,93 +373,22 @@ export function StoreDashboard({
   );
 }
 
-function StoreOverview({
-  data,
-  selectView,
-}: {
-  data: StoreData;
-  selectView(view: Tab): void;
-}) {
-  const recent = data.orders.slice(0, 4);
-  return (
-    <div className="store-stack">
-      <header className="store-page-heading">
-        <div>
-          <p className="eyebrow">Store overview</p>
-          <h2>Welcome back, {data.store.contactName.split(" ")[0]}.</h2>
-        </div>
-        <button className="button dark small" onClick={() => selectView("inventory")}>
-          Add inventory
-        </button>
-      </header>
-      <div className="metric-grid store-metrics">
-        <article>
-          <span>Gross sales</span>
-          <b>{formatMoney(data.analytics.grossSalesCents)}</b>
-          <small>Paid item totals</small>
-        </article>
-        <article>
-          <span>Orders to fulfill</span>
-          <b>{data.analytics.unfulfilledOrders}</b>
-          <button onClick={() => selectView("orders")}>Manage orders</button>
-        </article>
-        <article>
-          <span>Active inventory</span>
-          <b>{data.analytics.activeListings}</b>
-          <small>{data.analytics.lowStock} low-stock items</small>
-        </article>
-        <article>
-          <span>Units sold</span>
-          <b>{data.analytics.unitsSold}</b>
-          <small>{data.analytics.paidOrders} paid orders</small>
-        </article>
-      </div>
-      <section className="store-panel">
-        <div className="panel-heading">
-          <div>
-            <p className="eyebrow">Recent activity</p>
-            <h2>Latest orders</h2>
-          </div>
-          <button className="text-button" onClick={() => selectView("orders")}>
-            View all orders
-          </button>
-        </div>
-        {recent.length ? (
-          <div className="store-order-summary">
-            {recent.map((order) => (
-              <article key={order.id}>
-                <div>
-                  <b>{order.orderNumber}</b>
-                  <span>{date(order.createdAt)}</span>
-                </div>
-                <p>{order.items.map((item) => item.productTitleSnapshot).join(", ")}</p>
-                <div>
-                  <span className={`status ${order.fulfillmentStatus}`}>
-                    {order.fulfillmentStatus}
-                  </span>
-                  <b>{formatMoney(order.totalCents, order.currency)}</b>
-                </div>
-              </article>
-            ))}
-          </div>
-        ) : (
-          <p className="store-empty">Your first orders will appear here.</p>
-        )}
-      </section>
-    </div>
-  );
-}
-
 function Inventory({
   marketplaceFeeBps,
   rows,
   initialProductId,
+  queue,
+  slowIds,
+  navigate,
   disabled,
   action,
 }: {
   marketplaceFeeBps: number;
   rows: Product[];
   initialProductId?: string;
+  queue: string;
+  slowIds: string[];
+  navigate: HubNavigate;
   disabled: boolean;
   action(
     payload: Record<string, unknown>,
@@ -440,7 +396,7 @@ function Inventory({
   ): Promise<Record<string, unknown>>;
 }) {
   const initial = rows.find((row) => row.id === initialProductId) ?? null;
-  const [editing, setEditing] = useState<Product | "new" | null>(initial);
+  const [editing, setEditing] = useState<Product | "new" | null>(disabled ? null : initialProductId === "new" ? "new" : initial);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
   const visible = useMemo(
@@ -449,9 +405,9 @@ function Inventory({
         const matchesSearch = `${row.title} ${row.sellerSku} ${row.vehicleMake} ${row.vehicleModel}`
           .toLowerCase()
           .includes(search.toLowerCase());
-        return matchesSearch && (filter === "all" || row.status === filter);
+        return matchesSearch && (filter === "all" || row.status === filter) && matchesInventoryView(row, queue, slowIds);
       }),
-    [filter, rows, search],
+    [filter, rows, search, queue, slowIds],
   );
   async function setStatus(product: Product, status: "active" | "inactive") {
     await action(
@@ -482,6 +438,11 @@ function Inventory({
           Add product
         </button>
       </header>
+      <nav className="hub-filters" aria-label="Inventory views">
+        {inventoryViews.map(([value, label]) => <button key={value} aria-pressed={queue === value} onClick={() => navigate("inventory", value)}>{label}<span>{rows.filter((row) => matchesInventoryView(row, value, slowIds)).length}</span></button>)}
+      </nav>
+      {queue === "slow" && <p className="hub-note">Active, in-stock listings at least 90 days old with no paid sale in the last 90 days.</p>}
+      {queue === "low" && <p className="hub-note">Active, in-stock listings with 1–2 available units, after reservations.</p>}
       <div className="store-inventory-tools">
         <input
           aria-label="Search inventory"
@@ -505,7 +466,7 @@ function Inventory({
         <div className="store-inventory-meta">
           <b>{visible.length} products</b>
           <span>
-            {rows.reduce(
+            {visible.reduce(
               (sum, row) =>
                 sum + Math.max(0, row.inventoryQuantity - row.reservedQuantity),
               0,
@@ -606,6 +567,7 @@ function ProductEditor({
   onClose(): void;
 }) {
   const dialog = useDialogFocus(onClose);
+  const [catalogReady, setCatalogReady] = useState(Boolean(product?.catalogProductId));
   const [busy, setBusy] = useState(false);
   const [productId, setProductId] = useState(product?.id ?? "");
   const [files, setFiles] = useState<File[]>([]);
@@ -620,6 +582,7 @@ function ProductEditor({
   >(product?.availabilityType ?? "in_stock");
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!catalogReady) { setImageError("Choose a catalog model first."); return; }
     setBusy(true);
     setImageError("");
     try {
@@ -736,23 +699,14 @@ function ProductEditor({
           <button type="button" className="dialog-close" aria-label="Close" onClick={onClose}>×</button>
         </div>
         <form className="admin-form" onSubmit={submit}>
+          <CatalogModelPicker initial={product} listingSaved={Boolean(productId)} disabled={busy} onReady={setCatalogReady} />
+          <fieldset className="catalog-listing-fields" hidden={!catalogReady} disabled={!catalogReady}>
           <div className="form-row">
             <label>Seller SKU<input name="sellerSku" required maxLength={100} defaultValue={product?.sellerSku ?? ""} /></label>
-            <label>Title<input name="title" required maxLength={200} defaultValue={product?.title ?? ""} /></label>
+            <label>Listing title (optional)<input name="title" maxLength={200} defaultValue={product?.title ?? ""} /></label>
           </div>
+          <label>Condition notes<textarea name="conditionNotes" maxLength={2000} defaultValue={product?.conditionNotes ?? ""} /></label>
           <label>Description<textarea name="description" rows={4} maxLength={4000} defaultValue={product?.description ?? ""} /></label>
-          <div className="form-row">
-            <label>Scale<input name="scale" required maxLength={30} placeholder="1:18" defaultValue={product?.scale ?? "1:18"} /></label>
-            <label>Model manufacturer<input name="modelManufacturer" required maxLength={100} defaultValue={product?.modelManufacturer ?? ""} /></label>
-          </div>
-          <div className="form-row">
-            <label>Vehicle make<input name="vehicleMake" required maxLength={100} defaultValue={product?.vehicleMake ?? ""} /></label>
-            <label>Vehicle model<input name="vehicleModel" required maxLength={120} defaultValue={product?.vehicleModel ?? ""} /></label>
-          </div>
-          <div className="form-row">
-            <label>Vehicle year<input name="vehicleYear" maxLength={20} defaultValue={product?.vehicleYear ?? ""} /></label>
-            <label>Color<input name="color" maxLength={80} defaultValue={product?.color ?? ""} /></label>
-          </div>
           <div className="form-row">
             <label>Price (USD)<input name="price" inputMode="decimal" required defaultValue={product ? (product.priceCents / 100).toFixed(2) : ""} /></label>
             <label>Inventory quantity<input name="inventoryQuantity" type="number" min={product?.reservedQuantity ?? 0} max={1000000} required defaultValue={product?.inventoryQuantity ?? 1} /></label>
@@ -794,7 +748,7 @@ function ProductEditor({
             </p>
           </fieldset>
           <fieldset><legend>Package override (optional)</legend><p className="form-note">Leave all four blank to use the store default package for calculated checkout rates.</p><div className="parcel-grid"><label>Length (in)<input name="packageLength" inputMode="decimal" defaultValue={product?.packageLength ?? ""} /></label><label>Width (in)<input name="packageWidth" inputMode="decimal" defaultValue={product?.packageWidth ?? ""} /></label><label>Height (in)<input name="packageHeight" inputMode="decimal" defaultValue={product?.packageHeight ?? ""} /></label><label>Weight (lb)<input name="packageWeight" inputMode="decimal" defaultValue={product?.packageWeight ?? ""} /></label></div></fieldset>
-          <CollectibleListingFields product={product}/>
+          <CollectibleListingFields product={product} includeIdentity={false}/>
           <ProductImageFields
             images={images}
             primaryImageUrl={primaryImageUrl}
@@ -813,7 +767,8 @@ function ProductEditor({
             <button className="button dark small" disabled={busy}>{busy ? "Saving…" : product ? "Save changes" : "Create draft"}</button>
             <button type="button" onClick={onClose}>Cancel</button>
           </div>
-        </form>
+            </fieldset>
+      </form>
       </section>
     </div>
   );
@@ -874,12 +829,18 @@ function InventoryImporter({
 
 function Orders({
   rows,
+  initialFilter,
+  returnOrderIds,
+  navigate,
   store,
   shipping,
   disabled,
   action,
 }: {
   rows: StoreOrder[];
+  initialFilter?: string;
+  returnOrderIds: string[];
+  navigate: HubNavigate;
   store: Store;
   shipping: StoreData["shipping"];
   disabled: boolean;
@@ -888,27 +849,23 @@ function Orders({
     options?: { reload?: boolean; message?: string },
   ): Promise<Record<string, unknown>>;
 }) {
-  const [filter, setFilter] = useState("open");
+  const filter = ["open", "all", "shipped", "returns", "refunded", "cancelled"].includes(initialFilter ?? "") ? initialFilter! : "open";
   const urgentCount = rows.filter((order) =>
     ["overdue", "due_today", "due_soon"].includes(
       orderHandlingReminder(order).level,
     ),
   ).length;
-  const visible = rows.filter((order) =>
-    filter === "all"
-      ? true
-      : filter === "open"
-        ? ["paid", "partially_refunded"].includes(order.paymentStatus) && ["unfulfilled", "processing"].includes(order.fulfillmentStatus)
-        : order.fulfillmentStatus === filter || order.paymentStatus === filter,
-  );
+  const visible = rows.filter((order) => matchesOrderView(order, filter, returnOrderIds));
   return (
     <div className="store-stack">
       <header className="store-page-heading">
         <div><p className="eyebrow">Fulfillment</p><h2>Orders</h2><p>Compare protected carrier rates, print labels, and follow tracking events.</p>{urgentCount > 0 && <p className="handling-summary"><b>{urgentCount} handling reminder{urgentCount === 1 ? "" : "s"}</b> need attention.</p>}</div>
-        <select aria-label="Filter orders" value={filter} onChange={(event) => setFilter(event.target.value)}>
-          <option value="open">Needs fulfillment</option><option value="all">All orders</option><option value="shipped">Shipped</option><option value="refunded">Refunded</option><option value="cancelled">Cancelled</option>
+        <select aria-label="Filter orders" value={filter} onChange={(event) => navigate("orders", event.target.value)}>
+          <option value="open">Awaiting shipment</option><option value="all">All orders</option><option value="shipped">Shipped</option><option value="returns">Returns</option><option value="refunded">Refunded</option><option value="cancelled">Cancelled</option>
         </select>
       </header>
+      <nav className="hub-filters" aria-label="Order queues">{orderViews.map(([value, label]) => <button key={value} aria-pressed={filter === value} onClick={() => navigate("orders", value)}>{label}<span>{rows.filter((row) => matchesOrderView(row, value, returnOrderIds)).length}</span></button>)}</nav>
+      {filter === "returns" && <div className="hub-callout"><p>Orders with a return-and-refund request. Review each case and respond in the Resolution Center.</p><Link className="button outline small" href="/resolution">Manage returns</Link></div>}
       <div className="store-orders">
         {visible.map((order) => (
           <article className="store-order" key={order.id}>
@@ -1161,29 +1118,7 @@ async function shippingRequest(payload: Record<string, unknown>) {
 
 function AnalyticsView({ analytics }: { analytics: Analytics }) {
   const max = Math.max(1, ...analytics.monthlySales.map((month) => month.grossCents));
-  return (
-    <div className="store-stack">
-      <header className="store-page-heading"><div><p className="eyebrow">Performance</p><h2>Store analytics</h2><p>Lifetime totals and a rolling six-month sales view.</p></div></header>
-      <div className="metric-grid store-metrics analytics-metrics">
-        <article><span>Gross sales</span><b>{formatMoney(analytics.grossSalesCents)}</b><small>Before marketplace fees</small></article>
-        <article><span>Item sales after commission</span><b>{formatMoney(analytics.netSalesCents)}</b><small>Before processing, refunds, and fulfillment costs; see orders for your proceeds.</small></article>
-        <article><span>Average order</span><b>{formatMoney(analytics.averageOrderCents)}</b><small>{analytics.paidOrders} paid orders</small></article>
-        <article><span>Inventory value</span><b>{formatMoney(analytics.inventoryValueCents)}</b><small>Available units at list price</small></article>
-      </div>
-      <div className="store-analytics-grid">
-        <section className="store-panel">
-          <p className="eyebrow">Last six months</p><h3>Gross item sales</h3>
-          <div className="sales-bars">
-            {analytics.monthlySales.map((month) => <div key={month.key}><div><span>{month.label}</span><b>{formatMoney(month.grossCents)}</b></div><div className="sales-bar-track"><span style={{ width: `${(month.grossCents / max) * 100}%` }} /></div><small>{month.orders} order{month.orders === 1 ? "" : "s"}</small></div>)}
-          </div>
-        </section>
-        <section className="store-panel">
-          <p className="eyebrow">Product performance</p><h3>Top products</h3>
-          {analytics.topProducts.length ? <ol className="top-products">{analytics.topProducts.map((product) => <li key={product.title}><div><b>{product.title}</b><span>{product.units} units</span></div><b>{formatMoney(product.revenueCents)}</b></li>)}</ol> : <p className="store-empty">Product performance appears after your first paid order.</p>}
-        </section>
-      </div>
-    </div>
-  );
+  return <section className="store-panel"><p className="eyebrow">Last six calendar months</p><h3>Revenue over time</h3><p className="hub-note">Gross item sales before fees and refunds. The current month is partial; sales are grouped by order creation date.</p><div className="sales-bars">{analytics.monthlySales.map((month) => <div key={month.key}><div><span>{month.label}</span><b>{formatMoney(month.grossCents)}</b></div><div className="sales-bar-track"><span style={{ width: `${month.grossCents / max * 100}%`, minWidth: 0 }} /></div><small>{month.orders} paid orders</small></div>)}</div></section>;
 }
 
 function StoreSettings({

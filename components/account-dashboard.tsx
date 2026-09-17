@@ -125,7 +125,7 @@ export function AccountDashboard({
           ))}
         </nav>
         <Link className="button dark small" href={professionalStore ? "/store" : "/sell/model"}>
-          {professionalStore ? "Open Store Console" : "Sell a Model"}
+          {professionalStore ? "Open Seller Hub" : "Sell a Model"}
         </Link>
       </aside>
       <section className="garage-content">
@@ -517,7 +517,7 @@ function Listings({
     return (
       <div className="garage-section">
         <p className="eyebrow">Professional store</p>
-        <h2>Manage inventory in your Store Console.</h2>
+        <h2>Manage inventory in your Seller Hub.</h2>
         <p>
           Create products, import inventory, publish listings, and monitor stock
           from the workspace built for your store.

@@ -1,5 +1,7 @@
 export type ProductSummary = {
   id: string;
+  catalogProductId?: string | null;
+  conditionNotes?: string;
   sellerId: string;
   sellerSlug: string;
   sellerName: string;

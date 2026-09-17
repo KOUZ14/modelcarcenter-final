@@ -48,12 +48,14 @@ function initialSelectValue(value: unknown, options: readonly string[]) {
 
 export function CollectibleListingFields({
   product,
+  includeIdentity = true,
 }: {
   product?: CollectibleProduct | null;
+  includeIdentity?: boolean;
 }) {
   return (
     <fieldset className="collectible-fields">
-      <legend>Collectible condition and identity</legend>
+      <legend>Condition of your copy</legend>
       <p className="field-note">
         Grade the model separately from its packaging. For disclosure fields,
         enter &ldquo;None known&rdquo; when there is nothing to report.
@@ -139,12 +141,11 @@ export function CollectibleListingFields({
           </select>
         </label>
       </div>
-      <div className="form-row">
+      {includeIdentity && <div className="form-row">
         <label>
-          Material
+          Material (optional)
           <input
             name="material"
-            required
             maxLength={120}
             placeholder="Die-cast metal with plastic details"
             defaultValue={String(product?.material ?? "")}
@@ -159,7 +160,7 @@ export function CollectibleListingFields({
             defaultValue={String(product?.productNumber ?? "")}
           />
         </label>
-      </div>
+      </div>}
       <label>
         Edition or serial number
         <input

@@ -55,10 +55,10 @@ export function SignInForm({
     return (
       <div className="auth-card" role="status">
         <p className="eyebrow">Check your email</p>
-        <h1>Your secure link is on its way.</h1>
+        <h1>Check for your secure link.</h1>
         <p>
-          We sent a single-use sign-in link to <b>{email}</b>. It expires in 10
-          minutes.
+          If your request can be processed, a single-use sign-in link will arrive at <b>{email}</b>.
+          It expires in 10 minutes. If you recently requested a link, use that email or wait 10 minutes before trying again.
         </p>
         <button
           className="text-button"

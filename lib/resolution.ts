@@ -1136,6 +1136,8 @@ async function storeResolutionFiles(input: {
   const prepared: PreparedFile[] = [];
   try {
     for (const file of input.files) {
+      if (file.size < 1 || file.size > MAX_RESOLUTION_FILE_BYTES)
+        throw new ValidationError("Each evidence or label file must be 10 MB or smaller.");
       const bytes = new Uint8Array(await file.arrayBuffer());
       const detected = detectResolutionFileType(bytes, file.type);
       if (!detected)

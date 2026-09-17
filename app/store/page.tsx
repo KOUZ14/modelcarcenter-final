@@ -8,14 +8,14 @@ import { getStoreDashboardData } from "@/lib/store";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
-  title: "Store Console",
+  title: "Seller Hub",
   robots: { index: false, follow: false },
 };
 
 export default async function StorePage({
   searchParams,
 }: {
-  searchParams: Promise<{ view?: string; edit?: string }>;
+  searchParams: Promise<{ view?: string; edit?: string; filter?: string }>;
 }) {
   const account = await requireCollector("/store");
   const query = await searchParams;
@@ -25,7 +25,7 @@ export default async function StorePage({
       <main>
         <SiteHeader />
         <div id="main-content" tabIndex={-1} className="inner-page shell store-access-empty">
-          <p className="eyebrow">Store Console</p>
+          <p className="eyebrow">Seller Hub</p>
           <h1>No store is connected to this account.</h1>
           <p>
             Sign in with the verified contact email on an approved professional
@@ -47,8 +47,9 @@ export default async function StorePage({
   return (
     <StoreDashboard
       data={data}
-      initialView={query.view ?? "overview"}
+      initialView={query.view ?? (query.edit ? "inventory" : "overview")}
       initialProductId={query.edit}
+      initialFilter={query.filter}
       email={account.user.email}
     />
   );

@@ -6,6 +6,7 @@ import {
   sqliteTable,
   text,
   uniqueIndex,
+  type AnySQLiteColumn,
 } from "drizzle-orm/sqlite-core";
 import { user as authUser } from "./auth-schema.generated";
 
@@ -27,6 +28,12 @@ const timestamps = {
     .notNull()
     .default(sql`CURRENT_TIMESTAMP`),
 };
+
+export const securityRateLimits = sqliteTable("security_rate_limits", {
+  id: text("id").primaryKey(),
+  count: integer("count").notNull(),
+  expiresAt: integer("expires_at").notNull(),
+}, (table) => [index("security_rate_limits_expiry_idx").on(table.expiresAt)]);
 
 export const collectorProfiles = sqliteTable(
   "collector_profiles",
@@ -197,10 +204,52 @@ export const sellerApplications = sqliteTable(
   (table) => [index("seller_applications_status_idx").on(table.status)],
 );
 
+// Shared model identity. Prices, stock, condition and seller photos live on listings.
+export const catalogProducts = sqliteTable(
+  "catalog_products",
+  {
+    id: text("id").primaryKey(),
+    modelManufacturer: text("model_car_manufacturer").notNull(),
+    manufacturerKey: text("manufacturer_key").notNull(),
+    manufacturerSku: text("manufacturer_sku"),
+    skuKey: text("sku_key"),
+    scale: text("scale").notNull(),
+    vehicleMake: text("vehicle_make").notNull(),
+    vehicleModel: text("vehicle_model").notNull(),
+    vehicleVariant: text("vehicle_variant"),
+    vehicleYear: text("vehicle_year"),
+    color: text("color"),
+    livery: text("livery"),
+    releaseYear: text("release_year"),
+    material: text("material").notNull().default(""),
+    upc: text("upc"),
+    ean: text("ean"),
+    gtinKey: text("gtin_key"),
+    title: text("title").notNull(),
+    description: text("description").notNull().default(""),
+    primaryImageUrl: text("primary_image_url"),
+    createdByUserId: text("created_by_user_id").references(() => authUser.id, { onDelete: "set null" }),
+    catalogStatus: text("catalog_status", { enum: ["unverified", "verified", "needs_review", "archived"] }).notNull().default("unverified"),
+    mergedIntoId: text("merged_into_id").references((): AnySQLiteColumn => catalogProducts.id, { onDelete: "restrict" }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("catalog_manufacturer_sku_unique").on(table.manufacturerKey, table.skuKey),
+    uniqueIndex("catalog_gtin_unique").on(table.gtinKey),
+    index("catalog_attributes_idx").on(table.manufacturerKey, table.scale, table.vehicleMake, table.vehicleModel),
+    index("catalog_status_idx").on(table.catalogStatus, table.createdAt),
+  ],
+);
+
+// The historical `products` table is seller inventory, not the canonical catalog.
+// Keep its IDs stable for carts, orders, messages, and photos. Migration triggers
+// require catalog_product_id on every insert/update after backfilling old rows.
 export const products = sqliteTable(
   "products",
   {
     id: text("id").primaryKey(),
+    catalogProductId: text("catalog_product_id").references(() => catalogProducts.id, { onDelete: "restrict" }),
+    conditionNotes: text("condition_notes").notNull().default(""),
     sellerId: text("seller_id")
       .notNull()
       .references(() => sellers.id, { onDelete: "cascade" }),
@@ -335,6 +384,7 @@ export const products = sqliteTable(
   },
   (table) => [
     uniqueIndex("products_slug_unique").on(table.slug),
+    index("listings_catalog_product_idx").on(table.catalogProductId, table.status),
     uniqueIndex("products_seller_sku_unique").on(
       table.sellerId,
       table.sellerSku,

@@ -84,7 +84,8 @@ test("paid-order persistence and delayed fee reconciliation use actual fees with
   await writeFile(bundlePath, built.outputFiles[0].contents);
   const { finalizePaidCheckout } = await import(pathToFileURL(bundlePath).href);
   sqlite.exec("INSERT INTO sellers (id, slug, store_name, contact_name, contact_email, status, stripe_account_id) VALUES ('seller', 'seller', 'Seller', 'Seller', 'seller@example.test', 'active', 'acct_seller')");
-  sqlite.exec("INSERT INTO products (id, seller_id, slug, seller_sku, title, scale, model_manufacturer, vehicle_make, vehicle_model, price_cents, inventory_quantity, reserved_quantity) VALUES ('product', 'seller', 'product', 'sku', 'Model', '1:18', 'Maker', 'Make', 'Model', 20000, 5, 5)");
+  sqlite.exec("INSERT INTO catalog_products (id, model_car_manufacturer, manufacturer_key, scale, vehicle_make, vehicle_model, title) VALUES ('catalog-fixture', 'Maker', 'maker', '1:18', 'Make', 'Model', 'Model')");
+  sqlite.exec("INSERT INTO products (catalog_product_id, id, seller_id, slug, seller_sku, title, scale, model_manufacturer, vehicle_make, vehicle_model, price_cents, inventory_quantity, reserved_quantity) VALUES ('catalog-fixture', 'product', 'seller', 'product', 'sku', 'Model', '1:18', 'Maker', 'Make', 'Model', 20000, 5, 5)");
   for (const [id, fee, payer] of [["new",697,"seller"], ["pending",null,"seller"], ["zero",0,"seller"], ["legacy",697,null], ["early-refund",null,"seller"]]) {
     sqlite.prepare("INSERT INTO checkout_reservations (id, seller_id, subtotal_cents, shipping_cents, platform_fee_cents, marketplace_fee_bps, currency, expires_at) VALUES (?, 'seller', 20000, 1000, 1400, 700, 'usd', '2026-09-16')").run(id);
     sqlite.prepare("INSERT INTO checkout_reservation_items (id, reservation_id, product_id, product_title_snapshot, seller_sku_snapshot, scale_snapshot, manufacturer_snapshot, unit_price_cents, quantity) VALUES (?, ?, 'product', 'Model', 'sku', '1:18', 'Maker', 20000, 1)").run(id,id);

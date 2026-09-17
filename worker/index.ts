@@ -3,6 +3,10 @@ import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } fr
 import handler from "vinext/server/app-router-entry";
 import { processResolutionNotifications } from "../lib/resolution-notifications";
 import { processEligibleSellerTransfers } from "../lib/seller-transfers";
+import { config } from "../lib/config";
+import { protectRequest, requestSecurityFailure, securityPath } from "../lib/request-security";
+import { pruneSecurityRateLimits } from "../lib/security-rate-limit";
+import { logSecurityEvent } from "../lib/security-events";
 
 interface Env {
   ASSETS: Fetcher;
@@ -35,6 +39,18 @@ interface ScheduledController {
 
 const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    try {
+      const guarded = await protectRequest(request, {
+        database: env.DB,
+        siteUrl: config.siteUrl,
+        secret: config.betterAuthSecret,
+        production: process.env.NODE_ENV === "production",
+      });
+      if (guarded instanceof Response) return withSecurityHeaders(guarded, request);
+      request = guarded;
+    } catch (error) {
+      return withSecurityHeaders(requestSecurityFailure(error), request);
+    }
     const url = new URL(request.url);
 
     if (url.pathname === "/_vinext/image") {
@@ -46,10 +62,21 @@ const worker = {
           return result.response();
         },
       }, allowedWidths);
-      return withSecurityHeaders(response);
+      return withSecurityHeaders(response, request);
     }
 
-    return withSecurityHeaders(await handler.fetch(request, env, ctx));
+    const response = await handler.fetch(request, env, ctx);
+    const path = securityPath(request);
+    if (path.startsWith("/api/")) {
+      if ([401, 403].includes(response.status)) logSecurityEvent("access_denied", { status: response.status });
+      if (path.startsWith("/api/admin") && !["GET", "HEAD", "OPTIONS"].includes(request.method)) {
+        logSecurityEvent("admin_mutation", { status: response.status });
+      }
+      if (path.startsWith("/api/auth/") && path !== "/api/auth/get-session") {
+        logSecurityEvent("auth_result", { status: response.status });
+      }
+    }
+    return withSecurityHeaders(response, request);
   },
   async scheduled(
     controller: ScheduledController,
@@ -66,6 +93,7 @@ async function runScheduledMaintenance(database: D1Database, now: Date) {
     const [notifications, transfers] = await Promise.all([
       processResolutionNotifications({ database, now }),
       processEligibleSellerTransfers({ database, now }),
+      pruneSecurityRateLimits(database, now.getTime()),
     ]);
     console.info(
       "Scheduled marketplace maintenance completed.",
@@ -81,7 +109,7 @@ async function runScheduledMaintenance(database: D1Database, now: Date) {
   }
 }
 
-function withSecurityHeaders(response: Response) {
+function withSecurityHeaders(response: Response, request: Request) {
   const headers = new Headers(response.headers);
   headers.set(
     "Content-Security-Policy",
@@ -92,6 +120,14 @@ function withSecurityHeaders(response: Response) {
   headers.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
   headers.set("X-Content-Type-Options", "nosniff");
   headers.set("X-Frame-Options", "DENY");
+  // This application has no cross-origin API consumers. Authentication and
+  // private API responses must never enter shared caches or leak link tokens.
+  headers.delete("Access-Control-Allow-Origin");
+  headers.delete("Access-Control-Allow-Credentials");
+  let path = "";
+  try { path = securityPath(request); } catch { /* Rejected malformed path. */ }
+  if (path.startsWith("/api/")) headers.set("Cache-Control", "private, no-store");
+  if (path.startsWith("/api/auth/")) headers.set("Referrer-Policy", "no-referrer");
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,

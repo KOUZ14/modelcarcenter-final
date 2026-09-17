@@ -20,6 +20,8 @@ import {
   ValidationError,
 } from "./validation";
 import { isCurrentPolicyVersion } from "./legal";
+import { listingPayloadWithCatalog, persistCatalogListing, prepareListingCatalog } from "./catalog-products";
+import { catalogListingSnapshot } from "./catalog-product-rules";
 
 type CollectorProfile = { displayName: string; bio: string };
 
@@ -81,13 +83,16 @@ export async function saveCollectorListing(input: {
   payload: Record<string, unknown>;
   productId?: string | null;
 }) {
-  const values = parseCollectorListing(input.payload);
+  const owned = input.productId ? await getOwnedProduct(input.user.id, input.productId) : null;
+  if (input.productId && !owned) throw new ValidationError("Listing not found.");
+  const catalog = await prepareListingCatalog(input.payload, input.user.id, owned?.product.catalogProductId);
+  const values = parseCollectorListing(listingPayloadWithCatalog(input.payload, catalog.model));
   const seller = await getOrCreateCollectorSeller(input.user, input.profile);
+  if (seller.status === "suspended") throw new ValidationError("This seller is suspended.");
   const db = getDb();
   const shipFromAddress = await resolveShipFromAddress(seller.id, values);
   await updateCollectorSellerPreferences(seller.id, values);
   if (input.productId) {
-    const owned = await getOwnedProduct(input.user.id, input.productId);
     if (!owned) throw new ValidationError("Listing not found.");
     if (values.inventoryQuantity < owned.product.reservedQuantity) {
       throw new ValidationError(
@@ -96,37 +101,43 @@ export async function saveCollectorListing(input: {
     }
     const nextStatus =
       owned.product.status === "active" ? "pending_review" : "draft";
-    await db
+    const model = await persistCatalogListing(catalog, (model) => db
       .update(products)
       .set({
         ...listingProductValues(values),
+        ...catalogListingSnapshot(model),
+        sellerSku: cleanText(input.payload.sellerSku, 100) || owned.product.sellerSku,
+        conditionNotes: cleanText(input.payload.conditionNotes, 2000),
         shipFromAddressId: shipFromAddress.id,
         status: nextStatus,
         rejectionReason: null,
         updatedAt: new Date().toISOString(),
       })
       .where(
-        and(eq(products.id, input.productId), eq(products.sellerId, seller.id)),
-      );
+        and(eq(products.id, input.productId!), eq(products.sellerId, seller.id)),
+      ).toSQL());
     return {
       productId: input.productId,
+      catalogProductId: model.id,
       status: nextStatus,
       shipFromAddress,
     };
   }
   const id = crypto.randomUUID();
   const slug = `${makeSlug(values.title)}-${id.slice(0, 8)}`;
-  await db.insert(products).values({
+  const model = await persistCatalogListing(catalog, (model) => db.insert(products).values({
     id,
     sellerId: seller.id,
     slug,
-    sellerSku: `COL-${id.replaceAll("-", "").slice(0, 12).toUpperCase()}`,
+    sellerSku: cleanText(input.payload.sellerSku, 100) || `COL-${id.replaceAll("-", "").slice(0, 12).toUpperCase()}`,
     shipFromAddressId: shipFromAddress.id,
     ...listingProductValues(values),
+    ...catalogListingSnapshot(model),
+    conditionNotes: cleanText(input.payload.conditionNotes, 2000),
     currency: "usd",
     status: "draft",
-  });
-  return { productId: id, status: "draft" as const, shipFromAddress };
+  }).toSQL());
+  return { productId: id, catalogProductId: model.id, status: "draft" as const, shipFromAddress };
 }
 
 async function updateCollectorSellerPreferences(

@@ -1,4 +1,5 @@
 "use client";
+import { CatalogModelPicker } from "./catalog-model-picker";
 import { SellerFeeDisclosure } from "./seller-fee-disclosure";
 
 
@@ -50,6 +51,7 @@ export function CollectorListingForm({
   marketplaceFeeBps: number;
 }) {
   const product = initial?.product ?? {};
+  const [catalogReady, setCatalogReady] = useState(Boolean(product.catalogProductId));
   const formRef = useRef<HTMLFormElement>(null);
   const addressRef = useRef<AddressFieldsHandle>(null);
   const [productId, setProductId] = useState(String(product.id ?? ""));
@@ -78,6 +80,7 @@ export function CollectorListingForm({
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!catalogReady) { setError("Choose a catalog model first."); return; }
     setBusy(true);
     setError("");
     setMessage("");
@@ -273,25 +276,6 @@ export function CollectorListingForm({
     }
   }
 
-  function buildTitle() {
-    const form = formRef.current;
-    if (!form) return;
-    const data = new FormData(form);
-    const value = (name: string) => String(data.get(name) ?? "").trim();
-    const title = form.elements.namedItem("title") as HTMLInputElement | null;
-    if (!title) return;
-    title.value = [
-      value("vehicleYear"),
-      value("vehicleMake"),
-      value("vehicleModel"),
-      value("scale"),
-      value("modelManufacturer"),
-    ]
-      .filter(Boolean)
-      .join(" ");
-    title.focus();
-  }
-
   function fillCommonDisclosures() {
     const form = formRef.current;
     if (!form) return;
@@ -341,6 +325,8 @@ export function CollectorListingForm({
       </div>
 
       <form ref={formRef} className="listing-form" onSubmit={save} noValidate>
+        <CatalogModelPicker initial={product} listingSaved={Boolean(productId)} initialQuery={[prefill.manufacturer, prefill.make, prefill.model, prefill.scale].filter(Boolean).join(" ")} disabled={busy} onReady={setCatalogReady} />
+        <fieldset className="catalog-listing-fields" hidden={!catalogReady} disabled={!catalogReady}>
         <div className="listing-section-controls">
           <p>Open the section you need. Your entries stay in place when a section is closed.</p>
           <div>
@@ -357,33 +343,10 @@ export function CollectorListingForm({
             </span>
           </summary>
           <div className="listing-section-content">
-            <div className="listing-section-action-row">
-              <button className="text-action" type="button" onClick={buildTitle}>
-                Build title from details
-              </button>
-            </div>
-          <label>
-            Product title
-            <input name="title" required maxLength={200} placeholder="Example: 1967 Ford Mustang 1:18 AUTOart" defaultValue={String(product.title ?? "")} />
-          </label>
-          <div className="form-row">
-            <label>Vehicle make<input name="vehicleMake" required maxLength={100} autoComplete="off" defaultValue={String(product.vehicleMake ?? prefill.make ?? "")} /></label>
-            <label>Vehicle model<input name="vehicleModel" required maxLength={120} autoComplete="off" defaultValue={String(product.vehicleModel ?? prefill.model ?? "")} /></label>
-          </div>
-          <div className="form-row">
-            <label>Vehicle year<input name="vehicleYear" maxLength={20} inputMode="numeric" defaultValue={String(product.vehicleYear ?? "")} /></label>
-            <label>
-              Scale
-              <select name="scale" required defaultValue={String(product.scale ?? prefill.scale ?? "1:18")}>
-                {["1:18", "1:24", "1:43", "1:64", "1:87", "Other"].map((scale) => <option key={scale}>{scale}</option>)}
-              </select>
-            </label>
-          </div>
-          <div className="form-row">
-            <label>Model manufacturer<input name="modelManufacturer" required maxLength={100} autoComplete="off" defaultValue={String(product.modelManufacturer ?? prefill.manufacturer ?? "")} /></label>
-            <label>Color<input name="color" maxLength={80} autoComplete="off" defaultValue={String(product.color ?? "")} /></label>
-          </div>
-          <label>Description<textarea name="description" required maxLength={4000} rows={6} placeholder="What makes this model special? Include edition details and anything a buyer should know." defaultValue={String(product.description ?? "")} /></label>
+          <label>Listing title (optional)<input name="title" maxLength={200} placeholder="Uses the catalog model name if blank" defaultValue={String(product.title ?? "")} /></label>
+          <label>Seller SKU (optional)<input name="sellerSku" maxLength={100} placeholder="Your own inventory reference" defaultValue={String(product.sellerSku ?? "")} /></label>
+          <label>Listing description (optional)<textarea name="description" maxLength={4000} rows={4} defaultValue={String(product.description ?? "")} /></label>
+          <label>Condition notes (optional)<textarea name="conditionNotes" maxLength={2000} rows={3} defaultValue={String(product.conditionNotes ?? "")} /></label>
           </div>
         </details>
 
@@ -398,7 +361,7 @@ export function CollectorListingForm({
             <div className="listing-section-action-row">
               <button className="text-action" type="button" onClick={fillCommonDisclosures}>Fill common “none” answers</button>
             </div>
-          <CollectibleListingFields product={product} />
+          <CollectibleListingFields product={product} includeIdentity={false} />
           </div>
         </details>
 
@@ -530,6 +493,7 @@ export function CollectorListingForm({
           </div>
           </div>
         </details>
+        </fieldset>
       </form>
       <p><Link className="text-link" href="/account?view=listings">Back to My Listings</Link></p>
     </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { CatalogModelPicker } from "@/components/catalog-model-picker";
 import Image from "next/image";
 import { BrandLogo } from "@/components/brand-logo";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -663,6 +664,8 @@ function SellerEditor({
 }
 
 type AdminProduct = {
+  catalogProductId?: string | null;
+  conditionNotes?: string;
   id: string;
   sellerId: string;
   sellerName: string;
@@ -930,6 +933,7 @@ function ProductEditor({
   action(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
   onClose(): void;
 }) {
+  const [catalogReady, setCatalogReady] = useState(Boolean(product.catalogProductId));
   const [busy, setBusy] = useState(false);
   const [productId, setProductId] = useState(product.id);
   const [files, setFiles] = useState<File[]>([]);
@@ -944,6 +948,7 @@ function ProductEditor({
   >(product.availabilityType ?? "in_stock");
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!catalogReady) { setImageError("Choose a catalog model first."); return; }
     setBusy(true);
     setImageError("");
     try {
@@ -1052,6 +1057,8 @@ function ProductEditor({
     <section className="admin-panel">
       <h2>{product.id ? "Edit" : "Create"} product</h2>
       <form className="admin-form" onSubmit={submit}>
+          <CatalogModelPicker initial={product} listingSaved={Boolean(productId)} disabled={busy} onReady={setCatalogReady} />
+          <fieldset className="catalog-listing-fields" hidden={!catalogReady} disabled={!catalogReady}>
         <div className="form-row">
           <label>
             Seller
@@ -1069,8 +1076,8 @@ function ProductEditor({
           </label>
         </div>
         <label>
-          Title
-          <input name="title" required defaultValue={product.title} />
+          Listing title (optional)
+          <input name="title" defaultValue={product.title} />
         </label>
         <label>
           Description
@@ -1079,52 +1086,8 @@ function ProductEditor({
             defaultValue={product.description ?? ""}
           />
         </label>
-        <div className="form-row">
-          <label>
-            Scale
-            <input name="scale" required defaultValue={product.scale} />
-          </label>
-          <label>
-            Model manufacturer
-            <input
-              name="modelManufacturer"
-              required
-              defaultValue={product.modelManufacturer}
-            />
-          </label>
-        </div>
-        <div className="form-row">
-          <label>
-            Vehicle make
-            <input
-              name="vehicleMake"
-              required
-              defaultValue={product.vehicleMake}
-            />
-          </label>
-          <label>
-            Vehicle model
-            <input
-              name="vehicleModel"
-              required
-              defaultValue={product.vehicleModel}
-            />
-          </label>
-        </div>
-        <div className="form-row">
-          <label>
-            Vehicle year
-            <input
-              name="vehicleYear"
-              defaultValue={product.vehicleYear ?? ""}
-            />
-          </label>
-          <label>
-            Color
-            <input name="color" defaultValue={product.color ?? ""} />
-          </label>
-        </div>
-        <CollectibleListingFields product={product} />
+        <label>Condition notes<textarea name="conditionNotes" maxLength={2000} defaultValue={product.conditionNotes ?? ""} /></label>
+        <CollectibleListingFields product={product} includeIdentity={false} />
         <div className="form-row">
           <label>
             Price, cents
@@ -1203,6 +1166,7 @@ function ProductEditor({
             Cancel
           </button>
         </div>
+          </fieldset>
       </form>
     </section>
   );

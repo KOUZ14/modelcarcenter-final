@@ -240,7 +240,7 @@ export function parseCollectibleDetails(payload: Record<string, unknown>) {
       "restorationCustomization",
       2_000,
     ),
-    material: requiredString(payload.material, "material", 120),
+    material: cleanText(payload.material, 120),
     productNumber: cleanText(payload.productNumber, 150) || null,
     editionSerial: cleanText(payload.editionSerial, 150) || null,
     coaStatus: supportedValue(payload.coaStatus, coaStatuses, "COA status"),
@@ -282,7 +282,6 @@ export function assertCollectibleListingReady(
     listing.packagingCondition === "not_specified" ||
     listing.originalBoxStatus === "not_specified" ||
     listing.coaStatus === "not_specified" ||
-    !listing.material.trim() ||
     !listing.missingParts.trim() ||
     !listing.defects.trim() ||
     !listing.restorationCustomization.trim() ||
@@ -318,7 +317,7 @@ export function parseCollectorListing(payload: Record<string, unknown>) {
     throw new ValidationError("State or region is required for US and Canadian ship-from addresses.");
   return {
     title: requiredString(payload.title, "title", 200),
-    description: requiredString(payload.description, "description", 4_000),
+    description: cleanText(payload.description, 4_000),
     vehicleMake: requiredString(payload.vehicleMake, "vehicleMake", 100),
     vehicleModel: requiredString(payload.vehicleModel, "vehicleModel", 120),
     vehicleYear: cleanText(payload.vehicleYear, 20) || null,

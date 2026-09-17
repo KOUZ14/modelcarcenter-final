@@ -1,6 +1,8 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { getD1, getDb } from "@/db";
-import { products, sellers } from "@/db/schema";
+import { catalogProducts, products, sellers } from "@/db/schema";
+import { catalogListingSnapshot } from "./catalog-product-rules";
+import { prepareListingCatalog } from "./catalog-products";
 import { parseCsv, planImportUpserts, validateImportRows } from "./validation";
 import {
   notifyRestockSubscribers,
@@ -44,11 +46,12 @@ export function previewInventoryCsv(csv: string) {
   return validateImportRows(rows);
 }
 
-export async function commitInventoryCsv(sellerId: string, csv: string) {
+export async function commitInventoryCsv(sellerId: string, csv: string, retry = true) {
   const db = getDb();
   const seller = await db
     .select({
       id: sellers.id,
+      ownerUserId: sellers.ownerUserId,
       handlingTimeBusinessDays: sellers.handlingTimeBusinessDays,
     })
     .from(sellers)
@@ -60,6 +63,7 @@ export async function commitInventoryCsv(sellerId: string, csv: string) {
   const existing = await db
     .select({
       id: products.id,
+      catalogProductId: products.catalogProductId,
       sellerSku: products.sellerSku,
       slug: products.slug,
       inventoryQuantity: products.inventoryQuantity,
@@ -73,50 +77,41 @@ export async function commitInventoryCsv(sellerId: string, csv: string) {
   const planned = planImportUpserts(existing, preview.valid);
   const d1 = getD1();
   const statements: D1PreparedStatement[] = [];
+  const catalogs = new Map<string, Awaited<ReturnType<typeof prepareListingCatalog>>>();
+  const createdIds = new Set<string>();
+  const statement = (query: { sql: string; params: unknown[] }) => d1.prepare(query.sql).bind(...query.params);
   for (const row of planned) {
-    const productId = row.id;
-    const slug = row.slug;
-    statements.push(
-      d1.prepare(`INSERT INTO products
-        (id, seller_id, slug, seller_sku, title, description, scale, model_manufacturer, vehicle_make,
-         vehicle_model, vehicle_year, color, condition, model_condition, packaging_condition,
-         original_box_status, missing_parts, defects, restoration_customization, material,
-         product_number, edition_serial, coa_status, accessories, provenance, price_cents,
-         currency, inventory_quantity, reserved_quantity, availability_type, release_date, status, keywords)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'usd', ?, 0, ?, ?, 'draft', ?)
-        ON CONFLICT(seller_id, seller_sku) DO UPDATE SET
-          title = excluded.title, description = excluded.description, scale = excluded.scale,
-          model_manufacturer = excluded.model_manufacturer, vehicle_make = excluded.vehicle_make,
-          vehicle_model = excluded.vehicle_model, vehicle_year = excluded.vehicle_year, color = excluded.color,
-          condition = excluded.condition, model_condition = excluded.model_condition,
-          packaging_condition = excluded.packaging_condition,
-          original_box_status = excluded.original_box_status, missing_parts = excluded.missing_parts,
-          defects = excluded.defects, restoration_customization = excluded.restoration_customization,
-          material = excluded.material, product_number = excluded.product_number,
-          edition_serial = excluded.edition_serial, coa_status = excluded.coa_status,
-          accessories = excluded.accessories, provenance = excluded.provenance,
-          price_cents = excluded.price_cents,
-          inventory_quantity = CASE
-            WHEN excluded.inventory_quantity >= products.reserved_quantity THEN excluded.inventory_quantity
-            ELSE products.reserved_quantity
-          END,
-          availability_type = excluded.availability_type,
-          release_date = excluded.release_date,
-          status = CASE
-            WHEN products.status = 'sold_out' AND excluded.inventory_quantity > products.reserved_quantity THEN 'active'
-            ELSE products.status
-          END,
-          keywords = excluded.keywords,
-          updated_at = CURRENT_TIMESTAMP`)
-        .bind(productId, sellerId, slug, row.sellerSku, row.title, row.description, row.scale,
-          row.modelManufacturer, row.vehicleMake, row.vehicleModel, row.vehicleYear, row.color,
-          row.condition, row.modelCondition, row.packagingCondition, row.originalBoxStatus,
-          row.missingParts, row.defects, row.restorationCustomization, row.material,
-          row.productNumber, row.editionSerial, row.coaStatus, row.accessories, row.provenance,
-          row.priceCents, row.inventoryQuantity, row.availabilityType, row.releaseDate, row.keywords),
-    );
+    const previous = existing.find((item) => item.id === row.id);
+    const payload = { ...row, manufacturerSku: row.productNumber };
+    const resolved = await prepareListingCatalog(payload, seller[0].ownerUserId, previous?.catalogProductId);
+    const key = resolved.model.skuKey ? JSON.stringify([resolved.model.manufacturerKey, resolved.model.skuKey]) : resolved.model.id;
+    const catalog = catalogs.get(key) ?? resolved;
+    catalogs.set(key, catalog);
+    if (catalog.isNew && !createdIds.has(catalog.model.id)) {
+      statements.push(statement(db.insert(catalogProducts).values({ ...catalog.model, catalogStatus: "unverified", createdByUserId: catalog.createdByUserId }).toSQL()));
+      createdIds.add(catalog.model.id);
+    }
+    const { operation, id, slug, ...values } = row;
+    void operation;
+    const snapshot = catalogListingSnapshot(catalog.model);
+    statements.push(statement(db.insert(products).values({
+      id, slug, ...values, ...snapshot, sellerId, currency: "usd", reservedQuantity: 0, status: "draft",
+    }).onConflictDoUpdate({
+      target: [products.sellerId, products.sellerSku],
+      set: {
+        ...values, ...snapshot,
+        inventoryQuantity: sql`max(${row.inventoryQuantity}, ${products.reservedQuantity})`,
+        status: sql`CASE WHEN ${products.status} = 'sold_out' AND ${row.inventoryQuantity} > ${products.reservedQuantity} THEN 'active' ELSE ${products.status} END`,
+        updatedAt: new Date().toISOString(),
+      },
+    }).toSQL()));
   }
-  await d1.batch(statements);
+  try { await d1.batch(statements); }
+  catch (error) {
+    const message = String(error instanceof Error ? error.message + " " + error.cause : error);
+    if (retry && message.includes("UNIQUE constraint failed") && message.includes("catalog_products.")) return commitInventoryCsv(sellerId, csv, false);
+    throw error;
+  }
   const existingById = new Map(existing.map((item) => [item.id, item]));
   const restocked = planned.filter((row) => {
     const previous = existingById.get(row.id);

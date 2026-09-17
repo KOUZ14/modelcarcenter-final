@@ -17,6 +17,8 @@ import {
   wantedRequests,
 } from "@/db/schema";
 import { requireAdminApi } from "@/lib/admin-auth";
+import { listingPayloadWithCatalog, persistCatalogListing, prepareListingCatalog } from "@/lib/catalog-products";
+import { catalogListingSnapshot } from "@/lib/catalog-product-rules";
 import {
   canApproveCollectorListing,
   isCollectorListingAwaitingReview,
@@ -588,7 +590,7 @@ async function runAdminAction(
     const email = await sendEmail({
       to: application[0].email,
       subject: "Your Model Car Center store is approved",
-      html: `<h1>Your store is approved</h1><p>${escapeHtml(application[0].storeName)} now has access to the Model Car Center Store Console.</p><p><a href="${escapeHtml(config.siteUrl)}/store">Sign in to your Store Console</a> with this email address to manage inventory, orders, and analytics.</p><p>We will guide you through Stripe payout onboarding separately.</p>`,
+      html: `<h1>Your store is approved</h1><p>${escapeHtml(application[0].storeName)} now has access to the Model Car Center Seller Hub.</p><p><a href="${escapeHtml(config.siteUrl)}/store">Sign in to your Seller Hub</a> with this email address to manage inventory, orders, and analytics.</p><p>We will guide you through Stripe payout onboarding separately.</p>`,
       text: `${application[0].storeName} is approved for Model Car Center. Sign in with this email address to manage inventory, orders, and analytics: ${config.siteUrl}/store\nWe will guide you through Stripe payout onboarding separately.`,
       idempotencyKey: `seller-approved-${sellerId}`,
     });
@@ -909,8 +911,8 @@ async function startStripeOnboarding(sellerId: string) {
   const email = await sendEmail({
     to: seller.contactEmail,
     subject: "Complete your Model Car Center payout setup",
-    html: `<h1>Complete your payout setup</h1><p>Use Stripe's secure hosted onboarding to provide the business and payout details required to sell through Model Car Center.</p><p><a href="${escapeHtml(link.url)}">Complete Stripe onboarding</a></p><p>This single-use link expires soon. After onboarding, <a href="${escapeHtml(config.siteUrl)}/store">sign in to your Store Console</a> with this email address.</p>`,
-    text: `Complete your secure Stripe onboarding for Model Car Center: ${link.url}\nThis single-use link expires soon. After onboarding, sign in to your Store Console with this email address: ${config.siteUrl}/store`,
+    html: `<h1>Complete your payout setup</h1><p>Use Stripe's secure hosted onboarding to provide the business and payout details required to sell through Model Car Center.</p><p><a href="${escapeHtml(link.url)}">Complete Stripe onboarding</a></p><p>This single-use link expires soon. After onboarding, <a href="${escapeHtml(config.siteUrl)}/store">sign in to your Seller Hub</a> with this email address.</p>`,
+    text: `Complete your secure Stripe onboarding for Model Car Center: ${link.url}\nThis single-use link expires soon. After onboarding, sign in to your Seller Hub with this email address: ${config.siteUrl}/store`,
     idempotencyKey: `onboarding-${sellerId}-${link.expires_at}`,
   });
   return { onboardingUrl: link.url, emailSent: email.sent };
@@ -954,6 +956,7 @@ async function saveProduct(payload: Record<string, unknown>) {
   const id = cleanText(payload.id, 100) || crypto.randomUUID();
   const existing = await getDb()
     .select({
+      catalogProductId: products.catalogProductId,
       primaryImageUrl: products.primaryImageUrl,
       inventoryQuantity: products.inventoryQuantity,
       reservedQuantity: products.reservedQuantity,
@@ -974,6 +977,8 @@ async function saveProduct(payload: Record<string, unknown>) {
     .where(eq(sellers.id, sellerId))
     .limit(1);
   if (!seller[0]) throw new ValidationError("Select a valid seller.");
+  const catalog = await prepareListingCatalog(payload, null, existing[0]?.catalogProductId);
+  payload = listingPayloadWithCatalog(payload, catalog.model);
   const title = requiredString(payload.title, "title", 200);
   const sellerSku = requiredString(payload.sellerSku, "sellerSku", 100);
   const collectible = parseCollectibleDetails(payload);
@@ -993,6 +998,7 @@ async function saveProduct(payload: Record<string, unknown>) {
       cleanText(payload.slug, 100) ||
       `${makeSlug(title)}-${makeSlug(sellerSku)}-${id.slice(0, 6)}`,
     description: cleanText(payload.description, 4_000),
+    conditionNotes: cleanText(payload.conditionNotes, 2000),
     scale: requiredString(payload.scale, "scale", 30),
     modelManufacturer: requiredString(
       payload.modelManufacturer,
@@ -1011,13 +1017,14 @@ async function saveProduct(payload: Record<string, unknown>) {
     primaryImageUrl: existing[0]?.primaryImageUrl ?? null,
     keywords: cleanText(payload.keywords, 1_000),
   };
-  await getDb()
+  await persistCatalogListing(catalog, (model) => getDb()
     .insert(products)
-    .values({ ...values, status: "draft", currency: "usd" })
+    .values({ ...values, ...catalogListingSnapshot(model), status: "draft", currency: "usd" })
     .onConflictDoUpdate({
       target: products.id,
       set: {
         ...values,
+        ...catalogListingSnapshot(model),
         status:
           existing[0]?.status === "sold_out" &&
           inventoryQuantity > (existing[0]?.reservedQuantity ?? 0)
@@ -1025,7 +1032,7 @@ async function saveProduct(payload: Record<string, unknown>) {
             : existing[0]?.status,
         updatedAt: new Date().toISOString(),
       },
-    });
+    }).toSQL());
   if (
     existing[0] &&
     existing[0].inventoryQuantity - existing[0].reservedQuantity < 1 &&

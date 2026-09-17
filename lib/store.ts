@@ -9,6 +9,8 @@ import {
   sql,
 } from "drizzle-orm";
 import { getDb } from "@/db";
+import { listingPayloadWithCatalog, persistCatalogListing, prepareListingCatalog } from "./catalog-products";
+import { catalogListingSnapshot } from "./catalog-product-rules";
 import {
   orderItems,
   orders,
@@ -25,6 +27,8 @@ import { normalizeState } from "./address";
 import { validateShipFromFields } from "./validation";
 import { canClaimProfessionalStore } from "./account-rules";
 import { buildStoreAnalytics } from "./store-rules";
+import { buildSellerHubMetrics } from "./seller-hub";
+import { getSellerHubDemand } from "./seller-hub-data";
 import { determineMarketplaceFee } from "./fees";
 import {
   isCurrentPolicyVersion,
@@ -211,6 +215,8 @@ export async function getStoreDashboardData(userId: string) {
         .orderBy(desc(trackingEvents.statusDate))
     : [];
   const analytics = buildStoreAnalytics(orderRows, items, inventory);
+  const now = new Date();
+  const demand = await getSellerHubDemand(store.id, userId, inventory, now);
   return {
     store,
     fee: determineMarketplaceFee(store),
@@ -224,6 +230,8 @@ export async function getStoreDashboardData(userId: string) {
       shipment: shipmentForOrder(order.id, shipmentLinks, events),
     })),
     analytics,
+    hub: buildSellerHubMetrics(orderRows, items, inventory, now),
+    demand,
     shipping: {
       configured: Boolean(config.shippoApiKey),
       insuranceThresholdCents: config.shippoInsuranceThresholdCents,
@@ -254,6 +262,8 @@ export async function saveStoreProduct(
   if (requestedId && !existingRows[0])
     throw new ValidationError("Inventory item not found.");
   const existing = existingRows[0];
+  const catalog = await prepareListingCatalog(payload, store.ownerUserId, existing?.catalogProductId);
+  payload = listingPayloadWithCatalog(payload, catalog.model);
   const id = existing?.id ?? crypto.randomUUID();
   const sellerSku = requiredString(payload.sellerSku, "sellerSku", 100);
   const duplicate = await db
@@ -299,6 +309,7 @@ export async function saveStoreProduct(
     title,
     slug: `${makeSlug(title)}-${makeSlug(sellerSku)}-${id.slice(0, 6)}`,
     description: cleanText(payload.description, 4_000),
+    conditionNotes: cleanText(payload.conditionNotes, 2000),
     scale: requiredString(payload.scale, "scale", 30),
     modelManufacturer: requiredString(
       payload.modelManufacturer,
@@ -330,12 +341,12 @@ export async function saveStoreProduct(
       inventoryQuantity > existing.reservedQuantity
         ? "active"
         : existing.status;
-    await db
+    await persistCatalogListing(catalog, (model) => db
       .update(products)
-      .set({ ...values, status: nextStatus, updatedAt: new Date().toISOString() })
+      .set({ ...values, ...catalogListingSnapshot(model), status: nextStatus, updatedAt: new Date().toISOString() })
       .where(
         and(eq(products.id, existing.id), eq(products.sellerId, store.id)),
-      );
+      ).toSQL());
     if (wasSoldOut && inventoryQuantity - existing.reservedQuantity > 0) {
       await notifyRestockSubscribers(existing.id);
     }
@@ -349,12 +360,13 @@ export async function saveStoreProduct(
       handlingTimeBusinessDays: store.handlingTimeBusinessDays,
     });
   } else {
-    await db.insert(products).values({
+    await persistCatalogListing(catalog, (model) => db.insert(products).values({
       id,
       ...values,
+      ...catalogListingSnapshot(model),
       currency: "usd",
       status: "draft",
-    });
+    }).toSQL());
   }
   return { productId: id };
 }

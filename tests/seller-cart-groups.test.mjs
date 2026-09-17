@@ -50,9 +50,10 @@ test("account carts persist and merge sellers while shipping requests use one se
   t.after(async () => { delete globalThis.__sellerCartTest; sqlite.close(); await unlink(bundle).catch(() => {}); await rmdir(scratch); });
   for (const name of (await readdir(join(root, "drizzle"))).filter((name) => name.endsWith(".sql")).sort()) sqlite.exec(await readFile(join(root, "drizzle", name), "utf8"));
   sqlite.exec("INSERT INTO user (id, name, email, created_at, updated_at) VALUES ('buyer', 'Buyer', 'buyer@example.test', 0, 0)");
+  sqlite.exec("INSERT INTO catalog_products (id, model_car_manufacturer, manufacturer_key, scale, vehicle_make, vehicle_model, title) VALUES ('catalog-fixture', 'Maker', 'maker', '1:18', 'Make', 'Model', 'Model')");
   for (const [seller, shipping, cost] of [["one", "flat", 800], ["two", "free", 0]]) {
     sqlite.prepare(`INSERT INTO sellers (id, slug, store_name, contact_name, contact_email, status, stripe_account_id, stripe_charges_enabled, stripe_payouts_enabled, seller_terms_version, seller_terms_accepted_at, shipping_mode, default_shipping_cents) VALUES (?, ?, ?, 'Owner', 'owner@example.test', 'active', ?, 1, 1, ?, CURRENT_TIMESTAMP, ?, ?)`).run(seller, seller, seller, `acct_${seller}`, POLICY_VERSION, shipping, cost);
-    sqlite.prepare(`INSERT INTO products (id, seller_id, slug, seller_sku, title, scale, model_manufacturer, vehicle_make, vehicle_model, price_cents, inventory_quantity, status) VALUES (?, ?, ?, ?, ?, '1:18', 'Maker', 'Make', 'Model', 10000, 5, 'active')`).run(seller, seller, seller, seller, seller);
+    sqlite.prepare(`INSERT INTO products (catalog_product_id, id, seller_id, slug, seller_sku, title, scale, model_manufacturer, vehicle_make, vehicle_model, price_cents, inventory_quantity, status) VALUES ('catalog-fixture', ?, ?, ?, ?, ?, '1:18', 'Maker', 'Make', 'Model', 10000, 5, 'active')`).run(seller, seller, seller, seller, seller);
   }
   const output = await build({
     stdin: { contents: 'export { saveAccountCart, getAccountCart, mergeGuestData } from "./lib/collector-store.ts"; export { loadAuthoritativeCart } from "./lib/inventory.ts";', resolveDir: root },

@@ -4,6 +4,7 @@ import { productImages, products, sellers } from "@/db/schema";
 import { normalizeSearch } from "./business";
 import { POLICY_VERSION } from "./legal";
 import type { CatalogResponse, ProductDetail, ProductSummary } from "./types";
+import { getCatalogProduct } from "./catalog-products";
 
 export type CatalogQuery = {
   q?: string;
@@ -18,6 +19,8 @@ export type CatalogQuery = {
 
 const productSelection = {
   id: products.id,
+  catalogProductId: products.catalogProductId,
+  conditionNotes: products.conditionNotes,
   sellerId: products.sellerId,
   sellerSlug: sellers.slug,
   sellerName: sellers.storeName,
@@ -65,6 +68,16 @@ const productSelection = {
   handlingTimeBusinessDays: sellers.handlingTimeBusinessDays,
   createdAt: products.createdAt,
 };
+
+export async function getCatalogListings(catalogProductId: string) {
+  const model = await getCatalogProduct(catalogProductId);
+  if (!model) return null;
+  const listings = await getDb().select(productSelection).from(products)
+    .innerJoin(sellers, eq(products.sellerId, sellers.id))
+    .where(and(eq(products.catalogProductId, model.id), ...activeConditions({})))
+    .orderBy(asc(products.priceCents), asc(products.id));
+  return { model, listings: listings as ProductSummary[] };
+}
 
 function activeConditions(query: CatalogQuery): SQL[] {
   const conditions: SQL[] = [

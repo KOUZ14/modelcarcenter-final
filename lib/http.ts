@@ -1,4 +1,5 @@
 import { ValidationError } from "./validation";
+import { CatalogMatchRequired } from "./catalog-product-rules";
 
 export async function readJsonObject(request: Request) {
   let payload: unknown;
@@ -14,6 +15,9 @@ export async function readJsonObject(request: Request) {
 }
 
 export function routeError(error: unknown, fallback = "Unable to complete the request.") {
+  if (error instanceof CatalogMatchRequired) {
+    return Response.json({ error: error.message, catalogMatches: error.matches }, { status: 409 });
+  }
   if (error instanceof ValidationError) {
     return Response.json({ error: error.message, fields: error.fields }, { status: 400 });
   }

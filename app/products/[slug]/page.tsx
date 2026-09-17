@@ -108,6 +108,8 @@ export default async function ProductPage({
               {product.scale} · {product.modelManufacturer}
             </p>
             <h1>{product.title}</h1>
+            {product.catalogProductId && <p><Link className="text-link" href={`/models/${product.catalogProductId}`}>Compare all sellers of this model</Link></p>}
+            {product.conditionNotes && <p><strong>Seller condition notes:</strong> {product.conditionNotes}</p>}
             <p className="vehicle-line">
               {[
                 product.vehicleYear,

@@ -1,6 +1,7 @@
 import { config } from "@/lib/config";
 import { routeError } from "@/lib/http";
 import { processShippoTrackingWebhook } from "@/lib/shipping";
+import { logSecurityEvent } from "@/lib/security-events";
 
 export const dynamic = "force-dynamic";
 
@@ -10,8 +11,10 @@ export async function POST(request: Request) {
     if (
       !config.shippoWebhookSecret ||
       !(await secureEqual(supplied, config.shippoWebhookSecret))
-    )
+    ) {
+      logSecurityEvent("webhook_rejected", { scope: "shippo", status: 401, reason: "invalid_token" });
       return Response.json({ error: "Invalid webhook token." }, { status: 401 });
+    }
     const payload = await request.json();
     return Response.json({
       ok: true,
