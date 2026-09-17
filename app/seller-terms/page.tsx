@@ -3,6 +3,7 @@ import Link from "next/link";
 import { PolicyPage } from "@/components/policy-page";
 import { config } from "@/lib/config";
 import { formatFeePercent } from "@/lib/fees";
+import { BusinessIdentity } from "@/components/business-details";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
@@ -13,6 +14,7 @@ export const metadata: Metadata = {
 export default function SellerTermsPage() {
   return <PolicyPage title="Seller Terms" intro="These Seller Terms apply to professional stores and individual collectors who apply, create listings, or sell through Model Car Center.">
     <h2>1. Agreement and relationship to other terms</h2>
+    <BusinessIdentity/>
     <p>These Seller Terms are a binding agreement between each seller (<b>“Seller”</b> or <b>“you”</b>) and Model Car Center. By applying to sell, starting payout onboarding, or submitting a listing for review, you accept these Seller Terms. The <Link href="/terms">Marketplace Terms</Link>, <Link href="/shipping">Shipping Policy</Link>, <Link href="/returns">Returns &amp; Refunds Policy</Link>, and <Link href="/privacy">Privacy Policy</Link> also apply. If a separate signed seller agreement conflicts with these Seller Terms, the signed agreement controls for that conflict.</p>
 
     <h2>2. Eligibility and authority</h2>

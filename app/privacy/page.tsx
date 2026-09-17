@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { PolicyPage } from "@/components/policy-page";
 import { config } from "@/lib/config";
-import { BusinessDetails } from "@/components/business-details";
+import { BusinessDetails, BusinessIdentity } from "@/components/business-details";
 
 export const metadata: Metadata = {
   title: "Privacy Policy",
@@ -12,6 +12,7 @@ export const metadata: Metadata = {
 export default function PrivacyPage() {
   return <PolicyPage effectiveDate="September 16, 2026" title="Privacy Policy" intro="This Policy explains the personal information Model Car Center collects, why we use it, when we disclose it, and the choices available to you.">
     <h2>1. Scope and who we are</h2>
+    <BusinessIdentity/>
     <p>This Privacy Policy applies to the Model Car Center website, marketplace, accounts, seller tools, Model Hunt, support, and related communications (the <b>“Service”</b>). Model Car Center is responsible for the information described here. Independent sellers are separately responsible for information they receive to fulfill orders and must use it only for that purpose and as law permits. Stripe and other services may separately control information you provide directly to them.</p>
 
     <h2>2. Information we collect</h2>

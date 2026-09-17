@@ -40,7 +40,7 @@ export const config = {
   marketplaceMode: enumEnv("MARKETPLACE_MODE", "test", ["test", "live"]),
   siteUrl: textEnv("SITE_URL", "http://localhost:5173").replace(/\/$/, ""),
   supportEmail: textEnv("SUPPORT_EMAIL", "support@modelcarcenter.com"),
-  businessLegalName: textEnv("BUSINESS_LEGAL_NAME"),
+  businessLegalName: textEnv("BUSINESS_LEGAL_NAME", "KM Venture Group"),
   businessMailingAddress: textEnv("BUSINESS_MAILING_ADDRESS"),
   businessJurisdiction: textEnv("BUSINESS_JURISDICTION"),
   emailFrom: textEnv("EMAIL_FROM", "Model Car Center <support@modelcarcenter.com>"),

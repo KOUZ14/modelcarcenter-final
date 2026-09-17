@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { PolicyPage } from "@/components/policy-page";
 import { config } from "@/lib/config";
-import { BusinessDetails } from "@/components/business-details";
+import { BusinessDetails, BusinessIdentity } from "@/components/business-details";
 
 export const metadata: Metadata = {
   title: "Marketplace Terms",
@@ -12,6 +12,7 @@ export const metadata: Metadata = {
 export default function TermsPage() {
   return <PolicyPage title="Marketplace Terms" intro="These Terms govern your access to Model Car Center and purchases made through our U.S. marketplace. Please read them before using the Service.">
     <h2>1. Agreement to these Terms</h2>
+    <BusinessIdentity/>
     <p>These Marketplace Terms (the <b>“Terms”</b>) are a binding agreement between you and Model Car Center (<b>“Model Car Center,” “we,” “us,”</b> or <b>“our”</b>) governing the Model Car Center website, accounts, Model Hunt, marketplace checkout, and related services (collectively, the <b>“Service”</b>). By creating an account, submitting information, or completing checkout, you agree to these Terms and acknowledge our <Link href="/privacy">Privacy Policy</Link>. Our <Link href="/shipping">Shipping Policy</Link>, <Link href="/returns">Returns &amp; Refunds Policy</Link>, and any seller policy shown before purchase are incorporated into these Terms.</p>
 
     <h2>2. Eligibility</h2>
