@@ -5,7 +5,7 @@ Reviewed September 16, 2026 against the 20 items in the supplied image. This rec
 Owner clarification: Model Car Center is the marketplace's trading name, operated by KM Venture Group, a sole proprietorship. The operator name is configured locally and in Sites. On September 17, 2026, the owner supplied the public mailing address below, also configured locally and in Sites. Registration jurisdiction still awaits owner confirmation; the mailing address does not establish the registration address or assert a separate DBA registration for Model Car Center.
 
 ```text
-Kousik Murugan
+Model Car Center
 4101 Dublin Blvd
 Ste F - 1139
 Dublin, CA 94568-4603
