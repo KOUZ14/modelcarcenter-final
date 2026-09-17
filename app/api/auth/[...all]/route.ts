@@ -15,8 +15,11 @@ async function handler(request: Request) {
       if (email.length > 254 || !isEmail(email)) throw new ValidationError("Enter a valid email address.");
       const headers = new Headers(request.headers);
       headers.delete("content-length");
-      request = new Request(request, {
+      // Cloudflare cannot use Vinext's proxied request as constructor input.
+      request = new Request(request.url, {
+        method: request.method,
         headers,
+        signal: request.signal,
         body: JSON.stringify({
           email,
           name: cleanText(payload.name, 120),
