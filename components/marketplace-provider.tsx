@@ -125,8 +125,8 @@ export function MarketplaceProvider({ children }: { children: React.ReactNode })
     void bootstrap();
     return () => { active = false; };
   }, []);
-  useEffect(() => { if (mode === "guest") localStorage.setItem(CART_KEY, JSON.stringify(cart)); }, [cart, mode]);
-  useEffect(() => { if (mode === "guest") localStorage.setItem(WISHLIST_KEY, JSON.stringify(wishlist)); }, [wishlist, mode]);
+  useEffect(() => { if (mode === "guest") { try { localStorage.setItem(CART_KEY, JSON.stringify(cart)); } catch { /* Keep the in-memory cart. */ } } }, [cart, mode]);
+  useEffect(() => { if (mode === "guest") { try { localStorage.setItem(WISHLIST_KEY, JSON.stringify(wishlist)); } catch { /* Keep the in-memory wishlist. */ } } }, [wishlist, mode]);
   const toCartItem = useCallback(
     (product: ProductSummary, quantity: number) =>
       cartItemFromProduct(product, quantity),
@@ -173,6 +173,7 @@ export function MarketplaceProvider({ children }: { children: React.ReactNode })
       const key = `mcc-completed-checkout-${collector?.id ?? "guest"}-${sessionId}`;
       try { if (localStorage.getItem(key)) return; } catch { /* In-memory guard still applies. */ }
       completedSessions.current.add(sessionId);
+      clearDeliveryDraft();
       const next = removePurchasedItems(cart, items);
       setCart(next); persistCart(next);
       try {
@@ -220,8 +221,7 @@ function cartItemFromProduct(product: ProductSummary, quantity: number): CartIte
 }
 
 function clearGuestStorage() {
-  localStorage.removeItem(CART_KEY);
-  localStorage.removeItem(WISHLIST_KEY);
+  try { localStorage.removeItem(CART_KEY); localStorage.removeItem(WISHLIST_KEY); } catch { /* Storage may be disabled. */ }
 }
 
 function clearDeliveryDraft() {

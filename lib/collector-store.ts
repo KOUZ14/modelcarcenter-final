@@ -561,6 +561,10 @@ export async function getOwnedProductForImages(
 export async function deleteCollectorAccount(userId: string) {
   const d1 = getD1();
   await d1.batch([
+    // Remove optional/guest records before deleting the account's verified email.
+    d1.prepare("DELETE FROM community_subscribers WHERE lower(email) = (SELECT lower(email) FROM user WHERE id = ?)").bind(userId),
+    d1.prepare("DELETE FROM availability_alerts WHERE user_id = ? OR lower(email) = (SELECT lower(email) FROM user WHERE id = ?)").bind(userId, userId),
+    d1.prepare("DELETE FROM wanted_requests WHERE user_id = ? OR lower(collector_email) = (SELECT lower(email) FROM user WHERE id = ?)").bind(userId, userId),
     d1
       .prepare(
         `UPDATE products SET status = 'inactive', updated_at = CURRENT_TIMESTAMP

@@ -109,7 +109,7 @@ export function HomeMarketplace() {
           unoptimized
         />
         <div className="hero-shade" />
-        <div className="hero-content shell">
+        <div id="main-content" tabIndex={-1} className="hero-content shell">
           <p className="eyebrow light">Find. Buy. Sell. Hunt.</p>
           <h1>
             Every seller.

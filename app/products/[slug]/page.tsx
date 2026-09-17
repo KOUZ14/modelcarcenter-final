@@ -92,7 +92,7 @@ export default async function ProductPage({
   return (
     <main>
       <SiteHeader />
-      <div className="inner-page product-page shell">
+      <div id="main-content" tabIndex={-1} className="inner-page product-page shell">
         <nav className="breadcrumbs" aria-label="Breadcrumb">
           <Link href="/marketplace">Marketplace</Link>
           <span>/</span>

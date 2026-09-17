@@ -199,7 +199,7 @@ test("checkout ignores browser-supplied fee values and historical orders copy th
   );
   assert.doesNotMatch(checkout, /payload\.(?:marketplace|platform|application).*fee/i);
   assert.match(checkout, /loadAuthoritativeCart\(requested\)/);
-  assert.match(checkout, /retrieveStripeAccount/);
+  assert.match(checkout, /assertSellerPaymentsReady\(loadedCart\.seller\.sellerStripeAccountId!/);
   assert.match(orders, /reservation\.marketplaceFeeBps/);
   assert.match(orders, /reservation\.platformFeeCents/);
   assert.match(migration, /`marketplace_fee_bps` integer DEFAULT 1000 NOT NULL/);

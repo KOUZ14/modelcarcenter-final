@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { AdultConsent } from "./adult-consent";
 import { FormEvent, useState } from "react";
 import type { ProductSummary } from "@/lib/types";
 import { useMarketplace } from "./marketplace-provider";
@@ -24,7 +25,7 @@ export function ProductPurchase({ product }: { product: ProductSummary }) {
       const response = await fetch("/api/availability-alerts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ productId: product.id, email }),
+        body: JSON.stringify({ productId: product.id, email, adultConsent: new FormData(event.currentTarget).get("adultConsent") }),
       });
       const body = (await response.json()) as { error?: string; available?: boolean };
       if (!response.ok) throw new Error(body.error || "The alert could not be saved.");
@@ -44,6 +45,8 @@ export function ProductPurchase({ product }: { product: ProductSummary }) {
       <p>We’ll email you once when this model becomes available again.</p>
       {alertState === "success" ? <p className="restock-success" role="status"><Icon name="check"/> Alert set for {email}.</p> : <form className="restock-form" onSubmit={subscribe}>
         <label>Email address<input type="email" required autoComplete="email" value={email} onChange={(event) => setEmailOverride(event.target.value)}/></label>
+        <AdultConsent/>
+        <p className="collection-notice">One requested restock email. You can stop optional emails using its unsubscribe link or by contacting support. See our <Link href="/privacy">Privacy Policy</Link>.</p>
         <button className="button dark" disabled={alertState === "loading"}>{alertState === "loading" ? "Setting alert…" : "Notify me"}</button>
         {alertState === "error" && <p className="form-error" role="alert">{alertError}</p>}
       </form>}

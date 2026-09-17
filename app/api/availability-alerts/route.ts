@@ -1,3 +1,4 @@
+import { requireAdultConsent } from "@/lib/form-consent";
 import { getCollectorAuth } from "@/lib/auth";
 import {
   subscribeToRestock,
@@ -11,6 +12,7 @@ export const dynamic = "force-dynamic";
 export async function POST(request: Request) {
   try {
     const payload = await readJsonObject(request);
+    requireAdultConsent(payload.adultConsent);
     const session = await getCollectorAuth().api.getSession({
       headers: request.headers,
     });

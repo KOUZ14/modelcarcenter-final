@@ -1,11 +1,12 @@
 import Link from "next/link";
 import { BrandLogo } from "./brand-logo";
+import { CookieSettingsButton } from "./cookie-notice";
 
 export function SiteFooter() {
   return <footer><div className="shell footer-top"><Link className="brand footer-brand" href="/" aria-label="Model Car Center home"><BrandLogo/></Link><p>One search for the models worth collecting.</p></div><div className="shell footer-links">
     <div><h3>Marketplace</h3><Link href="/marketplace">Browse all</Link><Link href="/marketplace#filters">Browse by scale</Link><Link href="/#model-hunt">Model Hunt</Link><Link href="/wishlist">Saved items</Link></div>
     <div><h3>Sell</h3><Link href="/sell">Sell with us</Link><Link href="/seller-terms">Seller terms</Link></div>
     <div><h3>Support</h3><Link href="/resolution">Customer Support</Link><Link href="/protection">Buyer &amp; seller protection</Link><Link href="/contact">Contact</Link><Link href="/shipping">Shipping</Link><Link href="/returns">Returns &amp; refunds</Link></div>
-    <div><h3>Policies</h3><Link href="/terms">Marketplace terms</Link><Link href="/privacy">Privacy</Link><Link href="/cookies">Cookies &amp; local storage</Link></div>
+    <div><h3>Policies</h3><Link href="/terms">Marketplace terms</Link><Link href="/privacy">Privacy</Link><Link href="/privacy/request">Data deletion requests</Link><Link href="/cookies">Cookies &amp; local storage</Link><CookieSettingsButton/></div>
   </div><div className="shell footer-bottom"><span>© 2026 Model Car Center</span><span>Made for collectors.</span></div></footer>;
 }

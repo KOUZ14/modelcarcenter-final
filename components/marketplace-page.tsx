@@ -130,7 +130,7 @@ export function MarketplacePage({
   return (
     <main className="marketplace-page">
       <SiteHeader />
-      <section className="marketplace-hero" aria-labelledby="marketplace-title">
+      <section id="main-content" tabIndex={-1} className="marketplace-hero" aria-labelledby="marketplace-title">
         <div className="shell marketplace-hero-layout">
           <div>
             <h1 id="marketplace-title">Marketplace</h1>

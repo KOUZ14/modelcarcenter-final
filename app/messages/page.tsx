@@ -32,7 +32,7 @@ export default async function MessagesPage({
   return (
     <main className="messages-page">
       <SiteHeader />
-      <section className="messages-hero">
+      <section id="main-content" tabIndex={-1} className="messages-hero">
         <div className="shell messages-hero-layout">
           <div>
             <p className="eyebrow">Buyer · Seller</p>

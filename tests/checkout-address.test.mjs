@@ -133,9 +133,16 @@ test("checkout reuses the quoted destination and closes old payment sessions bef
   const quote = (address = destination) => api.quote(fixture.cart, address, null, null);
   const checkout = (address, rate, cookie) => api.POST(new Request("https://shop.example/api/checkout", {
     method: "POST", headers: { "Content-Type": "application/json", ...(cookie ? { cookie } : {}) },
-    body: JSON.stringify({ policyVersion: POLICY_VERSION, items: [{ productId: "model", quantity: 1 }], destination: address, previousReservationId: cookie?.split("=")[0].slice("mcc-checkout-return-".length), shippingSelection: rate ? { quoteId: rate.quoteId, rateId: rate.options[0].id } : undefined }),
+    body: JSON.stringify({ policyVersion: POLICY_VERSION, adultConsent: true, items: [{ productId: "model", quantity: 1 }], destination: address, previousReservationId: cookie?.split("=")[0].slice("mcc-checkout-return-".length), shippingSelection: rate ? { quoteId: rate.quoteId, rateId: rate.options[0].id } : undefined }),
   }));
   let firstCookie;
+  await t.test("checkout rejects a missing adult confirmation before contacting payment services", async () => {
+    const before = fixture.requests.length;
+    const response = await api.POST(new Request("https://shop.example/api/checkout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ policyVersion: POLICY_VERSION, destination }) }));
+    assert.equal(response.status, 400);
+    assert.match((await response.json()).error, /at least 18/);
+    assert.equal(fixture.requests.length, before);
+  });
   await t.test("guest address is sent to Stripe shipping and tax exactly once", async () => {
     const rate = await quote();
     const response = await checkout(destination, rate);

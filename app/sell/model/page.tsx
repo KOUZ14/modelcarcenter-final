@@ -29,5 +29,5 @@ export default async function SellModelPage({ searchParams }: { searchParams: Pr
     scale: String(query.scale ?? "").slice(0, 30),
     manufacturer: String(query.manufacturer ?? "").slice(0, 100),
   };
-  return <main><SiteHeader/><div className="inner-page shell"><CollectorListingForm initial={initial ? { product: initial.product, images: initial.images } : null} seller={garage.seller} shipFromAddresses={shipFromAddresses} displayName={collector.profile.displayName} prefill={prefill} marketplaceFeeBps={config.collectorMarketplaceFeeBps}/></div><SiteFooter/></main>;
+  return <main><SiteHeader/><div id="main-content" tabIndex={-1} className="inner-page shell"><CollectorListingForm initial={initial ? { product: initial.product, images: initial.images } : null} seller={garage.seller} shipFromAddresses={shipFromAddresses} displayName={collector.profile.displayName} prefill={prefill} marketplaceFeeBps={config.collectorMarketplaceFeeBps}/></div><SiteFooter/></main>;
 }

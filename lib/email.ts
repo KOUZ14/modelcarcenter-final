@@ -1,6 +1,10 @@
 import { config } from "./config";
 import { escapeHtml, renderEmailHtml } from "./email-template";
 import type { ShippingAddress } from "./types";
+import { unsubscribeUrl } from "./email-preferences";
+import { getDb } from "@/db";
+import { communitySubscribers, wantedRequests } from "@/db/schema";
+import { and, eq, ne } from "drizzle-orm";
 
 export { escapeHtml, renderEmailHtml } from "./email-template";
 
@@ -10,6 +14,7 @@ type SendEmailInput = {
   html: string;
   text: string;
   idempotencyKey?: string;
+  unsubscribeUrl?: string;
 };
 
 function money(cents: number, currency = "usd") {
@@ -28,8 +33,11 @@ function addressText(shipping: ShippingAddress) {
 }
 
 export async function sendEmail(input: SendEmailInput) {
+  if (input.unsubscribeUrl && (!config.businessLegalName || !config.businessMailingAddress)) {
+    return { sent: false as const, reason: "business_details_not_configured" as const };
+  }
   if (!config.resendApiKey) {
-    console.info(`[email skipped: RESEND_API_KEY unavailable] ${input.subject} -> ${input.to}`);
+    console.info("Email delivery skipped: RESEND_API_KEY unavailable.");
     return { sent: false as const, reason: "not_configured" as const };
   }
   const response = await fetch("https://api.resend.com/emails", {
@@ -51,8 +59,13 @@ export async function sendEmail(input: SendEmailInput) {
         input.html,
         config.siteUrl,
         config.supportEmail,
+        { unsubscribeUrl: input.unsubscribeUrl, businessName: config.businessLegalName, mailingAddress: config.businessMailingAddress },
       ),
-      text: input.text,
+      text: [input.text, input.unsubscribeUrl ? `Unsubscribe from optional emails: ${input.unsubscribeUrl}` : "", config.businessLegalName, config.businessMailingAddress].filter(Boolean).join("\n\n"),
+      ...(input.unsubscribeUrl ? { headers: {
+        "List-Unsubscribe": `<${input.unsubscribeUrl.replace("/unsubscribe?", "/api/unsubscribe?")}>`,
+        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+      } } : {}),
     }),
   });
   if (!response.ok) {
@@ -182,14 +195,24 @@ export async function sendLabelCreatedEmail(input: {
 }
 
 export async function sendModelHuntMatchEmail(input: { email: string; referenceCode: string; requestedModel: string; productTitle: string; sellerName: string; priceCents: number; currency: string; productSlug: string }) {
+  const active = await getDb().select({ id: wantedRequests.id }).from(wantedRequests).where(and(eq(wantedRequests.referenceCode, input.referenceCode), eq(wantedRequests.collectorEmail, input.email), ne(wantedRequests.status, "closed"))).limit(1);
+  if (!active.length) return { sent: false as const, reason: "unsubscribed" as const };
   const url = `${config.siteUrl}/products/${encodeURIComponent(input.productSlug)}`;
   return sendEmail({
     to: input.email,
+    unsubscribeUrl: await unsubscribeUrl("hunt", input.referenceCode),
     subject: `Possible match for ${input.referenceCode}`,
     html: `<h1>We found a possible match</h1><p>You asked us to hunt for ${escapeHtml(input.requestedModel)}.</p><p><strong>${escapeHtml(input.productTitle)}</strong><br>${escapeHtml(input.sellerName)}<br>${escapeHtml(money(input.priceCents, input.currency))}</p><p><a href="${escapeHtml(url)}">View this model</a></p>`,
     text: `We found a possible match for ${input.requestedModel}: ${input.productTitle} from ${input.sellerName}, ${money(input.priceCents, input.currency)}. ${url}`,
     idempotencyKey: `hunt-${input.referenceCode}-${input.productSlug}`,
   });
+}
+
+/** Use this entry point for community mail; it checks the current subscription before each send. */
+export async function sendCommunityUpdateEmail(input: { subscriberId: string; subject: string; html: string; text: string; campaignId: string }) {
+  const subscriber = (await getDb().select().from(communitySubscribers).where(eq(communitySubscribers.id, input.subscriberId)).limit(1))[0];
+  if (!subscriber) return { sent: false as const, reason: "unsubscribed" as const };
+  return sendEmail({ to: subscriber.email, subject: input.subject, html: input.html, text: input.text, unsubscribeUrl: await unsubscribeUrl("community", subscriber.id), idempotencyKey: `community-${input.campaignId}-${subscriber.id}` });
 }
 
 function trackingLink(carrier: string, trackingNumber: string) {

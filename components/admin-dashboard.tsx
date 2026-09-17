@@ -144,7 +144,7 @@ export function AdminDashboard({ adminEmail }: { adminEmail: string }) {
           </button>
         ))}
       </nav>
-      <main className="admin-main">
+      <main id="main-content" tabIndex={-1} className="admin-main">
         <div className="admin-title">
           <p className="eyebrow">Founder-operated V1</p>
           <h1>

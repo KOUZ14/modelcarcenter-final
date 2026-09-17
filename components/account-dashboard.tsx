@@ -798,7 +798,8 @@ function ProfileForm({
       {canDeleteAccount ? <details className="delete-account">
         <summary>Delete account</summary>
         <p>
-          This revokes sessions, removes your profile, and deactivates listings.
+          This revokes sessions, removes your profile, cart, wishlist, Model Hunts,
+          and optional email subscriptions, and deactivates listings.
           Paid order records are retained for transaction and legal
           requirements.
         </p>

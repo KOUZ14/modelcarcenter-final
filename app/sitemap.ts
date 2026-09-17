@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const base = config.siteUrl;
-  const staticRoutes = ["", "/marketplace", "/sell", "/terms", "/protection", "/privacy", "/returns", "/shipping", "/cookies", "/seller-terms", "/contact"].map((path) => ({ url: `${base}${path}`, changeFrequency: path === "/marketplace" || !path ? "daily" as const : "monthly" as const, priority: path === "/marketplace" ? .9 : path ? .5 : 1 }));
+  const staticRoutes = ["", "/marketplace", "/sell", "/terms", "/protection", "/privacy", "/privacy/request", "/returns", "/shipping", "/cookies", "/seller-terms", "/contact"].map((path) => ({ url: `${base}${path}`, changeFrequency: path === "/marketplace" || !path ? "daily" as const : "monthly" as const, priority: path === "/marketplace" ? .9 : path ? .5 : 1 }));
   try {
     const db = getDb();
     const [productRows, sellerRows] = await Promise.all([

@@ -19,7 +19,7 @@ export default function SellPage() {
   return (
     <main>
       <SiteHeader />
-      <div className="inner-page shell">
+      <div id="main-content" tabIndex={-1} className="inner-page shell">
         <section className="sell-intro">
           <p className="eyebrow">Two ways to sell</p>
           <h1>

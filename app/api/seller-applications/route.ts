@@ -4,10 +4,13 @@ import { sendEmail } from "@/lib/email";
 import { readJsonObject, routeError } from "@/lib/http";
 import { parseSellerApplication } from "@/lib/validation";
 import { POLICY_VERSION } from "@/lib/legal";
+import { requireAdultConsent } from "@/lib/form-consent";
 
 export async function POST(request: Request) {
   try {
-    const payload = parseSellerApplication(await readJsonObject(request));
+    const input = await readJsonObject(request);
+    requireAdultConsent(input.adultConsent);
+    const payload = parseSellerApplication(input);
     const id = crypto.randomUUID();
     await getDb().insert(sellerApplications).values({
       id,

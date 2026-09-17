@@ -17,6 +17,7 @@ export function renderEmailHtml(
   content: string,
   siteUrl = "https://modelcarcenter.com",
   supportEmail = "support@modelcarcenter.com",
+  preferences: { unsubscribeUrl?: string; businessName?: string; mailingAddress?: string } = {},
 ) {
   const safeSubject = escapeHtml(subject);
   const safeSiteUrl = escapeHtml(siteUrl);
@@ -72,6 +73,8 @@ export function renderEmailHtml(
             <td class="email-padding" style="padding:28px 42px;color:#aaa8a3;background:#171718;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.65;">
               <p style="margin:0 0 8px;color:#ffffff;font-weight:700;">Made for collectors.</p>
               <p style="margin:0;">Questions? Reply to this email or contact <a href="mailto:${safeSupportEmail}" style="color:#ffffff;text-decoration:underline;">${safeSupportEmail}</a>.</p>
+              ${preferences.businessName ? `<p style="margin:12px 0 0;">${escapeHtml(preferences.businessName)}${preferences.mailingAddress ? `<br>${escapeHtml(preferences.mailingAddress)}` : ""}</p>` : ""}
+              ${preferences.unsubscribeUrl ? `<p style="margin:12px 0 0;"><a href="${escapeHtml(preferences.unsubscribeUrl)}" style="color:#ffffff;text-decoration:underline;">Unsubscribe from optional emails</a></p>` : ""}
               <p style="margin:12px 0 0;"><a href="${safeSiteUrl}" style="color:#aaa8a3;text-decoration:none;">Model Car Center</a> &middot; One search for the models worth collecting.</p>
             </td>
           </tr>

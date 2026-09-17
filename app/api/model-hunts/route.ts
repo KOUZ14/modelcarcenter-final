@@ -1,3 +1,4 @@
+import { requireAdultConsent } from "@/lib/form-consent";
 import { getDb } from "@/db";
 import { wantedRequests } from "@/db/schema";
 import { searchCatalog } from "@/lib/catalog";
@@ -26,6 +27,7 @@ export async function POST(request: Request) {
   try {
     const collector = await getCurrentCollector(request.headers).catch(() => null);
     const input = await readJsonObject(request);
+    requireAdultConsent(input.adultConsent);
     if (collector) input.collectorEmail = collector.user.email;
     const payload = parseModelHunt(input);
     const existing = await searchCatalog({

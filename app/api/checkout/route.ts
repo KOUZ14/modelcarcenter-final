@@ -1,3 +1,4 @@
+import { requireAdultConsent } from "@/lib/form-consent";
 import { attachStripeSession, loadAuthoritativeCart, releaseReservation, releaseStaleReservations, reserveCart } from "@/lib/inventory";
 import { readJsonObject } from "@/lib/http";
 import { assertSellerPaymentsReady, createCheckoutSession, expireCheckoutSession } from "@/lib/stripe";
@@ -20,6 +21,7 @@ export async function POST(request: Request) {
   try {
     assertLiveCheckoutConfigured(config);
     const payload = await readJsonObject(request);
+    requireAdultConsent(payload.adultConsent);
     if (!isCurrentPolicyVersion(payload.policyVersion)) {
       throw new Error("Accept the current marketplace policies before checkout.");
     }

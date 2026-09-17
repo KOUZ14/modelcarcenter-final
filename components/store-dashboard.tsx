@@ -5,6 +5,7 @@ import { SellerOrderAmounts } from "./seller-order-amounts";
 
 import Link from "next/link";
 import { BrandLogo } from "@/components/brand-logo";
+import { useDialogFocus } from "./use-dialog-focus";
 import { FormEvent, useMemo, useRef, useState } from "react";
 import { AddressFields, type AddressFieldsHandle } from "./address-fields";
 import { SHIP_FROM_FIELD_NAMES, shipFromAddressValues } from "@/lib/address";
@@ -290,7 +291,7 @@ export function StoreDashboard({
           <Link href="/marketplace">Back to marketplace</Link>
         </div>
       </aside>
-      <main className="store-main">
+      <main id="main-content" tabIndex={-1} className="store-main">
         {suspended && (
           <div className="store-alert" role="alert">
             <b>Store access is read-only.</b>
@@ -604,6 +605,7 @@ function ProductEditor({
   ): Promise<Record<string, unknown>>;
   onClose(): void;
 }) {
+  const dialog = useDialogFocus(onClose);
   const [busy, setBusy] = useState(false);
   const [productId, setProductId] = useState(product?.id ?? "");
   const [files, setFiles] = useState<File[]>([]);
@@ -725,7 +727,7 @@ function ProductEditor({
   }
   return (
     <div className="store-editor-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <section className="store-editor" role="dialog" aria-modal="true" aria-labelledby="product-editor-title">
+      <section ref={dialog} tabIndex={-1} className="store-editor" role="dialog" aria-modal="true" aria-labelledby="product-editor-title">
         <div className="panel-heading">
           <div>
             <p className="eyebrow">Inventory item</p>

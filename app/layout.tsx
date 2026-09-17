@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { MarketplaceProvider } from "@/components/marketplace-provider";
+import { CookieNotice } from "@/components/cookie-notice";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -41,5 +42,5 @@ export const viewport: Viewport = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="en"><body className="antialiased"><MarketplaceProvider>{children}</MarketplaceProvider></body></html>;
+  return <html lang="en"><body className="antialiased"><a className="skip-link" href="#main-content">Skip to main content</a><MarketplaceProvider>{children}</MarketplaceProvider><CookieNotice/></body></html>;
 }

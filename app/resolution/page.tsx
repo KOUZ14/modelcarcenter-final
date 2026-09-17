@@ -23,11 +23,11 @@ export default async function ResolutionPage({
   return (
     <main className="resolution-page">
       <SiteHeader />
-      <ResolutionCenter
+      <div id="main-content" tabIndex={-1}><ResolutionCenter
         data={data}
         initialOrderId={query.order}
         initialCaseId={query.case}
-      />
+      /></div>
       <SiteFooter />
     </main>
   );

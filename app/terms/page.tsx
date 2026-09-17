@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { PolicyPage } from "@/components/policy-page";
 import { config } from "@/lib/config";
+import { BusinessDetails } from "@/components/business-details";
 
 export const metadata: Metadata = {
   title: "Marketplace Terms",
@@ -62,5 +63,6 @@ export default function TermsPage() {
 
     <h2>17. Contact</h2>
     <p>Questions about these Terms or an order may be sent to <a href={`mailto:${config.supportEmail}`}>{config.supportEmail}</a>.</p>
+    <BusinessDetails/>
   </PolicyPage>;
 }

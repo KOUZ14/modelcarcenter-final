@@ -22,7 +22,7 @@ export default async function AccountPage({
   return (
     <main>
       <SiteHeader />
-      <div className="inner-page shell">
+      <div id="main-content" tabIndex={-1} className="inner-page shell">
         <AccountDashboard
           initialView={
             query.view ?? (query.new === "1" ? "profile" : "overview")

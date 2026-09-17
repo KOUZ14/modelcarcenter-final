@@ -8,6 +8,8 @@ The professional-seller flow uses the same seller/product/order architecture: se
 
 ## Capabilities
 
+The [20-item site checklist audit](docs/site-checklist-audit.md) records privacy, consent, email, accessibility, and business-information checks. [Asset provenance](docs/asset-provenance.md) tracks the evidence still needed for images and branding. Public business information is configured with `BUSINESS_LEGAL_NAME`, `BUSINESS_MAILING_ADDRESS`, and `BUSINESS_JURISDICTION`; these must contain verified values. Optional community, Model Hunt, and restock emails are withheld until business name and mailing address are set. New community campaigns must use `sendCommunityUpdateEmail` so current subscriptions, postal details, and unsubscribe links are applied.
+
 - Passwordless collector accounts powered by Better Auth email magic links, 10-minute hashed verification tokens, secure cookie sessions, and Resend delivery
 - A protected **My Garage** for cross-device wishlists and carts, Model Hunts, orders, collector listings, sales, profile settings, and account deletion
 - A protected **Store Console** for approved professional sellers with store-scoped inventory CRUD, CSV imports, order fulfillment, storefront settings, and sales analytics
@@ -178,7 +180,7 @@ Use a test webhook with a `shippo_test_...` token. The handler rejects live even
 
 ### Account deletion and retained records
 
-Account deletion revokes the collector's sessions, removes the Better Auth user/profile through foreign-key cascades, suspends the associated collector seller, and deactivates its listings. Paid orders remain as immutable transaction records; their `buyer_user_id` becomes null while order snapshots and fulfillment data are retained for operational, accounting, dispute, and legal needs. Uploaded listing media is not automatically erased because retained transaction/listing records may still reference it; support can handle an appropriate deletion request after retention obligations are satisfied.
+Account deletion first removes newsletter subscriptions, restock alerts, and Model Hunts linked to the collector's user ID or verified email (including matching guest records). It then revokes the collector's sessions, removes the Better Auth user/profile through foreign-key cascades, suspends the associated collector seller, and deactivates its listings. Paid orders remain as immutable transaction records; their `buyer_user_id` becomes null while order snapshots and fulfillment data are retained for operational, accounting, dispute, and legal needs. Uploaded listing media is not automatically erased because retained transaction/listing records may still reference it; support can handle an appropriate deletion request after retention obligations are satisfied.
 
 ## R2 listing images
 

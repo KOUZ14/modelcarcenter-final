@@ -24,7 +24,7 @@ export default async function StorePage({
     return (
       <main>
         <SiteHeader />
-        <div className="inner-page shell store-access-empty">
+        <div id="main-content" tabIndex={-1} className="inner-page shell store-access-empty">
           <p className="eyebrow">Store Console</p>
           <h1>No store is connected to this account.</h1>
           <p>

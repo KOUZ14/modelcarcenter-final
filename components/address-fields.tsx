@@ -28,7 +28,7 @@ export function AddressFields({
   values.state = values.country === "US" ? normalizeState(values.state) : values.state;
   const [errors, setErrors] = useState<Partial<Record<AddressField, string>>>({});
   const [showUnit, setShowUnit] = useState(Boolean(initialValues.street2));
-  const [manual, setManual] = useState(initialValues.country != null && initialValues.country !== "US");
+  const [manual, setManual] = useState(true);
   const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
   const [active, setActive] = useState(-1);
   const [status, setStatus] = useState("");
@@ -165,6 +165,7 @@ export function AddressFields({
         <span className="address-attribution" translate="no">Google Maps</span>
       </div>}
       <p className="address-help" id={`${id}-status`} role="status">{status || (manual ? "Enter your address in the fields below." : "Start typing your street address to see suggestions.")}</p>
+      {isUS && manual && <p className="address-help">Optional autocomplete sends the street address you type to Google Maps. Enable it only if you want suggestions.</p>}
       {isUS && <button className="text-button address-link" type="button" disabled={disabled} onClick={() => {
         cancelLookup(); setManual(!manual); setSuggestions([]); setExpanded(false); setStatus(""); token.current = "";
         root.current?.querySelector<HTMLInputElement>('[data-address-field="street1"]')?.focus();

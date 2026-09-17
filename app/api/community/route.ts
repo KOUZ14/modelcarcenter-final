@@ -1,3 +1,4 @@
+import { requireAdultConsent, requireMarketingConsent } from "@/lib/form-consent";
 import { getDb } from "@/db";
 import { communitySubscribers } from "@/db/schema";
 import { readJsonObject, routeError } from "@/lib/http";
@@ -6,6 +7,8 @@ import { isEmail, normalizeEmail, rejectHoneypot, ValidationError } from "@/lib/
 export async function POST(request: Request) {
   try {
     const payload = await readJsonObject(request);
+    requireAdultConsent(payload.adultConsent);
+    requireMarketingConsent(payload.marketingConsent);
     rejectHoneypot(payload);
     const email = normalizeEmail(payload.email);
     if (!isEmail(email)) throw new ValidationError("Enter a valid email address.");

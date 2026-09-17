@@ -9,6 +9,7 @@ import {
 } from "@/db/schema";
 import { config } from "./config";
 import { sendEmail } from "./email";
+import { unsubscribeUrl } from "./email-preferences";
 import { isEmail, normalizeEmail, ValidationError } from "./validation";
 import { addBusinessDays } from "./reputation-rules";
 import {
@@ -120,12 +121,13 @@ export async function notifyRestockSubscribers(productId: string) {
   for (const alert of alerts) {
     try {
       const productUrl = `${config.siteUrl}/products/${encodeURIComponent(product.slug)}`;
-      const unsubscribeUrl = `${config.siteUrl}/api/availability-alerts?token=${encodeURIComponent(alert.unsubscribeToken)}`;
+      const stopUrl = await unsubscribeUrl("restock", alert.unsubscribeToken);
       const result = await sendEmail({
         to: alert.email,
         subject: `${product.title} is back in stock`,
-        html: `<h1>Back in stock</h1><p><strong>${escapeHtml(product.title)}</strong> from ${escapeHtml(product.sellerName)} is available again.</p><p><a href="${escapeHtml(productUrl)}">View the model</a></p><p style="font-size:12px"><a href="${escapeHtml(unsubscribeUrl)}">Stop alerts for this model</a></p>`,
-        text: `${product.title} from ${product.sellerName} is back in stock.\n${productUrl}\n\nStop alerts for this model: ${unsubscribeUrl}`,
+        html: `<h1>Back in stock</h1><p><strong>${escapeHtml(product.title)}</strong> from ${escapeHtml(product.sellerName)} is available again.</p><p><a href="${escapeHtml(productUrl)}">View the model</a></p>`,
+        text: `${product.title} from ${product.sellerName} is back in stock.\n${productUrl}`,
+        unsubscribeUrl: stopUrl,
         idempotencyKey: `restock-${alert.id}-${product.inventoryQuantity}-${product.reservedQuantity}`,
       });
       if (!result.sent) continue;

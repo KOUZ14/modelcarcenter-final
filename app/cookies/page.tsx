@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 };
 
 export default function CookiesPage() {
-  return <PolicyPage title="Cookie & Local Storage Policy" intro="Model Car Center uses a small amount of browser storage to keep accounts secure and remember guest shopping choices. We do not currently use advertising or analytics cookies.">
+  return <PolicyPage effectiveDate="September 16, 2026" title="Cookie & Local Storage Policy" intro="Model Car Center uses a small amount of browser storage to keep accounts secure and remember guest shopping choices. We do not currently use advertising or analytics cookies.">
     <h2>1. What browser storage is</h2>
     <p>Cookies are small text records a website asks a browser to store and return with later requests. Local storage is information kept by the browser on a device and available to the website that stored it. Similar technologies can perform related functions.</p>
 
@@ -19,12 +19,17 @@ export default function CookiesPage() {
       <tr><td>Guest cart local storage</td><td>Remember products and quantities placed in a guest cart on that browser.</td><td>Until cleared by the user, replaced by account data, or removed through browser settings.</td></tr>
       <tr><td>Guest wishlist local storage</td><td>Remember products saved by a guest on that browser.</td><td>Until cleared by the user, merged into an account, or removed through browser settings.</td></tr>
       <tr><td>Infrastructure and security data</td><td>Our hosting and security providers may process request identifiers and short-lived technical data needed to deliver and protect the Service.</td><td>As set by the provider for security and service delivery.</td></tr>
+      <tr><td>Checkout-return cookies (<code>mcc-checkout-return-*</code>)</td><td>Verify and resume or close a previous Stripe checkout.</td><td>Up to 24 hours.</td></tr>
+      <tr><td>Checkout and shipping session storage</td><td>Remember a shipping ZIP code, delivery-address draft, seller shipping choices, and checkout progress in this tab.</td><td>Until the tab is closed or storage is cleared; browser session restoration may restore it.</td></tr>
+      <tr><td>Checkout completion markers in local storage</td><td>Prevent purchased items from being removed from a cart more than once.</td><td>Until browser storage is cleared.</td></tr>
+      <tr><td>Notice preference (<code>mcc-storage-notice-v1</code>)</td><td>Remember that you dismissed the necessary-storage notice. This does not enable optional tracking.</td><td>Until browser storage is cleared or the notice version changes.</td></tr>
     </tbody></table></div>
 
     <h2>3. No advertising or analytics cookies</h2>
     <p>We do not currently use cookies for behavioral advertising, cross-site tracking, or audience analytics. Stripe may use cookies and similar technology on its hosted checkout and onboarding pages under Stripe’s own policy.</p>
 
     <h2>4. Your controls</h2>
+    <p>The notice offers &ldquo;Continue with necessary only&rdquo;. You can reopen it with Cookie settings in the footer. There are currently no optional advertising or analytics categories to enable or reject.</p>
     <p>You can delete cookies and local storage through browser settings. Blocking strictly necessary cookies may prevent sign-in or other secure account features. Clearing local storage removes the guest cart and wishlist from that device. Signed-in account carts and wishlists are stored with the account and can be changed through the Service.</p>
 
     <h2>5. Changes and contact</h2>

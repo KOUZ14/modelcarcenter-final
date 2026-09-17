@@ -2,7 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import Link from "next/link";
-import { authClient } from "@/lib/auth-client";
+import { AdultConsent } from "./adult-consent";
 
 export function SignInForm({
   returnTo = "/account",
@@ -29,22 +29,27 @@ export function SignInForm({
     const newUserCallbackURL = `${callbackURL}${callbackURL.includes("?") ? "&" : "?"}new=1`;
     const errorParams = new URLSearchParams({ error: "invalid-link", returnTo: callbackURL });
     if (saveOrder) errorParams.set("intent", "save-order");
-    const result = await authClient.signIn.magicLink({
-      email,
-      name: email.split("@")[0] || "Collector",
-      callbackURL,
-      newUserCallbackURL,
-      errorCallbackURL: `/sign-in?${errorParams}`,
-    });
-    if (result.error) {
+    try {
+      const response = await fetch("/api/auth/sign-in/magic-link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          adultConsent: new FormData(event.currentTarget).get("adultConsent"),
+          email,
+          name: email.split("@")[0] || "Collector",
+          callbackURL,
+          newUserCallbackURL,
+          errorCallbackURL: `/sign-in?${errorParams}`,
+        }),
+      });
+      const result = await response.json() as { message?: string; error?: string };
+      if (!response.ok) throw new Error(result.error || result.message || "We could not send the sign-in email. Please try again.");
+      setState("sent");
+    } catch (error) {
       setState("error");
-      setMessage(
-        result.error.message ||
-          "We could not send the sign-in email. Please try again.",
-      );
-      return;
+      setMessage(error instanceof Error ? error.message : "We could not send the sign-in email. Please try again.");
     }
-    setState("sent");
+
   }
   if (state === "sent")
     return (
@@ -67,7 +72,7 @@ export function SignInForm({
       </div>
     );
   return (
-    <form className="auth-card" onSubmit={submit} noValidate>
+    <form className="auth-card" onSubmit={submit}>
       <p className="eyebrow">
         {returnTo.startsWith("/store") ? "Store account" : "Your account"}
       </p>
@@ -91,6 +96,7 @@ export function SignInForm({
           placeholder="you@example.com"
         />
       </label>
+      <AdultConsent/>
       {state === "error" && (
         <p className="form-error" role="alert">
           {message ||
