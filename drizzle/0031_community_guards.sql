@@ -1,7 +1,7 @@
 -- Share the existing inventory authority with listing checkouts.
 CREATE TRIGGER community_offer_insert BEFORE INSERT ON collection_offers BEGIN
- SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM collection_items i JOIN community_settings s ON s.user_id=i.owner_id JOIN products p ON p.id=i.listing_id WHERE i.id=NEW.item_id AND i.owner_id=NEW.owner_id AND i.owner_id!=NEW.buyer_id AND i.visibility='public' AND s.published=1 AND i.availability='open_to_offers' AND i.version=NEW.item_version AND p.status='active' AND p.inventory_quantity=1 AND p.reserved_quantity=0 AND NEW.price_cents>=i.minimum_cents) THEN RAISE(ABORT,'Piece is no longer accepting offers') END;
- SELECT CASE WHEN EXISTS(SELECT 1 FROM collector_relationships WHERE kind='block' AND ((owner_id=NEW.owner_id AND target_id=NEW.buyer_id) OR(owner_id=NEW.buyer_id AND target_id=NEW.owner_id))) THEN RAISE(ABORT,'Contact unavailable') END;
+ SELECT RAISE(ABORT,'Piece is no longer accepting offers') WHERE NOT EXISTS(SELECT 1 FROM collection_items i JOIN community_settings s ON s.user_id=i.owner_id JOIN products p ON p.id=i.listing_id WHERE i.id=NEW.item_id AND i.owner_id=NEW.owner_id AND i.owner_id!=NEW.buyer_id AND i.visibility='public' AND s.published=1 AND i.availability='open_to_offers' AND i.version=NEW.item_version AND p.status='active' AND p.inventory_quantity=1 AND p.reserved_quantity=0 AND NEW.price_cents>=i.minimum_cents);
+ SELECT RAISE(ABORT,'Contact unavailable') WHERE EXISTS(SELECT 1 FROM collector_relationships WHERE kind='block' AND ((owner_id=NEW.owner_id AND target_id=NEW.buyer_id) OR(owner_id=NEW.buyer_id AND target_id=NEW.owner_id)));
 END;
 --> statement-breakpoint
 CREATE TRIGGER community_offer_immutable BEFORE UPDATE OF price_cents,currency,terms,item_version,destination,buyer_id,owner_id,proposer_id,root_id,expires_at ON collection_offers BEGIN
@@ -9,8 +9,8 @@ CREATE TRIGGER community_offer_immutable BEFORE UPDATE OF price_cents,currency,t
 END;
 --> statement-breakpoint
 CREATE TRIGGER community_offer_reserve BEFORE UPDATE OF status ON collection_offers WHEN NEW.status='reserved' AND OLD.status!='reserved' BEGIN
- SELECT CASE WHEN OLD.status!='proposed' OR OLD.expires_at<=unixepoch()*1000 OR NOT EXISTS(SELECT 1 FROM collection_items i JOIN community_settings s ON s.user_id=i.owner_id JOIN products p ON p.id=i.listing_id WHERE i.id=NEW.item_id AND i.visibility='public' AND s.published=1 AND i.availability='open_to_offers' AND i.version=NEW.item_version AND p.status='active' AND p.inventory_quantity=1 AND p.reserved_quantity=0) THEN RAISE(ABORT,'Piece already reserved or offer changed') END;
- SELECT CASE WHEN EXISTS(SELECT 1 FROM collector_relationships WHERE kind='block' AND ((owner_id=NEW.owner_id AND target_id=NEW.buyer_id) OR(owner_id=NEW.buyer_id AND target_id=NEW.owner_id))) THEN RAISE(ABORT,'Contact unavailable') END;
+ SELECT RAISE(ABORT,'Piece already reserved or offer changed') WHERE OLD.status!='proposed' OR OLD.expires_at<=unixepoch()*1000 OR NOT EXISTS(SELECT 1 FROM collection_items i JOIN community_settings s ON s.user_id=i.owner_id JOIN products p ON p.id=i.listing_id WHERE i.id=NEW.item_id AND i.visibility='public' AND s.published=1 AND i.availability='open_to_offers' AND i.version=NEW.item_version AND p.status='active' AND p.inventory_quantity=1 AND p.reserved_quantity=0);
+ SELECT RAISE(ABORT,'Contact unavailable') WHERE EXISTS(SELECT 1 FROM collector_relationships WHERE kind='block' AND ((owner_id=NEW.owner_id AND target_id=NEW.buyer_id) OR(owner_id=NEW.buyer_id AND target_id=NEW.owner_id)));
  UPDATE products SET reserved_quantity=reserved_quantity+1 WHERE id=(SELECT listing_id FROM collection_items WHERE id=NEW.item_id);
 END;
 --> statement-breakpoint
@@ -20,11 +20,11 @@ CREATE TRIGGER community_offer_release AFTER UPDATE OF status ON collection_offe
 END;
 --> statement-breakpoint
 CREATE TRIGGER community_checkout_claim BEFORE INSERT ON collection_offer_checkouts BEGIN
- SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM collection_offers o JOIN checkout_reservations c ON c.id=NEW.checkout_id WHERE o.id=NEW.offer_id AND o.status='reserved' AND o.payment_deadline>unixepoch()*1000 AND c.buyer_user_id=o.buyer_id AND c.currency=o.currency AND c.subtotal_cents=o.price_cents AND o.checkout_id=c.id AND c.status='pending') THEN RAISE(ABORT,'Offer checkout is unavailable') END;
+ SELECT RAISE(ABORT,'Offer checkout is unavailable') WHERE NOT EXISTS(SELECT 1 FROM collection_offers o JOIN checkout_reservations c ON c.id=NEW.checkout_id WHERE o.id=NEW.offer_id AND o.status='reserved' AND o.payment_deadline>unixepoch()*1000 AND c.buyer_user_id=o.buyer_id AND c.currency=o.currency AND c.subtotal_cents=o.price_cents AND o.checkout_id=c.id AND c.status='pending');
 END;
 --> statement-breakpoint
 CREATE TRIGGER community_checkout_complete BEFORE UPDATE OF status ON checkout_reservations WHEN NEW.status='completed' AND EXISTS(SELECT 1 FROM collection_offer_checkouts WHERE checkout_id=NEW.id) BEGIN
- SELECT CASE WHEN NOT EXISTS(SELECT 1 FROM collection_offer_checkouts c JOIN collection_offers o ON o.id=c.offer_id WHERE c.checkout_id=NEW.id AND o.checkout_id=NEW.id AND o.status='reserved' AND o.payment_deadline>unixepoch()*1000) THEN RAISE(ABORT,'Expired offer payment requires reconciliation') END;
+ SELECT RAISE(ABORT,'Expired offer payment requires reconciliation') WHERE NOT EXISTS(SELECT 1 FROM collection_offer_checkouts c JOIN collection_offers o ON o.id=c.offer_id WHERE c.checkout_id=NEW.id AND o.checkout_id=NEW.id AND o.status='reserved' AND o.payment_deadline>unixepoch()*1000);
 END;
 --> statement-breakpoint
 CREATE TRIGGER community_checkout_paid AFTER UPDATE OF status ON checkout_reservations WHEN NEW.status='completed' AND OLD.status='pending' BEGIN
