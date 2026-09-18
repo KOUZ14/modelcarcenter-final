@@ -127,9 +127,12 @@ CREATE INDEX `catalog_manufacturer_sku_idx` ON `catalog_products` (`manufacturer
 --> statement-breakpoint
 -- Capacity and priority are enforced inside SQLite's write transaction, including
 -- retries and simultaneous last-slot requests. Converted units remain committed.
+-- Use SELECT RAISE ... WHERE: D1's remote SQL splitter can mistake an
+-- unparenthesized CASE END for the end of the trigger body.
 CREATE TRIGGER preorder_hold_capacity BEFORE INSERT ON preorder_reservations
 BEGIN
-  SELECT CASE WHEN NEW.status != 'hold' OR NOT EXISTS (
+  SELECT RAISE(ABORT, 'Preorder capacity, terms or seller eligibility changed. Please review the offer.')
+  WHERE NEW.status != 'hold' OR NOT EXISTS (
     SELECT 1 FROM incoming_batches b JOIN products p ON p.id = b.listing_id
     JOIN sellers s ON s.id = p.seller_id
     JOIN preorder_seller_access a ON a.seller_id = s.id
@@ -151,13 +154,14 @@ BEGIN
       JOIN incoming_batches rb ON rb.id = r.batch_id WHERE rb.listing_id = p.id AND r.buyer_user_id = NEW.buyer_user_id
       AND (r.status IN ('reserved','allocated','awaiting_payment','converted') OR
         (r.status = 'hold' AND r.hold_expires_at > strftime('%Y-%m-%dT%H:%M:%fZ','now')))),0) <= json_extract(b.terms,'$.buyerLimit')
-  ) THEN RAISE(ABORT, 'Preorder capacity, terms or seller eligibility changed. Please review the offer.') END;
+  );
 END;
 --> statement-breakpoint
 CREATE TRIGGER preorder_confirm_guard BEFORE UPDATE OF status ON preorder_reservations
 WHEN OLD.status = 'hold' AND NEW.status = 'reserved'
 BEGIN
-  SELECT CASE WHEN OLD.hold_expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ','now') OR NOT EXISTS (
+  SELECT RAISE(ABORT, 'Reservation hold expired or the offer changed.')
+  WHERE OLD.hold_expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ','now') OR NOT EXISTS (
     SELECT 1 FROM incoming_batches b JOIN products p ON p.id = b.listing_id JOIN sellers s ON s.id = p.seller_id
     JOIN preorder_seller_access a ON a.seller_id = s.id
     JOIN preorder_policies policy ON policy.version = json_extract(b.terms,'$.policyVersion')
@@ -168,7 +172,7 @@ BEGIN
     AND COALESCE((SELECT SUM(quantity) FROM preorder_reservations r WHERE r.batch_id = b.id
       AND (r.status IN ('reserved','allocated','awaiting_payment','converted') OR
         (r.status = 'hold' AND r.hold_expires_at > strftime('%Y-%m-%dT%H:%M:%fZ','now')))),0) <= b.capacity - b.safety_buffer
-  ) THEN RAISE(ABORT, 'Reservation hold expired or the offer changed.') END;
+  );
 END;
 --> statement-breakpoint
 CREATE TRIGGER preorder_immutable BEFORE UPDATE ON preorder_reservations
@@ -179,13 +183,13 @@ BEGIN SELECT RAISE(ABORT, 'Accepted preorder terms and queue priority are immuta
 CREATE TRIGGER preorder_stock_allocate BEFORE UPDATE OF allocated_quantity ON preorder_reservations
 WHEN NEW.allocated_quantity > OLD.allocated_quantity
 BEGIN
-  SELECT CASE WHEN OLD.status != 'reserved' OR OLD.consent_state != 'accepted' OR EXISTS (
+  SELECT RAISE(ABORT, 'Inspected stock or queue priority changed.')
+  WHERE OLD.status != 'reserved' OR OLD.consent_state != 'accepted' OR EXISTS (
     SELECT 1 FROM preorder_reservations r WHERE r.batch_id = NEW.batch_id AND r.status = 'reserved'
       AND r.consent_state = 'accepted' AND r.accepted_sequence < NEW.accepted_sequence
   ) OR NEW.allocated_quantity + COALESCE((SELECT SUM(allocated_quantity) FROM preorder_reservations r
     WHERE r.batch_id = NEW.batch_id AND r.id != NEW.id AND r.status IN ('allocated','awaiting_payment','converted')),0)
-    > (SELECT sellable_quantity FROM incoming_batches WHERE id = NEW.batch_id)
-    THEN RAISE(ABORT, 'Inspected stock or queue priority changed.') END;
+    > (SELECT sellable_quantity FROM incoming_batches WHERE id = NEW.batch_id);
 END;
 --> statement-breakpoint
 CREATE TRIGGER preorder_stock_hold AFTER UPDATE OF allocated_quantity ON preorder_reservations
