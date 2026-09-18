@@ -1,1 +1,4 @@
-drizzle/*.sql text eol=lf
+drizzle/0031_community_guards.sql text eol=lf
+drizzle/0032_preorder_deposits.sql text eol=lf
+drizzle/0033_deposit_settlements.sql text eol=lf
+drizzle/0034_preorder_refund_concurrency.sql text eol=lf
