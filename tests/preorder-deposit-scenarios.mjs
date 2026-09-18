@@ -132,6 +132,7 @@ export async function depositScenarios({t,api,sqlite,row,all,buyer,buyer2,sessio
     assert.throws(()=>sqlite.prepare("INSERT INTO preorder_refund_requests (id,order_id,target_cents,created_at) VALUES ('competing',?,600,CURRENT_TIMESTAMP)").run(order.id),/UNIQUE/);
     const partial=refunds.find(f=>f.charge===order.stripe_charge_id);partial.status='succeeded';
     await api.reconcilePreorderOrderRefunds(order.id);assert.equal(row('SELECT refunded_amount_cents n FROM orders WHERE id=?',order.id).n,500);
+    assert.equal(row('SELECT refund_status s FROM preorder_payment_ledger WHERE session_id=?',c.sessionId).s,'not_required','A completed partial refund is not left pending');
     setRefundOutcome('succeeded');await api.createPreorderOrderRefund({...input,refundedAmountCents:500});
     const after=row('SELECT * FROM orders WHERE id=?',order.id);assert.equal(after.payment_status,'refunded');assert.equal(after.refunded_amount_cents,2650);
     assert.equal(refunds.filter(f=>[order.stripe_charge_id,r.session.payment_intent.latest_charge.id].includes(f.charge)).reduce((n,f)=>n+f.amount,0),2650);

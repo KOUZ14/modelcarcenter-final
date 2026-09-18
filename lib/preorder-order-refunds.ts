@@ -75,7 +75,7 @@ export async function reconcilePreorderOrderRefunds(orderId:string) {
   }
   const db=getD1();
   const statements=payments.map(p=>db.prepare(`UPDATE preorder_payment_ledger SET refunded_cents=?,refund_status=CASE
-    WHEN ?>=amount_cents THEN 'succeeded' WHEN ?>0 THEN 'pending' WHEN status='recovery' THEN 'required' ELSE refund_status END,updated_at=? WHERE id=?`)
+    WHEN ?>=amount_cents THEN 'succeeded' WHEN ?>0 THEN 'pending' WHEN status='recovery' THEN 'required' ELSE 'not_required' END,updated_at=? WHERE id=?`)
     .bind(p.returned,p.returned,p.pending,new Date().toISOString(),p.id));
   for (const p of payments) for (const refund of p.refunds) {
     if (!["failed","canceled"].includes(refund.status)) continue;

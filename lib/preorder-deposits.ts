@@ -190,7 +190,7 @@ export async function settleForfeitedPreorderDeposits() {
       const request:DepositRequest=JSON.parse(row.request),terms=termsOf(row);
       const amount=Math.max(0,row.amountCents-row.taxCents-charge.balance_transaction.fee-Math.round(row.subtotalCents*request.input.marketplaceFeeBps/10000));
       if(amount<1) continue;
-      const orderId=`preorder-deposit-${row.id}`,group=`MCC_${orderId}`;
+      const orderId=`preorder-deposit-${row.id}`,group=`MCC_${row.id}`;
       const transfer=await findSellerTransfer(group,orderId) ?? await createSellerTransfer({orderId,orderNumber:"Retained preorder deposit",sellerId:terms.sellerId,sellerStripeAccountId:row.accountId,chargeId:row.chargeId,transferGroup:group,amountCents:amount,currency:terms.currency});
       if(transfer.amount !== amount) throw new Error("Deposit transfer does not match the recorded proceeds.");
       await db.prepare("UPDATE preorder_deposit_checkouts SET seller_transfer_id=?,seller_transfer_amount_cents=?,seller_transfer_reversed_cents=?,error=NULL WHERE reservation_id=?").bind(transfer.id,amount,transfer.amount_reversed,row.id).run();
