@@ -25,19 +25,23 @@ function SponsoredCard({ placement }: { placement: Placement }) {
   return <div ref={ref}><ProductCard product={placement.product} sponsored onProductClick={() => { if (!clicked.current) { clicked.current = true; record(placement.token, "click"); } }}/></div>;
 }
 
-export function SponsoredListings({ queryString, organicIds }: { queryString: string; organicIds: string[] }) {
+export function MarketplaceListings({ queryString, products, sponsored }: { queryString: string; products: ProductSummary[]; sponsored: boolean }) {
   const [placements, setPlacements] = useState<Placement[]>([]);
   useEffect(() => {
+    if (!sponsored) return;
     const controller = new AbortController();
     void fetch(`/api/promotions/placements?${queryString}`, { signal: controller.signal, cache: "no-store" })
       .then(r => r.ok ? r.json() : { placements: [] }).then(b => { if (!controller.signal.aborted) setPlacements(b.placements ?? []); }).catch(() => {});
     return () => controller.abort();
-  }, [queryString]);
+  }, [queryString,sponsored]);
   useEffect(() => {
     const timers = placements.map(p => setTimeout(() => setPlacements(current => current.filter(row => row.token !== p.token)), Math.max(0, p.expiresAt - Date.now())));
     return () => timers.forEach(clearTimeout);
   }, [placements]);
-  const visible = placements.filter(p => !organicIds.includes(p.product.id));
-  if (!visible.length) return null;
-  return <section className="sponsored-section" aria-label="Sponsored listings"><h3>Sponsored listings</h3><p>Paid placements from stores matching your search.</p><div className="sponsored-grid">{visible.map(p => <SponsoredCard key={p.token} placement={p}/>)}</div></section>;
+  const visible = sponsored ? placements : [];
+  const promotedIds = new Set(visible.map(p=>p.product.id));
+  return <>
+    {visible.length > 0 && <section className="sponsored-section" aria-label="Sponsored listings"><h3>Sponsored listings</h3><p>Paid placements from stores matching your search.</p><div className="sponsored-grid">{visible.map(p => <SponsoredCard key={p.token} placement={p}/>)}</div></section>}
+    <div className="product-grid marketplace-product-grid">{products.filter(p=>!promotedIds.has(p.id)).map(product=><ProductCard key={product.id} product={product}/>)}</div>
+  </>;
 }

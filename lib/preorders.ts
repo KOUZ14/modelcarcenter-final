@@ -94,7 +94,8 @@ export async function publicPreorderOffers(listingId: string) {
     const totals = await batchCapacity(batch), terms = termsOf(batch);
     const [access] = await getDb().select().from(preorderSellerAccess).where(eq(preorderSellerAccess.sellerId,seller.id)).limit(1);
     const [policy] = await getDb().select().from(preorderPolicies).where(eq(preorderPolicies.version,terms.policyVersion)).limit(1);
-    const canReserve = Boolean(access?.approved && policy?.enabled && sellerAcceptedCurrentTerms(seller) && seller.stripeChargesEnabled && seller.stripePayoutsEnabled && batch.status === "open" && batch.evidenceState === "reviewed" && batch.shortage === 0 && totals.remaining > 0 && terms.priceCents > 0 && batch.dispatchEnd && batch.dispatchEnd > now() && batch.opensAt <= now() && batch.cutoffAt > now() && ["expected","in_transit"].includes(batch.supplyState));
+    const deposit = terms.paymentModel === "deposit_10";
+    const canReserve = Boolean((deposit || access?.approved) && policy?.enabled && sellerAcceptedCurrentTerms(seller) && seller.stripeChargesEnabled && seller.stripePayoutsEnabled && batch.status === "open" && (deposit || batch.evidenceState === "reviewed") && batch.shortage === 0 && totals.remaining > 0 && terms.priceCents > 0 && batch.dispatchEnd && batch.dispatchEnd > now() && batch.opensAt <= now() && batch.cutoffAt > new Date(Date.now()+(deposit ? 35*60000 : 0)).toISOString() && ["expected","in_transit"].includes(batch.supplyState));
     return { id: batch.id, terms, remaining: canReserve ? totals.remaining : 0, canReserve, supplyState: batch.supplyState, cutoffAt: batch.cutoffAt, timezone: batch.timezone, evidenceReviewed: batch.evidenceState === "reviewed" };
   }));
 }
@@ -110,6 +111,7 @@ export async function holdPreorder(user: { id: string; email: string }, input: R
   const [offer] = (await publicPreorderOffers(batch.listingId)).filter(o=>o.id===batch.id);
   if (!offer?.canReserve) throw new ValidationError("This offer currently accepts interest only.");
   if (Number(input.revision) !== batch.revision) throw new ValidationError("The offer changed. Refresh and review its current terms.");
+  if (termsOf(batch).paymentModel === "deposit_10") holdMinutes = Math.max(35,holdMinutes);
   const id = crypto.randomUUID();
   try { await getDb().insert(preorderReservations).values({ id,batchId,buyerUserId:user.id,idempotencyKey:key,quantity,terms:batch.terms,holdExpiresAt:new Date(Math.min(Date.now()+holdMinutes*60000,Date.parse(batch.cutoffAt))).toISOString(),acceptedRevision:batch.revision,contactEmail:user.email,actor:user.id }); }
   catch (error) {
@@ -122,6 +124,7 @@ export async function holdPreorder(user: { id: string; email: string }, input: R
 export async function confirmPreorder(userId: string, id: string, accepted: unknown) {
   const r = await buyerReservation(userId,id);
   if (r.acceptedAt) return r;
+  if (termsOf(r).paymentModel === "deposit_10") throw new ValidationError("Pay the 10% deposit to confirm this preorder.");
   if (accepted !== true) throw new ValidationError("Accept the displayed reservation terms before confirming.");
   const result = await getD1().prepare(`UPDATE preorder_reservations SET status='reserved',accepted_at=?,actor=?,
     accepted_sequence=(SELECT COALESCE(MAX(accepted_sequence),0)+1 FROM preorder_reservations),updated_at=? WHERE id=? AND status='hold'
@@ -134,9 +137,10 @@ export async function confirmPreorder(userId: string, id: string, accepted: unkn
 }
 
 export async function cancelPreorder(id: string, actor: string, reason: string, expired = false) {
+  const [before] = await getDb().select().from(preorderReservations).where(eq(preorderReservations.id,id)).limit(1);
   // Releasing the allocation invokes the stock trigger once. Checkout sessions
   // can finish late; their webhook refunds instead of resurrecting this promise.
-  await getD1().prepare(`UPDATE preorder_reservations SET status=?,allocated_quantity=0,
+  const result = await getD1().prepare(`UPDATE preorder_reservations SET status=?,allocated_quantity=0,
     reason=CASE WHEN ?=1 THEN CASE WHEN status='hold' THEN 'review_hold_expired'
       WHEN consent_state='required' AND consent_deadline <= strftime('%Y-%m-%dT%H:%M:%fZ','now') THEN 'delay_consent_expired'
       ELSE 'payment_deadline_expired' END ELSE ? END,actor=?,updated_at=?
@@ -144,6 +148,13 @@ export async function cancelPreorder(id: string, actor: string, reason: string, 
       (status='hold' AND hold_expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ','now')) OR
       (consent_state='required' AND consent_deadline <= strftime('%Y-%m-%dT%H:%M:%fZ','now')) OR
       (status IN ('allocated','awaiting_payment') AND payment_deadline <= strftime('%Y-%m-%dT%H:%M:%fZ','now')))` : ""}`).bind(expired?"expired":"cancelled",expired?1:0,reason,actor,now(),id).run();
+  if (result.meta.changes && before && termsOf(before).paymentModel === "deposit_10") {
+    const [batch] = await getDb().select().from(incomingBatches).where(eq(incomingBatches.id,before.batchId)).limit(1);
+    if (before.consentState === "required" || (before.status === "reserved" && batch.dispatchEnd && batch.dispatchEnd <= now()) || batch.supplyState === "cancelled" || ["seller_refund","supplier_shortage","seller_failure","manufacturer_cancelled","material_product_change","deposit_not_confirmed","deposit_refunded"].includes(reason)) {
+      const {requestDepositRefund}=await import("./preorder-deposits");
+      await requestDepositRefund(id,actor,reason);
+    }
+  }
 }
 export async function updateBuyerPreorder(userId: string, id: string, input: Record<string,unknown>) {
   const r = await buyerReservation(userId,id);
@@ -157,6 +168,7 @@ export async function updateBuyerPreorder(userId: string, id: string, input: Rec
   }
   if (r.checkoutReservationId) throw new ValidationError("Close the current payment checkout before changing quantities or consent.");
   if (input.action === "reduce") {
+    if (termsOf(r).paymentModel === "deposit_10") throw new ValidationError("Your deposit covers the original quantity. Contact the seller to cancel and refund before placing a different quantity.");
     const quantity = whole(input.quantity,"reduced quantity",1,r.quantity);
     await getD1().prepare("UPDATE preorder_reservations SET quantity=?,allocated_quantity=MIN(allocated_quantity,?),actor=?,updated_at=? WHERE id=? AND checkout_reservation_id IS NULL AND status IN ('reserved','allocated','awaiting_payment')").bind(quantity,quantity,userId,now(),id).run(); return;
   }
@@ -180,9 +192,14 @@ export async function allocateBatch(batchId: string, actor: string) {
     if (!batch || batch.supplyState === "cancelled" || !batch.inspectedAt || !batch.dispatchEnd || batch.dispatchEnd <= now()) return;
     const used = await getD1().prepare("SELECT COALESCE(SUM(allocated_quantity),0) n FROM preorder_reservations WHERE batch_id=? AND status IN ('allocated','awaiting_payment','converted')").bind(batchId).first<{n:number}>();
     const available = batch.sellableQuantity-used!.n;
-    if (available < 1) return;
     const [r] = await getDb().select().from(preorderReservations).where(and(eq(preorderReservations.batchId,batchId),eq(preorderReservations.status,"reserved"),eq(preorderReservations.consentState,"accepted"),eq(preorderReservations.acceptedRevision,batch.revision))).orderBy(asc(preorderReservations.acceptedSequence)).limit(1);
     if (!r) return;
+    if (termsOf(r).paymentModel === "deposit_10" && available < r.quantity) {
+      if (batch.supplyState !== "received") return;
+      await cancelPreorder(r.id,actor,"supplier_shortage");
+      continue;
+    }
+    if (available < 1) return;
     const qty = Math.min(available,r.quantity), deadline = new Date(Date.now()+7*86400000).toISOString();
     await getD1().prepare(`UPDATE preorder_reservations SET allocated_quantity=?,status=?,payment_deadline=?,actor=?,reason='inspected_stock_allocated',updated_at=?
       WHERE id=? AND status='reserved' AND consent_state='accepted'`).bind(qty,qty<r.quantity?"allocated":"awaiting_payment",deadline,actor,now(),r.id).run();
@@ -210,7 +227,7 @@ export async function changeBatch(userId: string, batchId: string, input: Record
     await allocateBatch(batchId,userId);
   } else if (action === "allocate") { await audit.run(); await allocateBatch(batchId,userId); }
   else if (action === "close" || action === "open") {
-    if (action === "open" && (batch.evidenceState !== "reviewed" || !termsOf(batch).priceCents || !batch.dispatchEnd || batch.dispatchEnd <= now() || batch.shortage || !["expected","in_transit"].includes(batch.supplyState))) throw new ValidationError("Review allocation evidence and provide a supported price and dispatch window before opening.");
+    if (action === "open" && ((termsOf(batch).paymentModel !== "deposit_10" && batch.evidenceState !== "reviewed") || !termsOf(batch).priceCents || !batch.dispatchEnd || batch.dispatchEnd <= now() || batch.shortage || !["expected","in_transit"].includes(batch.supplyState))) throw new ValidationError("Provide available preorder quantity and a future ship date before opening.");
     await db.batch([db.prepare("UPDATE incoming_batches SET status=?,updated_at=? WHERE id=?").bind(action === "open"?"open":"closed",now(),batchId),audit]);
   } else if (action === "review_evidence" && admin) {
     if (!batch.evidenceReference) throw new ValidationError("The seller has not supplied allocation evidence.");
@@ -259,6 +276,7 @@ async function batchConsentStatements(batch: Batch, r: Reservation, actor: strin
 export async function buyerPreorders(userId: string) {
   const rows = await getDb().select({ reservation:preorderReservations,batch:incomingBatches }).from(preorderReservations).innerJoin(incomingBatches,eq(incomingBatches.id,preorderReservations.batchId)).where(eq(preorderReservations.buyerUserId,userId)).orderBy(desc(preorderReservations.createdAt));
   return Promise.all(rows.map(async ({reservation:r,batch})=>({ ...r, terms:termsOf(r), currentTerms:termsOf(batch), supplyState:batch.supplyState,
+    deposit: await getD1().prepare("SELECT amount_cents amountCents,subtotal_cents subtotalCents,tax_cents taxCents,refunded_cents refundedCents,status,refund_status refundStatus FROM preorder_payment_ledger WHERE reservation_id=? AND kind='deposit'").bind(r.id).first<{amountCents:number;subtotalCents:number;taxCents:number;refundedCents:number;status:string;refundStatus:string}>(),
     events:await getDb().select({id:preorderEvents.id,kind:preorderEvents.kind,detail:preorderEvents.detail,createdAt:preorderEvents.createdAt}).from(preorderEvents).where(eq(preorderEvents.reservationId,r.id)).orderBy(desc(preorderEvents.createdAt)).limit(100),
     payment: await getD1().prepare("SELECT status,refund_status AS refundStatus,amount_cents AS amountCents,currency FROM preorder_payment_ledger WHERE reservation_id=? ORDER BY created_at DESC").bind(r.id).all(),
   })));
@@ -266,11 +284,11 @@ export async function buyerPreorders(userId: string) {
 export async function sellerPreorders(userId: string) {
   const [seller] = await getDb().select().from(sellers).where(eq(sellers.ownerUserId,userId)).limit(1);
   if (!seller || seller.sellerType !== "professional") throw new ValidationError("A professional store is required.");
-  const [access] = await getDb().select().from(preorderSellerAccess).where(eq(preorderSellerAccess.sellerId,seller.id)).limit(1);
   const batches = await getDb().select({batch:incomingBatches}).from(incomingBatches).innerJoin(products,eq(products.id,incomingBatches.listingId)).where(eq(products.sellerId,seller.id)).orderBy(desc(incomingBatches.createdAt));
-  return { sellerId:seller.id,eligible:Boolean(access?.approved && seller.status === "active"),batches:await Promise.all(batches.map(async ({batch})=>({
+  return { sellerId:seller.id,eligible:Boolean(seller.status === "active" && seller.stripeChargesEnabled && seller.stripePayoutsEnabled && sellerAcceptedCurrentTerms(seller)),batches:await Promise.all(batches.map(async ({batch})=>({
     ...batch,terms:termsOf(batch),...await batchCapacity(batch),
     reservations:await getDb().select().from(preorderReservations).where(eq(preorderReservations.batchId,batch.id)).orderBy(asc(preorderReservations.acceptedSequence)),
+    deposits:(await getD1().prepare("SELECT l.reservation_id reservationId,l.amount_cents amountCents,l.refunded_cents refundedCents,l.refund_status refundStatus,l.status FROM preorder_payment_ledger l JOIN preorder_reservations r ON r.id=l.reservation_id WHERE r.batch_id=? AND l.kind='deposit'").bind(batch.id).all<{reservationId:string;amountCents:number;refundedCents:number;refundStatus:string;status:string}>()).results ?? [],
     metrics:await getD1().prepare(`SELECT
       (SELECT count(*) FROM availability_alerts WHERE product_id=? AND status='active') AS watchers,
       (SELECT count(*) FROM preorder_waitlist WHERE batch_id=? AND status IN ('waiting','invited')) AS waitlisted,

@@ -227,6 +227,38 @@ export async function createCheckoutSession(input: CheckoutSessionInput) {
   });
 }
 
+export function buildPreorderDepositBody(input: CheckoutSessionInput) {
+  const body = buildCheckoutSessionBody(input);
+  body.set("success_url", `${config.siteUrl}/preorders?deposit=paid`);
+  body.set("cancel_url", `${config.siteUrl}/preorders?deposit=cancelled`);
+  body.set("payment_method_types[0]", "card");
+  body.set("custom_text[submit][message]", "10% merchandise deposit, credited toward your preorder. Non-refundable for a change of mind unless the seller approves a refund. Refunded if the seller cannot fulfill or a required refund applies. Remaining balance and shipping are paid when ready; no automatic balance charge.");
+  for (const prefix of ["metadata", "payment_intent_data[metadata]"]) {
+    body.delete(`${prefix}[reservation_id]`);
+    body.set(`${prefix}[purpose]`, "preorder_deposit");
+    body.set(`${prefix}[preorder_reservation_id]`, input.reservationId);
+  }
+  return body;
+}
+
+export async function createPreorderDepositCheckout(input: CheckoutSessionInput, savedBody?: string) {
+  assertLiveCheckoutConfigured(config);
+  return stripeRequest<StripeCheckoutSession>("/v1/checkout/sessions", { method:"POST",body:savedBody ? new URLSearchParams(savedBody) : buildPreorderDepositBody(input),idempotencyKey:`preorder-deposit-${input.reservationId}` });
+}
+
+export async function findPreorderDepositCheckout(reservationId: string, createdAt: string) {
+  let after = "";
+  for (let page=0;page<20;page++) {
+    const result = await stripeRequest<{data:StripeCheckoutSession[];has_more:boolean}>(`/v1/checkout/sessions?limit=100&created[gte]=${Math.floor(Date.parse(createdAt)/1000)-60}&created[lte]=${Math.floor(Date.parse(createdAt)/1000)+3600}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`);
+    const found = result.data.find(s => s.metadata?.purpose === "preorder_deposit" && s.metadata?.preorder_reservation_id === reservationId);
+    if (found) return found;
+    if (!result.has_more) return null;
+    if (!result.data.length) break;
+    after = result.data[result.data.length-1].id;
+  }
+  throw new Error("Deposit checkout requires payment reconciliation.");
+}
+
 export async function expireCheckoutSession(sessionId: string) {
   return stripeRequest<StripeCheckoutSession>(`/v1/checkout/sessions/${encodeURIComponent(sessionId)}/expire`, {
     method: "POST", body: new URLSearchParams(),
@@ -571,6 +603,7 @@ export async function createSellerTransfer(input: {
   transferGroup: string;
   amountCents: number;
   currency: string;
+  combinedPayments?: boolean;
 }) {
   const body = new URLSearchParams({
     amount: String(input.amountCents),
@@ -582,6 +615,9 @@ export async function createSellerTransfer(input: {
     "metadata[order_number]": input.orderNumber,
     "metadata[seller_id]": input.sellerId,
   });
+  // A preorder is funded by both the deposit and balance charge. Transfer the
+  // combined proceeds from available platform funds after the delivery hold.
+  if (input.combinedPayments) body.delete("source_transaction");
   return stripeRequest<{ id: string; amount: number; amount_reversed: number }>(
     "/v1/transfers",
     {
@@ -590,6 +626,11 @@ export async function createSellerTransfer(input: {
       idempotencyKey: `seller-transfer-${input.orderId}`,
     },
   );
+}
+
+export async function findSellerTransfer(transferGroup:string,orderId:string) {
+  const result=await stripeRequest<{data:Array<{id:string;amount:number;amount_reversed:number;metadata?:Record<string,string>}>}>(`/v1/transfers?transfer_group=${encodeURIComponent(transferGroup)}&limit=100`);
+  return result.data.find(t=>t.metadata?.order_id === orderId) ?? null;
 }
 
 export async function reverseSellerTransfer(input: {

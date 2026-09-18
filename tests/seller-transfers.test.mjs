@@ -99,6 +99,7 @@ test("delivery-gated transfers, case holds, partial refunds, and reversals recon
         stripe_transfer_id TEXT,
         currency TEXT NOT NULL,
         total_cents INTEGER NOT NULL,
+        preorder_deposit_cents INTEGER NOT NULL DEFAULT 0,
         refunded_amount_cents INTEGER NOT NULL,
         seller_proceeds_cents INTEGER NOT NULL,
         seller_transfer_amount_cents INTEGER NOT NULL,
@@ -114,6 +115,7 @@ test("delivery-gated transfers, case holds, partial refunds, and reversals recon
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       )`),
+      database.prepare(`CREATE TABLE preorder_refund_requests (id TEXT PRIMARY KEY, order_id TEXT NOT NULL, status TEXT NOT NULL)`),
       database.prepare(`CREATE TABLE resolution_cases (
         id TEXT PRIMARY KEY,
         order_id TEXT NOT NULL,

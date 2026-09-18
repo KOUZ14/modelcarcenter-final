@@ -9,6 +9,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import { config } from '../lib/config.ts';
 import { POLICY_VERSION } from '../lib/legal.ts';
 import { dateWindow, capacitySummary } from '../lib/preorder-rules.ts';
+import { depositScenarios } from './preorder-deposit-scenarios.mjs';
 
 test('preorder windows preserve quarter/month precision and reject invented dates',()=>{
   assert.deepEqual(dateWindow({precision:'quarter',start:'2027-Q1',end:'2027-Q2'}),{start:'2027-01-01T00:00:00.000Z',end:'2027-06-30T23:59:59.999Z',precision:'quarter',label:'Q1 2027 – Q2 2027'});
@@ -26,7 +27,7 @@ test('preorder database and checkout lifecycle',async t=>{
   const binding={prepare(query){let values=[];return {bind(...args){values=args;return this;},async raw(){const s=sqlite.prepare(query);s.setReturnArrays(true);return s.all(...values);},async all(){return {results:sqlite.prepare(query).all(...values),success:true};},async first(column){const row=sqlite.prepare(query).get(...values);return column?row?.[column]??null:row??null;},async run(){const r=sqlite.prepare(query).run(...values);return {success:true,meta:{changes:r.changes}};}};},async batch(statements){sqlite.exec('BEGIN');try{const results=[];for(const s of statements)results.push(await s.run());sqlite.exec('COMMIT');return results;}catch(e){sqlite.exec('ROLLBACK');throw e;}}};
   for(const id of ['buyer','buyer2','owner','owner2'])sqlite.prepare('INSERT INTO user (id,name,email,created_at,updated_at) VALUES (?,?,?,0,0)').run(id,id,`${id}@example.test`);
   for(const [id,owner] of [['seller','owner'],['seller2','owner2']])sqlite.prepare(`INSERT INTO sellers (id,owner_user_id,slug,store_name,contact_name,contact_email,status,stripe_account_id,stripe_charges_enabled,stripe_payouts_enabled,seller_terms_version,seller_terms_accepted_at,shipping_mode,default_shipping_cents,shipping_origin_street_1,shipping_origin_city,shipping_origin_region,shipping_origin_postal_code,shipping_origin_phone) VALUES (?,?,?,'Diecast Store','Owner',?,'active',?,1,1,?,CURRENT_TIMESTAMP,'flat',600,'100 Market St','San Francisco','CA','94105','4155550100')`).run(id,owner,id,`${owner}@example.test`,`acct_${id}`,POLICY_VERSION);
-  const sessions=new Map(),refunds=[],emails=[],reversals=new Map();
+  const sessions=new Map(),refunds=[],emails=[],reversals=new Map(),transfers=new Map(),disputes=new Map();
   let refundOutcome='pending';
   globalThis.__preorderFixture={db:drizzle(binding),binding,emails,config:{...config,betterAuthSecret:'preorder-fixture-signing-secret-not-for-production',marketplaceMode:'test',stripeSecretKey:'sk_test_preorder',siteUrl:'https://mcc.test',automaticTax:true,stripeTaxBehavior:'exclusive'}};
   const originalFetch=globalThis.fetch;
@@ -34,22 +35,27 @@ test('preorder database and checkout lifecycle',async t=>{
     const url=new URL(input);assert.equal(url.origin,'https://api.stripe.com');const body=new URLSearchParams(init.body);
     if(url.pathname.startsWith('/v1/accounts/'))return Response.json({charges_enabled:true,payouts_enabled:true});
     if(url.pathname==='/v1/customers')return Response.json({id:'cus_test'});
+    if(url.pathname==='/v1/checkout/sessions' && init.method !== 'POST')return Response.json({data:[...sessions.values()],has_more:false});
     if(url.pathname==='/v1/checkout/sessions'){
+      const key=init.headers['Idempotency-Key'];const previous=[...sessions.values()].find(s=>s.key===key);if(previous)return Response.json(previous);
       const id=`cs_test_${sessions.size+1}`,metadata=Object.fromEntries([...body].filter(([k])=>/^metadata\[/.test(k)).map(([k,v])=>[k.slice(9,-1),v]));
       let base=0;for(let i=0;body.has(`line_items[${i}][quantity]`);i++)base+=Number(body.get(`line_items[${i}][quantity]`))*Number(body.get(`line_items[${i}][price_data][unit_amount]`));
-      const session={id,url:`https://checkout.stripe.com/${id}`,status:'open',payment_status:'unpaid',metadata,amount_total:base+125,currency:'usd',total_details:{amount_tax:125},customer_details:{email:'buyer@example.test'},payment_intent:{id:`pi_${id}`,latest_charge:{id:`ch_${id}`,balance_transaction:{fee:90}}}};
+      const session={id,key,request:body.toString(),created:Math.floor(Date.now()/1000),url:`https://checkout.stripe.com/${id}`,status:'open',payment_status:'unpaid',metadata,amount_subtotal:base,amount_total:base+125,currency:'usd',total_details:{amount_tax:125},customer_details:{email:'buyer@example.test'},payment_intent:{id:`pi_${id}`,latest_charge:{id:`ch_${id}`,balance_transaction:{fee:90}}}};
       sessions.set(id,session);return Response.json(session);
     }
     if(url.pathname.startsWith('/v1/checkout/sessions/')){const session=sessions.get(url.pathname.split('/')[4]);assert.ok(session);if(url.pathname.endsWith('/expire'))session.status='expired';return Response.json(session);}
     if(url.pathname==='/v1/refunds'&&init.method==='POST'){const key=init.headers['Idempotency-Key'];let refund=refunds.find(r=>r.key===key);if(!refund){refund={id:`re_${refunds.length}`,status:refundOutcome,key,amount:Number(body.get('amount')),charge:body.get('charge'),metadata:{order_id:body.get('metadata[order_id]')}};refunds.push(refund);}return Response.json(refund);}
     if(url.pathname==='/v1/refunds')return Response.json({data:refunds.filter(r=>r.charge===url.searchParams.get('charge')),has_more:false});
+    if(url.pathname==='/v1/transfers'&&init.method==='POST'){const key=init.headers['Idempotency-Key'];if(!transfers.has(key))transfers.set(key,{id:`tr_${transfers.size}`,amount:Number(body.get('amount')),amount_reversed:0,metadata:{order_id:body.get('metadata[order_id]')},transfer_group:body.get('transfer_group'),source_transaction:body.get('source_transaction')});return Response.json(transfers.get(key));}
+    if(url.pathname==='/v1/transfers')return Response.json({data:[...transfers.values()].filter(r=>r.transfer_group===url.searchParams.get('transfer_group')),has_more:false});
+    if(url.pathname.startsWith('/v1/disputes/'))return Response.json(disputes.get(url.pathname.split('/').at(-1)));
     if(/^\/v1\/transfers\/.+\/reversals$/.test(url.pathname)){const key=init.headers['Idempotency-Key'];if(!reversals.has(key))reversals.set(key,{id:`trr_${reversals.size}`,amount:Number(body.get('amount'))});return Response.json(reversals.get(key));}
     if(url.pathname.startsWith('/v1/refunds/'))return Response.json(refunds.find(r=>r.id===url.pathname.split('/').at(-1)));
     throw new Error(`Unexpected Stripe request ${url.pathname}`);
   };
   t.after(async()=>{globalThis.fetch=originalFetch;delete globalThis.__preorderFixture;sqlite.close();await unlink(bundle);await rmdir(scratch);});
-  const mocks={db:'export const getDb=()=>globalThis.__preorderFixture.db;export const getD1=()=>globalThis.__preorderFixture.binding;',config:'export const config=globalThis.__preorderFixture.config;export const requireConfig=k=>config[k];',email:'export const sendPaidOrderEmails=async v=>globalThis.__preorderFixture.emails.push(v);export const sendEmail=async v=>{globalThis.__preorderFixture.emails.push(v);return {sent:true};};export const escapeHtml=v=>String(v);'};
-  const output=await build({stdin:{contents:`export * from './lib/preorders.ts';export * from './lib/preorder-payments.ts';export * from './lib/preorder-maintenance.ts';export * from './lib/preorder-waitlist.ts';export * from './lib/orders.ts';export * from './lib/inventory.ts';export * from './lib/catalog-products.ts';`,resolveDir:root},bundle:true,platform:'node',format:'esm',packages:'external',write:false,plugins:[{name:'fixture',setup(b){b.onResolve({filter:/.*/},({path})=>{const mock=path==='@/db'?'db':/\/(config|email)(\.ts)?$/.exec(path)?.[1];if(mock)return {path:mock,namespace:'fixture'};if(path.startsWith('@/'))return {path:join(root,`${path.slice(2)}.ts`)};});b.onLoad({filter:/.*/,namespace:'fixture'},({path})=>({contents:mocks[path]}));}}]});
+  const mocks={db:'export const getDb=()=>globalThis.__preorderFixture.db;export const getD1=()=>globalThis.__preorderFixture.binding;',config:'export const config=globalThis.__preorderFixture.config;export const requireConfig=k=>config[k];',email:'export const sendLabelCreatedEmail=async()=>{};export const sendShipmentEmail=async()=>{};export const sendPaidOrderEmails=async v=>globalThis.__preorderFixture.emails.push(v);export const sendEmail=async v=>{globalThis.__preorderFixture.emails.push(v);return {sent:true};};export const escapeHtml=v=>String(v);'};
+  const output=await build({stdin:{contents:`export * from './lib/preorders.ts';export * from './lib/preorder-payments.ts';export * from './lib/preorder-maintenance.ts';export * from './lib/preorder-waitlist.ts';export * from './lib/orders.ts';export * from './lib/inventory.ts';export * from './lib/catalog-products.ts';export * from './lib/preorder-deposits.ts';export * from './lib/preorder-order-refunds.ts';export {saveStoreProduct,setStoreProductStatus} from './lib/store.ts';export {createSellerTransfer} from './lib/stripe.ts';`,resolveDir:root},bundle:true,platform:'node',format:'esm',packages:'external',write:false,plugins:[{name:'fixture',setup(b){b.onResolve({filter:/.*/},({path})=>{const mock=path==='@/db'?'db':/\/(config|email)(\.ts)?$/.exec(path)?.[1];if(mock)return {path:mock,namespace:'fixture'};if(path.startsWith('@/'))return {path:join(root,`${path.slice(2)}.ts`)};});b.onLoad({filter:/.*/,namespace:'fixture'},({path})=>({contents:mocks[path]}));}}]});
   await writeFile(bundle,output.outputFiles[0].contents);const api=await import(pathToFileURL(bundle).href);
   const row=(sql,...args)=>sqlite.prepare(sql).get(...args),all=(sql,...args)=>sqlite.prepare(sql).all(...args);
   const future=new Date().getUTCFullYear()+2;
@@ -81,7 +87,7 @@ test('preorder database and checkout lifecycle',async t=>{
     reservation=await reserve(batch,10,buyer,'first');const retry=await reserve(batch,10,buyer,'first');assert.equal(retry.id,reservation.id);
     await reserve(batch,8,buyer2);await assert.rejects(()=>reserve(batch,1,buyer2),/interest only|capacity/i);
     assert.equal((await api.batchCapacity((await api.ownedBatch('owner',batch.batchId)).batch)).committed,18);
-    await assert.rejects(()=>api.loadAuthoritativeCart([{productId:batch.listingId,quantity:1}]),/unpaid reservation/);
+    await assert.rejects(()=>api.loadAuthoritativeCart([{productId:batch.listingId,quantity:1}]),/is a preorder/);
   });
   await t.test('shortages identify later commitments and preserve priority and original dates',async()=>{
     const b=await make({capacity:10,confirmedAllocation:10,safetyBuffer:0});const early=await reserve(b,6),late=await reserve(b,4,buyer2);
@@ -213,4 +219,5 @@ test('preorder database and checkout lifecycle',async t=>{
     assert.equal(after.seller_transfer_reversed_cents,order.seller_proceeds_cents);assert.equal(reversals.size,1);
     refundOutcome='pending';
   });
+  await depositScenarios({t,api,sqlite,row,all,buyer,buyer2,sessions,refunds,reversals,transfers,disputes,future,pay,paid,setRefundOutcome:v=>{refundOutcome=v;}});
 });

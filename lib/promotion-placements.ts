@@ -1,7 +1,7 @@
 import { and, eq, gt, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import { getD1, getDb } from "@/db";
 import { products, sellers, promotionCampaigns, promotionPayments } from "@/db/schema";
-import { activeConditions, productSelection, searchCatalog, type CatalogQuery } from "./catalog";
+import { activeConditions, productSelection, type CatalogQuery } from "./catalog";
 import { getPromotionSettings } from "./promotions";
 import { signPromotionToken, verifyPromotionToken, rotatePromotions, PROMOTION_TOKEN_MS } from "./promotion-rules";
 import { config } from "./config";
@@ -11,9 +11,7 @@ import type { ProductSummary } from "./types";
 export async function getPromotionPlacements(query: CatalogQuery, viewerId: string | null, now = Date.now()) {
   if ((query.page ?? 1) !== 1 || query.seller || query.availability === "preorder" || !(await getPromotionSettings()).servingEnabled) return [];
   const db = getDb();
-  const [organic, candidates] = await Promise.all([
-    searchCatalog({ ...query, page: 1, pageSize: 24 }),
-    db.select({ id: promotionCampaigns.id, sellerId: promotionCampaigns.sellerId, productId: promotionCampaigns.productId, endsAt: promotionCampaigns.endsAt })
+  const candidates = await db.select({ id: promotionCampaigns.id, sellerId: promotionCampaigns.sellerId, productId: promotionCampaigns.productId, endsAt: promotionCampaigns.endsAt })
       .from(promotionCampaigns).innerJoin(promotionPayments, eq(promotionPayments.campaignId, promotionCampaigns.id))
       .innerJoin(products, eq(products.id, promotionCampaigns.productId)).innerJoin(sellers, eq(sellers.id, products.sellerId))
       .where(and(...activeConditions(query), eq(promotionCampaigns.status, "active"), gt(promotionCampaigns.endsAt, now),
@@ -22,9 +20,8 @@ export async function getPromotionPlacements(query: CatalogQuery, viewerId: stri
         isNotNull(sellers.stripeAccountId), eq(sellers.stripeChargesEnabled, true), eq(sellers.stripePayoutsEnabled, true),
         eq(promotionPayments.status, "paid"), eq(promotionPayments.refundedCents, 0), inArray(promotionPayments.disputeStatus, ["none", "won"]),
         sql`NOT EXISTS (SELECT 1 FROM promotion_refunds r WHERE r.campaign_id=${promotionCampaigns.id} AND r.status NOT IN ('failed','canceled'))`,
-        viewerId ? sql`(${sellers.ownerUserId} IS NULL OR ${sellers.ownerUserId} <> ${viewerId})` : undefined)),
-  ]);
-  const chosen = rotatePromotions(candidates, organic.products.map(p => p.id), now);
+        viewerId ? sql`(${sellers.ownerUserId} IS NULL OR ${sellers.ownerUserId} <> ${viewerId})` : undefined));
+  const chosen = rotatePromotions(candidates, [], now);
   if (!chosen.length) return [];
   const details = await db.select(productSelection).from(products).innerJoin(sellers, eq(sellers.id, products.sellerId))
     .where(and(...activeConditions(query), inArray(products.id, chosen.map(c => c.productId))));

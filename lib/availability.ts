@@ -132,7 +132,7 @@ export async function notifyRestockSubscribers(productId: string) {
       const stopUrl = await unsubscribeUrl("restock", alert.unsubscribeToken);
       const heading = upcoming ? "Reservations are open" : "Back in stock";
       const message = upcoming
-        ? `${product.title} from ${product.sellerName} is accepting unpaid reservations. Review the current offer and accept its terms to reserve. This alert has not reserved a unit or given you queue priority.`
+        ? `${product.title} from ${product.sellerName} is accepting preorders. Review the current offer, payment schedule and cancellation terms on the listing. This alert has not reserved a unit or given you queue priority.`
         : `${product.title} from ${product.sellerName} is back in stock.`;
       const result = await sendEmail({
         to: alert.email,

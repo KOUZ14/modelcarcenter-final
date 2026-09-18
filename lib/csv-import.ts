@@ -82,7 +82,7 @@ export async function commitInventoryCsv(sellerId: string, csv: string, retry = 
   const statement = (query: { sql: string; params: unknown[] }) => d1.prepare(query.sql).bind(...query.params);
   for (const row of planned) {
     const previous = existing.find((item) => item.id === row.id);
-    if (row.availabilityType === "preorder" || previous?.availabilityType === "preorder") throw new ValidationError("Manage preorder allocations in Incoming preorders; CSV inventory cannot create or overwrite them.");
+    if (row.availabilityType === "preorder" || previous?.availabilityType === "preorder") throw new ValidationError("Create preorders in the listing form and manage customer commitments in Preorders; CSV inventory cannot create or overwrite them.");
     const payload = { ...row, manufacturerSku: row.productNumber };
     const resolved = await prepareListingCatalog(payload, seller[0].ownerUserId, previous?.catalogProductId);
     const key = resolved.model.skuKey ? JSON.stringify([resolved.model.manufacturerKey, resolved.model.skuKey]) : resolved.model.id;

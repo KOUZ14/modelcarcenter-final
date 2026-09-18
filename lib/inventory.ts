@@ -88,7 +88,7 @@ export async function loadAuthoritativeCartItems(items: RequestedCartItem[], all
     const quantity = consolidated.get(row.id)!;
     if ((!allocatedPreorder && (row.status !== "active" || row.sellerStatus !== "active")) || (allocatedPreorder && !["active", "suspended"].includes(row.sellerStatus))) throw new Error(`${row.title} is no longer available.`);
     if (row.availabilityType === "preorder" && !allocatedPreorder)
-      throw new Error(`${row.title} requires an unpaid reservation. Pay through My Preorders after inspected stock is allocated.`);
+      throw new Error(`${row.title} is a preorder. Start from its listing page, then pay any remaining balance through My Preorders when stock is ready.`);
     if (!allocatedPreorder && row.inventoryQuantity - row.reservedQuantity < quantity) throw new Error(`Only ${Math.max(0, row.inventoryQuantity - row.reservedQuantity)} of ${row.title} are currently available.`);
     if (!row.sellerStripeAccountId || !row.stripeChargesEnabled || !row.stripePayoutsEnabled) {
       throw new Error(`${row.sellerName} is not ready to accept marketplace payments.`);

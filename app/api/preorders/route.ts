@@ -9,6 +9,7 @@ import { requireAdultConsent } from "@/lib/form-consent";
 import { checkoutReturnCookie } from "@/lib/checkout-return";
 import { deliverPreorderNotices, processPreorders } from "@/lib/preorder-maintenance";
 import { joinPreorderWaitlist, buyerWaitlist, cancelWaitlist, inviteNextWaitlisted } from "@/lib/preorder-waitlist";
+import { startPreorderDeposit, refundPreorderDeposit } from "@/lib/preorder-deposits";
 
 export const dynamic = "force-dynamic";
 export async function GET(request:Request) {
@@ -21,7 +22,8 @@ export async function GET(request:Request) {
       const [batches,policies,access,exceptions,notices,sellerOptions]=await Promise.all([
         db.prepare("SELECT b.*,p.title,s.store_name FROM incoming_batches b JOIN products p ON p.id=b.listing_id JOIN sellers s ON s.id=p.seller_id ORDER BY b.created_at DESC LIMIT 200").all(),
         db.prepare("SELECT * FROM preorder_policies").all(),db.prepare("SELECT * FROM preorder_seller_access").all(),
-        db.prepare("SELECT * FROM preorder_payment_ledger WHERE status='recovery' AND refund_status!='succeeded' ORDER BY updated_at DESC LIMIT 100").all(),
+        db.prepare(`SELECT id,reservation_id,refund_status,error FROM preorder_payment_ledger WHERE status='recovery' AND refund_status!='succeeded'
+          UNION ALL SELECT id,order_id AS reservation_id,status AS refund_status,error FROM preorder_refund_requests WHERE status!='succeeded' LIMIT 100`).all(),
         db.prepare("SELECT id,kind,delivery_status,attempts,created_at FROM preorder_events WHERE recipient IS NOT NULL AND delivery_status != 'sent' ORDER BY created_at LIMIT 100").all(),
         db.prepare("SELECT id,store_name,status FROM sellers WHERE seller_type='professional' ORDER BY store_name").all(),
       ]);
@@ -48,12 +50,14 @@ export async function POST(request:Request) {
     const user=account.user;
     let result:unknown={ok:true};
     if(action==="create_batch") result=await createIncomingBatch(user.id,input);
+    else if(action==="refund_deposit" && input.view==="seller") await refundPreorderDeposit(user.id,required(input.id,"preorder",100),required(input.reason,"refund reason"));
     else if(action==="invite_next" && input.view==="seller") result=await inviteNextWaitlisted(user.id,required(input.batchId,"batch",100));
     else if(input.view==="seller") await changeBatch(user.id,required(input.batchId,"batch",100),input);
     else if(action==="waitlist") { requireAdultConsent(input.adultConsent); result=await joinPreorderWaitlist(user,required(input.batchId,"batch",100),input.quantity); }
     else if(action==="cancel_waitlist") await cancelWaitlist(user.id,required(input.id,"waitlist ID",100));
     else if(action==="hold") { requireAdultConsent(input.adultConsent); result=await holdPreorder(user,input); }
     else if(action==="confirm") result=await confirmPreorder(user.id,required(input.id,"reservation",100),input.acceptedTerms);
+    else if(action==="deposit") { requireAdultConsent(input.adultConsent); result=await startPreorderDeposit(user,required(input.id,"reservation",100),input.acceptedTerms); }
     else if(action==="close_checkout") await closePreorderPayment(user.id,required(input.id,"reservation",100));
     else if(action==="quote") result=await preorderShippingQuote(user,required(input.id,"reservation",100),input.destination);
     else if(action==="pay") {

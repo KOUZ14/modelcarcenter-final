@@ -1,5 +1,5 @@
 import { getD1 } from "@/db";
-import { ownedBatch, publicPreorderOffers, holdPreorder, eventStatement, cancelPreorder } from "./preorders";
+import { ownedBatch, publicPreorderOffers, holdPreorder, eventStatement, cancelPreorder, termsOf } from "./preorders";
 import { whole } from "./preorder-rules";
 import { ValidationError } from "./validation";
 
@@ -29,7 +29,7 @@ export async function inviteNextWaitlisted(userId:string,batchId:string) {
   const hold=await holdPreorder({id:next.buyerId,email:next.email},{batchId,quantity:next.quantity,revision:batch.revision,idempotencyKey:`waitlist-${next.id}`},48*60);
   await db.batch([
     db.prepare("UPDATE preorder_waitlist SET status='invited',reservation_id=? WHERE id=? AND status='waiting'").bind(hold.id,next.id),
-    eventStatement({id:`waitlist-invite-${next.id}`,batchId,reservationId:hold.id,actor:userId,kind:"waitlist_invitation",recipient:next.email,detail:{message:"A reservation slot is held for 48 hours. Review the current seller, product, full price and terms in My Preorders and explicitly accept to reserve. No payment is charged. Without acceptance this invitation expires.",responseDeadline:hold.holdExpiresAt}}),
+    eventStatement({id:`waitlist-invite-${next.id}`,batchId,reservationId:hold.id,actor:userId,kind:"waitlist_invitation",recipient:next.email,detail:{message:termsOf(hold).paymentModel === "deposit_10" ? "A preorder slot is held for 48 hours. Review the price and cancellation terms in My Preorders and pay the 10% deposit to confirm. The slot is released if checkout expires or no deposit is paid." : "A reservation slot is held for 48 hours. Review the current seller, product, full price and terms in My Preorders and explicitly accept to reserve. No payment is charged. Without acceptance this invitation expires.",responseDeadline:hold.holdExpiresAt}}),
   ]);
   return {invited:true};
 }

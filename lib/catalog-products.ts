@@ -99,22 +99,23 @@ export function listingPayloadWithCatalog(payload: Record<string, unknown>, mode
 export async function persistCatalogListing(
   prepared: Awaited<ReturnType<typeof prepareListingCatalog>>,
   listingWrite: (model: CatalogModel) => { sql: string; params: unknown[] },
+  additionalWrites?: (model: CatalogModel) => Array<{ sql: string; params: unknown[] }>,
 ) {
   const d1 = getD1();
   const statement = (query: { sql: string; params: unknown[] }) => d1.prepare(query.sql).bind(...query.params);
-  const write = (model: CatalogModel) => statement(listingWrite(model));
-  if (!prepared.isNew) { await write(prepared.model).run(); return prepared.model; }
+  const writes = (model: CatalogModel) => [statement(listingWrite(model)), ...(additionalWrites?.(model) ?? []).map(statement)];
+  if (!prepared.isNew) { await d1.batch(writes(prepared.model)); return prepared.model; }
   const model = prepared.model;
   const create = getDb().insert(catalogProducts).values({ ...model, catalogStatus: "unverified", createdByUserId: prepared.createdByUserId }).toSQL();
   try {
-    await d1.batch([statement(create), write(model)]);
+    await d1.batch([statement(create), ...writes(model)]);
     return model;
   } catch (error) {
     const message = String(error instanceof Error ? `${error.message} ${error.cause ?? ""}` : error);
     if (!message.includes("UNIQUE constraint failed") || (!message.includes("catalog_products.") && !message.includes("catalog_sku_identity_unique"))) throw error;
     const winner = await exactCatalogMatch(model);
     if (!winner) throw error;
-    await write(winner).run();
+    await d1.batch(writes(winner));
     return winner;
   }
 }

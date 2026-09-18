@@ -24,6 +24,7 @@ type EligibleOrder = {
   sellerProceedsCents: number;
   sellerTransferAmountCents: number;
   sellerTransferReversedCents: number;
+  preorderDepositCents?: number;
 };
 
 type TransferredOrder = {
@@ -70,7 +71,8 @@ export async function processEligibleSellerTransfers(input: {
         o.total_cents AS totalCents, o.refunded_amount_cents AS refundedAmountCents,
         o.seller_proceeds_cents AS sellerProceedsCents,
         o.seller_transfer_amount_cents AS sellerTransferAmountCents,
-        o.seller_transfer_reversed_cents AS sellerTransferReversedCents
+        o.seller_transfer_reversed_cents AS sellerTransferReversedCents,
+        o.preorder_deposit_cents AS preorderDepositCents
        FROM orders o
        INNER JOIN sellers s ON s.id = o.seller_id
        WHERE o.payment_flow = 'separate'
@@ -88,7 +90,8 @@ export async function processEligibleSellerTransfers(input: {
            o.seller_transfer_status IN ('pending', 'failed') OR
            (o.seller_transfer_status = 'processing' AND o.seller_transfer_processing_at < ?)
          )
-          AND NOT EXISTS (
+           AND NOT EXISTS (SELECT 1 FROM preorder_refund_requests pr WHERE pr.order_id=o.id AND pr.status IN ('pending','failed'))
+           AND NOT EXISTS (
             SELECT 1 FROM resolution_cases rc
             WHERE rc.order_id = o.id
               AND rc.status NOT IN ('resolved', 'closed', 'denied')
@@ -138,6 +141,7 @@ export async function processEligibleSellerTransfers(input: {
              seller_transfer_status IN ('pending', 'failed') OR
              (seller_transfer_status = 'processing' AND seller_transfer_processing_at < ?)
            )
+            AND NOT EXISTS (SELECT 1 FROM preorder_refund_requests pr WHERE pr.order_id=orders.id AND pr.status IN ('pending','failed'))
             AND NOT EXISTS (
               SELECT 1 FROM resolution_cases rc
               WHERE rc.order_id = orders.id
@@ -184,6 +188,7 @@ export async function processEligibleSellerTransfers(input: {
         transferGroup: order.stripeTransferGroup,
         amountCents: releaseAmountCents,
         currency: order.currency,
+        ...(order.preorderDepositCents ? {combinedPayments:true} : {}),
       });
       await input.database
         .prepare(
@@ -274,7 +279,7 @@ async function reconcileProcessingFees(
   if (!gateway.retrieveSession) return;
   const pending = await database.prepare(`SELECT id, stripe_checkout_session_id AS sessionId,
       total_cents AS totalCents, tax_cents AS taxCents, currency,
-      platform_fee_cents AS platformFeeCents, stripe_charge_id AS chargeId, checkout_group_id AS checkoutGroupId
+      platform_fee_cents AS platformFeeCents, stripe_charge_id AS chargeId, checkout_group_id AS checkoutGroupId,preorder_deposit_cents AS preorderDepositCents
     FROM orders WHERE processing_fee_payer = 'seller'
       AND payment_flow = 'separate' AND payment_processing_fee_cents IS NULL
       AND seller_proceeds_cents IS NULL AND stripe_transfer_id IS NULL
@@ -282,7 +287,7 @@ async function reconcileProcessingFees(
       AND payment_status IN ('paid', 'partially_refunded', 'refunded')
     ORDER BY updated_at, created_at LIMIT ?`).bind(limit).all<{
       id: string; sessionId: string; totalCents: number; taxCents: number;
-      currency: string; platformFeeCents: number; chargeId: string | null; checkoutGroupId: string | null;
+      currency: string; platformFeeCents: number; chargeId: string | null; checkoutGroupId: string | null; preorderDepositCents:number;
     }>();
   for (const order of pending.results ?? []) {
     try {
@@ -293,6 +298,17 @@ async function reconcileProcessingFees(
       let allocation: { totalCents: number; taxCents: number; paymentProcessingFeeCents: number | null } | undefined;
       let expectedTotal = order.totalCents;
       let expectedTax = order.taxCents;
+      if(order.preorderDepositCents) {
+        const deposit=await database.prepare("SELECT l.session_id sessionId,l.tax_cents taxCents FROM preorder_payment_ledger l JOIN preorder_reservations r ON r.id=l.reservation_id WHERE r.order_id=? AND l.kind='deposit'").bind(order.id).first<{sessionId:string;taxCents:number}>();
+        if(!deposit) throw new Error("Preorder deposit settlement is missing.");
+        const depositSession=await gateway.retrieveSession(deposit.sessionId);
+        const depositFee=stripeSettlementDetails(depositSession,0).paymentProcessingFeeCents;
+        const balanceFee=stripeSettlementDetails(session,0).paymentProcessingFeeCents;
+        if(depositSession.payment_status !== "paid" || depositSession.amount_total !== order.preorderDepositCents || depositSession.currency !== order.currency || depositFee == null || balanceFee == null) throw new Error("Preorder payment fees are not ready.");
+        expectedTotal-=order.preorderDepositCents;
+        expectedTax-=deposit.taxCents;
+        allocation={totalCents:order.totalCents,taxCents:order.taxCents,paymentProcessingFeeCents:depositFee+balanceFee};
+      }
       if (order.checkoutGroupId) {
         const siblings = await database.prepare("SELECT id, total_cents AS totalCents, tax_cents AS taxCents FROM orders WHERE checkout_group_id = ? ORDER BY checkout_reservation_id")
           .bind(order.checkoutGroupId).all<{ id: string; totalCents: number; taxCents: number }>();

@@ -12,15 +12,22 @@ import { ValidationError } from "./validation";
 import { config } from "./config";
 import { sendPaidOrderEmails } from "./email";
 import type { preparePaidOrder } from "./orders";
+import { paidPreorderDeposit, reverseRetainedDeposit } from "./preorder-deposits";
 
 const now = () => new Date().toISOString();
 export async function preorderPaymentCart(userId: string, id: string) {
   const r = await buyerReservation(userId,id), terms = termsOf(r);
   const [batch] = await getDb().select().from(incomingBatches).where(eq(incomingBatches.id,r.batchId)).limit(1);
-  if (r.status !== "awaiting_payment" || r.allocatedQuantity !== r.quantity || r.consentState !== "accepted" || !r.paymentDeadline || r.paymentDeadline <= now() || r.acceptedRevision !== batch.revision || batch.supplyState === "cancelled" || !batch.dispatchEnd || batch.dispatchEnd <= now()) throw new ValidationError("Payment is not available. Review your allocation, deadline and any required consent in My Preorders.");
+  if (r.status !== "awaiting_payment" || r.allocatedQuantity !== r.quantity || r.consentState !== "accepted" || !r.paymentDeadline || r.paymentDeadline <= now() || r.acceptedRevision !== batch.revision || batch.supplyState === "cancelled" || !batch.dispatchEnd || (terms.paymentModel !== "deposit_10" && batch.dispatchEnd <= now())) throw new ValidationError("Payment is not available. Review your allocation, deadline and any required consent in My Preorders.");
+  const deposit = terms.paymentModel === "deposit_10" ? await paidPreorderDeposit(r.id) : undefined;
+  if (terms.paymentModel === "deposit_10") {
+    const saved = await getD1().prepare("SELECT dispute_status disputeStatus FROM preorder_deposit_checkouts WHERE reservation_id=?").bind(r.id).first<{disputeStatus:string}>();
+    if (!deposit || deposit.status !== "paid" || deposit.refundStatus !== "not_required" || deposit.refundedCents > 0 || !saved || !["none","won","warning_closed"].includes(saved.disputeStatus)) throw new ValidationError("The deposit needs to be settled before the remaining balance can be paid.");
+    if (!deposit.chargeId || (await retrieveChargeRefunds(deposit.chargeId)).some(f => !["failed","canceled"].includes(f.status))) throw new ValidationError("This deposit is being refunded. Refresh your preorder before continuing.");
+  }
   const rows = await loadAuthoritativeCartItems([{productId:terms.listingId,quantity:r.allocatedQuantity}],true);
   const cart = sellerCartFromRows(rows.map(row=>({...row,priceCents:terms.priceCents,currency:terms.currency,title:terms.title,description:`${terms.variant}. ${terms.contents}`,scale:terms.scale,manufacturer:terms.manufacturer,sellerSku:terms.sellerSku,imageUrl:terms.imageUrl,releaseDate:null})));
-  return { r,cart,terms };
+  return { r,cart,terms,deposit };
 }
 export async function preorderShippingQuote(user:{id:string;email:string}, id:string, destination:unknown) {
   const {cart} = await preorderPaymentCart(user.id,id);
@@ -38,7 +45,7 @@ export async function closePreorderPayment(userId:string,id:string) {
   await releaseReservation(r.checkoutReservationId);
 }
 export async function startPreorderPayment(user:{id:string;email:string}, id:string, input:Record<string,unknown>) {
-  const {r,cart:loaded,terms} = await preorderPaymentCart(user.id,id);
+  const {r,cart:loaded,terms,deposit} = await preorderPaymentCart(user.id,id);
   if (input.acceptedFinalQuote !== true || input.policyVersion !== POLICY_VERSION) throw new ValidationError("Accept the final shipping quote and current checkout policies. Tax and the final total are accepted on the payment page.");
   if (r.checkoutReservationId) {
     const existing = await getD1().prepare("SELECT stripe_checkout_session_id sessionId FROM checkout_reservations WHERE id=? AND status='pending'").bind(r.checkoutReservationId).first<{sessionId:string|null}>();
@@ -71,7 +78,8 @@ export async function startPreorderPayment(user:{id:string;email:string}, id:str
   try {
     const returnToken = crypto.randomUUID();
     const session = await createCheckoutSession({reservationId:checkout.reservationId,sellerId:cart.seller.sellerId,sellerStripeAccountId:cart.seller.sellerStripeAccountId!,items:cart.items,
-      shippingCents:shipping.amountCents,marketplaceFeeBps:cart.fee.marketplaceFeeBps,platformFeeCents:cart.totals.platformFeeCents,expiresAt:expires,buyerUserId:user.id,buyerEmail:user.email,policyVersion:POLICY_VERSION,deliveryAddress:parseCheckoutShippingAddress(JSON.parse(shipping.quotedAddress!)),returnToken});
+      shippingCents:shipping.amountCents,marketplaceFeeBps:cart.fee.marketplaceFeeBps,platformFeeCents:cart.totals.platformFeeCents,expiresAt:expires,buyerUserId:user.id,buyerEmail:user.email,policyVersion:POLICY_VERSION,deliveryAddress:parseCheckoutShippingAddress(JSON.parse(shipping.quotedAddress!)),returnToken,
+      ...(deposit ? {items:cart.items.map(item=>({...item,priceCents:item.priceCents-terms.depositUnitCents!,title:`Preorder balance: ${item.title}`}))} : {})});
     sessionId=session.id;
     if (!session.url) throw new Error("Payment provider did not return a checkout URL.");
     await attachStripeSession(checkout.reservationId,session.id);
@@ -92,7 +100,7 @@ export async function preorderForCheckout(checkoutId:string) {
 function payable(row:NonNullable<Awaited<ReturnType<typeof preorderForCheckout>>>) {
   const r=row.reservation;
   return r.status === "awaiting_payment" && r.consentState === "accepted" && r.allocatedQuantity === r.quantity && r.paymentDeadline! > now()
-    && r.checkoutReservationId === row.checkout.checkoutId && r.acceptedRevision === row.batch.revision && row.batch.supplyState !== "cancelled" && row.batch.dispatchEnd! > now();
+    && r.checkoutReservationId === row.checkout.checkoutId && r.acceptedRevision === row.batch.revision && row.batch.supplyState !== "cancelled" && (termsOf(r).paymentModel === "deposit_10" || row.batch.dispatchEnd! > now());
 }
 function paymentRefs(session:StripeCheckoutSession) {
   const intent = typeof session.payment_intent === "string" ? session.payment_intent : session.payment_intent?.id;
@@ -109,30 +117,47 @@ export async function finalizePreorderPayment(event:{id:string;type:string}, ses
   const cr = await db.prepare("SELECT stripe_checkout_session_id sessionId,subtotal_cents subtotal,shipping_cents shipping FROM checkout_reservations WHERE id=?").bind(checkout.checkoutId).first<{sessionId:string|null;subtotal:number;shipping:number}>();
   if (!cr || (cr.sessionId && cr.sessionId !== session.id) || session.currency !== termsOf(r).currency) throw new Error("Preorder payment does not match the checkout.");
   const quote=JSON.parse(checkout.acceptedQuote);
-  const expectedTotal=cr.subtotal+cr.shipping+(quote.taxBehavior==="inclusive"?0:session.total_details?.amount_tax??0);
+  const deposit = termsOf(r).paymentModel === "deposit_10" ? await paidPreorderDeposit(r.id) : undefined;
+  if (termsOf(r).paymentModel === "deposit_10" && (!deposit || deposit.status !== "paid" || deposit.refundStatus !== "not_required" || deposit.refundedCents > 0)) return recordRecovery(event,session,r.id);
+  if (deposit && (!deposit.chargeId || (await retrieveChargeRefunds(deposit.chargeId)).some(f => !["failed","canceled"].includes(f.status)))) return recordRecovery(event,session,r.id);
+  if (deposit && !await depositCanComplete(r.id)) return recordRecovery(event,session,r.id);
+  const expectedTotal=cr.subtotal-(deposit?.subtotalCents ?? 0)+cr.shipping+(quote.taxBehavior==="inclusive"?0:session.total_details?.amount_tax??0);
   if(refs.amount!==expectedTotal) return recordRecovery(event,session,r.id);
   if (!payable(row)) return recordRecovery(event,session,r.id);
-  const planned = await plan(session,checkout.checkoutId);
+  const charge=typeof session.payment_intent === "object" && session.payment_intent && typeof session.payment_intent.latest_charge === "object" ? session.payment_intent.latest_charge : null;
+  const fee=charge && typeof charge.balance_transaction === "object" && charge.balance_transaction ? charge.balance_transaction.fee : null;
+  const planned = await plan(session,checkout.checkoutId,deposit ? {totalCents:refs.amount+deposit.amountCents,taxCents:(session.total_details?.amount_tax ?? 0)+deposit.taxCents,paymentProcessingFeeCents:fee != null && deposit.processingFeeCents != null ? fee+deposit.processingFeeCents : null} : undefined);
   try {
     await db.batch([
       db.prepare(`UPDATE preorder_reservations SET status=CASE WHEN status='awaiting_payment' AND consent_state='accepted'
         AND allocated_quantity=quantity AND payment_deadline > ? AND checkout_reservation_id=?
         AND accepted_revision=(SELECT revision FROM incoming_batches WHERE id=batch_id)
-        AND EXISTS (SELECT 1 FROM incoming_batches b WHERE b.id=batch_id AND b.supply_state != 'cancelled' AND b.dispatch_end > ?)
+        AND EXISTS (SELECT 1 FROM incoming_batches b WHERE b.id=batch_id AND b.supply_state != 'cancelled' AND (json_extract(preorder_reservations.terms,'$.paymentModel')='deposit_10' OR b.dispatch_end > ?))
+        AND (json_extract(terms,'$.paymentModel')!='deposit_10' OR EXISTS (
+          SELECT 1 FROM preorder_payment_ledger l JOIN preorder_deposit_checkouts d ON d.reservation_id=l.reservation_id
+          WHERE l.reservation_id=preorder_reservations.id AND l.kind='deposit' AND l.status='paid'
+          AND l.refund_status='not_required' AND l.refunded_cents=0 AND d.dispute_status IN ('none','won','warning_closed')))
         THEN status ELSE NULL END WHERE id=?`).bind(now(),checkout.checkoutId,now(),r.id),
       ...planned.statements,
+      db.prepare("UPDATE orders SET preorder_deposit_cents=? WHERE id=?").bind(deposit?.amountCents ?? 0,planned.orderId),
       db.prepare("UPDATE preorder_reservations SET status='converted',order_id=?,actor='stripe',updated_at=? WHERE id=?").bind(planned.orderId,now(),r.id),
-      db.prepare("INSERT INTO preorder_payment_ledger (id,reservation_id,session_id,payment_intent_id,charge_id,amount_cents,currency,status) VALUES (?,?,?,?,?,?,?,'paid')").bind(crypto.randomUUID(),r.id,session.id,refs.intent,refs.charge,refs.amount,refs.currency),
+      db.prepare("INSERT INTO preorder_payment_ledger (id,reservation_id,session_id,payment_intent_id,charge_id,amount_cents,currency,status,subtotal_cents,tax_cents,processing_fee_cents) VALUES (?,?,?,?,?,?,?,'paid',?,?,?)").bind(crypto.randomUUID(),r.id,session.id,refs.intent,refs.charge,refs.amount,refs.currency,cr.subtotal-(deposit?.subtotalCents ?? 0),session.total_details?.amount_tax ?? 0,fee),
       db.prepare("INSERT INTO stripe_events (id,type) VALUES (?,?)").bind(event.id,event.type),
     ]);
   } catch (error) {
     const fresh=await preorderForCheckout(checkout.checkoutId);
     if (fresh?.reservation.status === "converted" && fresh.reservation.checkoutReservationId === checkout.checkoutId) return {duplicateOrder:true};
     if (fresh && !payable(fresh)) return recordRecovery(event,session,r.id);
+    if (deposit && !await depositCanComplete(r.id)) return recordRecovery(event,session,r.id);
     throw error;
   }
   await sendPaidOrderEmails(planned.email);
   return {orderId:planned.orderId,orderNumber:planned.orderNumber};
+}
+async function depositCanComplete(id:string) {
+  return Boolean(await getD1().prepare(`SELECT 1 FROM preorder_payment_ledger l JOIN preorder_deposit_checkouts d ON d.reservation_id=l.reservation_id
+    WHERE l.reservation_id=? AND l.kind='deposit' AND l.status='paid' AND l.refund_status='not_required'
+    AND l.refunded_cents=0 AND d.dispute_status IN ('none','won','warning_closed')`).bind(id).first());
 }
 async function recordRecovery(event:{id:string;type:string},session:StripeCheckoutSession,reservationId:string) {
   const refs=paymentRefs(session),db=getD1();
@@ -148,7 +173,7 @@ async function recordRecovery(event:{id:string;type:string},session:StripeChecko
 export async function cancelPaidPreorders(batchId:string,actor:string,reason:string) {
   await getD1().batch([
     getD1().prepare(`UPDATE preorder_payment_ledger SET status='recovery',refund_status='required',updated_at=? WHERE reservation_id IN (
-      SELECT r.id FROM preorder_reservations r JOIN orders o ON o.id=r.order_id WHERE r.batch_id=? AND o.fulfillment_status IN ('unfulfilled','processing') AND o.payment_status IN ('paid','partially_refunded')) AND refund_status='not_required'`).bind(now(),batchId),
+      SELECT r.id FROM preorder_reservations r LEFT JOIN orders o ON o.id=r.order_id WHERE r.batch_id=? AND (r.order_id IS NULL OR (o.fulfillment_status IN ('unfulfilled','processing') AND o.payment_status IN ('paid','partially_refunded')))) AND refund_status='not_required'`).bind(now(),batchId),
     getD1().prepare(`UPDATE orders SET fulfillment_status='cancelled',seller_transfer_status=CASE WHEN stripe_transfer_id IS NULL THEN 'cancelled' ELSE seller_transfer_status END,updated_at=?
       WHERE id IN (SELECT order_id FROM preorder_reservations WHERE batch_id=?) AND fulfillment_status IN ('unfulfilled','processing')`).bind(now(),batchId),
     eventStatement({batchId,actor,kind:"paid_cancellation",detail:{reason,message:"Unshipped orders cancelled; refunds tracked separately. Shipped orders use the Resolution Center."}}),
@@ -169,6 +194,11 @@ export async function recoverPreorderRefunds() {
       const balance=await reconcilePreorderRefund(l,r);
       if (balance.status!=="required") continue;
       const [order] = r.orderId ? await getDb().select().from(orders).where(eq(orders.id,r.orderId)).limit(1) : [];
+      if (order?.preorderDepositCents) {
+        const {createPreorderOrderRefund}=await import("./preorder-order-refunds");
+        await createPreorderOrderRefund({orderId:order.id,totalCents:order.totalCents,refundedAmountCents:order.refundedAmountCents,paymentIntentId:order.stripePaymentIntentId!,paymentFlow:"separate"});
+        continue;
+      }
       const matchesOrder=order?.stripeCheckoutSessionId===l.sessionId;
       const refund=await createOrderRefund({orderId:matchesOrder?order.id:`preorder-${l.sessionId}`,paymentIntentId:l.paymentIntentId,chargeId:l.chargeId,paymentFlow:"separate",totalCents:matchesOrder?order.totalCents:l.amountCents,
         refundedAmountCents:balance.refundedCents,stripeTransferId:matchesOrder?order.stripeTransferId:null,sellerTransferAmountCents:matchesOrder?order.sellerTransferAmountCents:0,sellerTransferReversedCents:matchesOrder?order.sellerTransferReversedCents:0,sellerProceedsCents:matchesOrder?order.sellerProceedsCents:null});
@@ -191,8 +221,10 @@ async function reconcilePreorderRefund(l:typeof preorderPaymentLedger.$inferSele
   const failed=last?.status==="failed"||last?.status==="canceled";
   const status=refundedCents>=l.amountCents?"succeeded":pendingCents>0?"pending":failed?last.status:"required";
   const error=failed?"Refund failed or was cancelled at the provider; operations review required":null;
+  if (l.kind === "deposit" && !r.orderId && refundedCents+pendingCents>=l.amountCents) await reverseRetainedDeposit(r.id);
   await getD1().batch([
-    getD1().prepare("UPDATE preorder_payment_ledger SET refund_status=?,error=?,updated_at=? WHERE id=? AND (refund_status!='succeeded' OR ?='succeeded')").bind(status,error,now(),l.id,status),
+    getD1().prepare("UPDATE preorder_payment_ledger SET refunded_cents=?,refund_status=?,error=?,updated_at=? WHERE id=? AND (refund_status!='succeeded' OR ?='succeeded')").bind(refundedCents,status,error,now(),l.id,status),
+    getD1().prepare("UPDATE preorder_deposit_checkouts SET status=? WHERE reservation_id=? AND ?='deposit'").bind(status === "succeeded" ? "refunded" : "refund_pending",r.id,l.kind),
     eventStatement({id:`refund-balance-${l.id}-${status}-${refundedCents}-${pendingCents}`,reservationId:r.id,batchId:r.batchId,actor:"system",kind:"refund_update",recipient:r.contactEmail,
       detail:{status,amountCents:l.amountCents,refundedCents,pendingCents,outstandingCents:Math.max(0,l.amountCents-refundedCents),currency:l.currency,message:status==="required"?"A refund balance remains due and will be retried.":undefined}}),
   ]);

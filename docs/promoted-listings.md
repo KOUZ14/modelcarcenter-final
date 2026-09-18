@@ -1,6 +1,6 @@
 # Promoted listings
 
-Professional sellers use `/store?view=marketing&filter=promoted`; an eligible inventory row also has a Promote link. Administrators use `/admin/promotions` for pricing, pilot access, delivery controls, refunds, payment recovery, and audit history. Purchase terms are at `/promotion-terms`.
+Professional sellers use `/store?view=marketing&filter=promoted`. The screen shows searchable inventory with photos, SKU, price and available quantity. Choose **Promote** on a listing, accept the displayed price and terms, and pay through Stripe. Active promotion status and pause/resume/end actions stay on the inventory row. Administrators use `/admin/promotions` for pricing, access, delivery controls, refunds and payment recovery. Purchase terms are at `/promotion-terms`.
 
 ## Price and launch controls
 
@@ -13,10 +13,10 @@ These are reference points, not directly comparable weekly placement prices. MCC
 
 Apply `drizzle/0028_promoted_listings.sql` together with its prerequisite migrations through the established migration/deployment workflow. Defaults come from `lib/promotion-rules.ts` until an administrator saves the singleton settings record:
 
-- New purchases: disabled.
+- New purchases: enabled for eligible stores with payment setup complete. Existing administrator settings are preserved.
 - Serving existing paid campaigns: enabled.
 - Price: 299 cents; USD only in this version.
-- Service tax treatment: unconfigured, which blocks purchases. Select either the appropriate no-collection setting or Stripe automatic tax with an appropriate service tax code. These are configuration choices, not an application determination of tax obligations.
+- Service tax treatment: Stripe automatic tax using `txcd_10701000`, [Website Advertising](https://docs.stripe.com/tax/tax-codes). Stripe applies the account's configured tax registrations. Administrators can change the tax setting when appropriate; unconfigured treatment blocks purchases.
 - Pilot seller IDs: configurable allowlist; blank permits all eligible professional stores once purchases are enabled.
 
 Settings changes require a reason and are audited. Disabling purchases does not stop existing campaigns. Disabling serving stops placements and logs the settings change so operations can identify the outage and issue service adjustments. The original campaign price, duration, tax configuration, and terms version remain frozen when settings change.
@@ -27,7 +27,7 @@ The feature uses existing Stripe platform credentials and `BETTER_AUTH_SECRET` f
 
 Listings must belong to active professional stores with accepted current seller terms, a connected Stripe account with charges/payouts enabled, an active in-stock listing, remaining available units after reservations, and a primary image. Preorders and collector listings cannot be promoted. Check eligibility at purchase, payment activation, serving, and measurement time.
 
-The first marketplace results page can show two sponsored cards above its organic grid. Search and filters use the same catalog predicates. Seller-specific views and later pages show no sponsored section. Listings already present in the organic page are excluded; organic counts, sorting, and pagination are unchanged. When every eligible listing is already visible organically, the sponsored section is empty. Explain this limitation when recruiting pilot stores.
+The first marketplace results page can show two sponsored cards above its regular grid. Search and filters use the same catalog predicates. Seller-specific views and later pages show no sponsored section. Listings already present on the first page remain eligible for promotion; the client removes the matching regular card while its sponsored card is visible. Regular search counts, ordering and pagination stay unchanged. Expired placement tokens remove the sponsored card and restore the regular card.
 
 Selection rotates by minute, chooses distinct sellers first, and then chooses listings within each selected seller. More purchased campaigns do not buy multiple slots per response. No equal-impression guarantee is made. Self-views by signed-in store owners and recognizable automated clients are excluded where identifiable.
 
@@ -57,6 +57,6 @@ Admin financial reporting separates collected amounts, original tax, confirmed r
 
 ## Verification
 
-`tests/promotions.test.mjs` runs real generated SQLite migrations with mocked Stripe calls and exercises ownership, eligibility, checkout retry, duplicate payment events, expiry, pauses, refunds, disputes, rotation, filters, organic exclusion, event signatures, event deduplication, and seller-scoped reporting. The Worker security fixture includes promotion maintenance. Run the project build, TypeScript, lint, and regression suite before release.
+`tests/promotions.test.mjs` runs real generated SQLite migrations with mocked Stripe calls and exercises ownership, eligibility, checkout retry, duplicate payment events, expiry, pauses, refunds, disputes, rotation, filters, first-page placement, event signatures, event deduplication, and seller-scoped reporting. The Worker security fixture includes promotion maintenance. Run the project build, TypeScript, lint, and regression suite before release.
 
 No live seller payment, refund, or ad campaign is created by these tests. Target-account configuration and real campaign delivery must be verified during the controlled pilot.

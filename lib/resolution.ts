@@ -31,7 +31,7 @@ import {
   prepareResolutionNotification,
   safelyDeliverResolutionNotifications,
 } from "./resolution-notifications";
-import { createOrderRefund } from "./stripe";
+import { createOrderRefund } from "./preorder-order-refunds";
 import {
   cleanText,
   moneyToCents,

@@ -102,19 +102,19 @@ export async function getSellerPromotions(sellerId: string) {
     COALESCE((SELECT sum(clicks) FROM promotion_daily_metrics WHERE campaign_id=c.id),0) AS clicks,
     (SELECT group_concat(DISTINCT status) FROM promotion_refunds WHERE campaign_id=c.id) AS refund_status
     FROM promotion_campaigns c JOIN promotion_payments p ON p.campaign_id=c.id WHERE c.seller_id=? ORDER BY c.created_at DESC LIMIT 100`).bind(sellerId).all<Record<string, unknown>>();
-  const listings = await db.prepare(`SELECT p.id,p.title,p.status,p.availability_type AS availabilityType,p.seller_id AS sellerId,
+  const listings = await db.prepare(`SELECT p.id,p.title,p.seller_sku AS sku,p.price_cents AS priceCents,p.currency,p.status,p.availability_type AS availabilityType,p.seller_id AS sellerId,
     p.inventory_quantity AS inventoryQuantity,p.reserved_quantity AS reservedQuantity,p.primary_image_url AS primaryImageUrl,
     s.status AS sellerStatus,s.seller_type AS sellerType,s.seller_terms_version AS sellerTermsVersion,s.seller_terms_accepted_at AS sellerTermsAcceptedAt,
     s.stripe_account_id AS sellerStripeAccountId,s.stripe_charges_enabled AS sellerStripeChargesEnabled,s.stripe_payouts_enabled AS sellerStripePayoutsEnabled,
     EXISTS(SELECT 1 FROM promotion_campaigns c WHERE c.product_id=p.id AND (c.status='pending_payment' OR (c.status IN ('active','paused') AND c.ends_at>?))) AS hasCampaign
-    FROM products p JOIN sellers s ON s.id=p.seller_id WHERE p.seller_id=? ORDER BY p.title LIMIT 1000`).bind(now, sellerId).all<PromotionListing & { hasCampaign: number }>();
+    FROM products p JOIN sellers s ON s.id=p.seller_id WHERE p.seller_id=? ORDER BY p.title LIMIT 1000`).bind(now, sellerId).all<PromotionListing & { hasCampaign: number; sku: string; priceCents: number; currency: string }>();
   return { settings: { ...settings, sellerIds: undefined }, pilotEligible: !settings.sellerIds.length || settings.sellerIds.includes(sellerId), termsVersion: PROMOTION_TERMS_VERSION,
     campaigns: (campaigns.results ?? []).map(c => {
       const listing = (listings.results ?? []).find(l => l.id === c.product_id);
       return { ...c, status: ["active", "paused"].includes(String(c.status)) && Number(c.ends_at) <= now ? "expired" : c.status,
         deliveryReason: !settings.servingEnabled ? "Sponsored placements are temporarily stopped." : listing ? promotionIneligibility(listing, POLICY_VERSION) : "Listing unavailable." };
     }),
-    listings: (listings.results ?? []).map(l => ({ id: l.id, title: l.title, imageUrl: l.primaryImageUrl, unavailable: promotionIneligibility(l, POLICY_VERSION) ?? (l.hasCampaign ? "Already has a campaign. Refresh after it ends." : null) })),
+    listings: (listings.results ?? []).map(l => ({ id: l.id, title: l.title, sku: l.sku, priceCents: l.priceCents, currency: l.currency, quantity: Math.max(0,l.inventoryQuantity-l.reservedQuantity), imageUrl: l.primaryImageUrl, unavailable: promotionIneligibility(l, POLICY_VERSION) ?? (l.hasCampaign ? "Already promoted." : null) })),
   };
 }
 

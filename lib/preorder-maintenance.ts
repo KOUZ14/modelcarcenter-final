@@ -8,9 +8,12 @@ import { sendEmail, escapeHtml } from "./email";
 import { config } from "./config";
 import { notifyRestockSubscribers } from "./availability";
 import { formatMoney } from "./format";
+import { recoverPreorderDeposits, settleForfeitedPreorderDeposits } from "./preorder-deposits";
+import { recoverPreorderOrderRefunds } from "./preorder-order-refunds";
 
 export async function processPreorders() {
   const db=getD1(), at=new Date().toISOString();
+  await recoverPreorderDeposits();
   await releaseStaleReservations(50);
   const approaching=await db.prepare(`SELECT b.id,b.revision,b.dispatch_end deadline,p.title,s.contact_email email
     FROM incoming_batches b JOIN products p ON p.id=b.listing_id JOIN sellers s ON s.id=p.seller_id
@@ -27,7 +30,7 @@ export async function processPreorders() {
   await db.prepare(`UPDATE preorder_waitlist SET status=(SELECT CASE WHEN r.status='reserved' THEN 'reserved' ELSE 'expired' END FROM preorder_reservations r WHERE r.id=reservation_id)
     WHERE status='invited' AND reservation_id IN (SELECT id FROM preorder_reservations WHERE status IN ('reserved','cancelled','expired'))`).run();
   const overdue=await db.prepare(`SELECT id FROM incoming_batches WHERE dispatch_end <= ? AND supply_state != 'cancelled'
-    AND EXISTS(SELECT 1 FROM preorder_reservations r WHERE r.batch_id=incoming_batches.id AND r.status IN ('reserved','allocated','awaiting_payment') AND r.consent_state != 'required') LIMIT 30`).bind(at).all<{id:string}>();
+    AND EXISTS(SELECT 1 FROM preorder_reservations r WHERE r.batch_id=incoming_batches.id AND r.status IN ('reserved','allocated','awaiting_payment') AND (json_extract(r.terms,'$.paymentModel')!='deposit_10' OR r.status='reserved') AND r.consent_state != 'required') LIMIT 30`).bind(at).all<{id:string}>();
   for (const row of (overdue.results ?? [])) {
     // No replacement date is invented. An overdue buyer can cancel; keeping the
     // reservation requires a supported revised estimate from the seller.
@@ -35,13 +38,13 @@ export async function processPreorders() {
       db.prepare("UPDATE incoming_batches SET status='closed' WHERE id=?").bind(row.id),
       db.prepare(`UPDATE preorder_reservations SET consent_state='required',reason='dispatch_overdue',actor='system',updated_at=?,
         consent_deadline=strftime('%Y-%m-%dT%H:%M:%fZ',?, '+' || (SELECT delay_response_days FROM preorder_policies WHERE version=json_extract(preorder_reservations.terms,'$.policyVersion')) || ' days')
-        WHERE batch_id=? AND status IN ('reserved','allocated','awaiting_payment') AND consent_state != 'required'`).bind(at,at,row.id),
+        WHERE batch_id=? AND status IN ('reserved','allocated','awaiting_payment') AND (json_extract(terms,'$.paymentModel')!='deposit_10' OR status='reserved') AND consent_state != 'required'`).bind(at,at,row.id),
     ]);
   }
   const reminders=await db.prepare(`SELECT id,contact_email email,payment_deadline deadline FROM preorder_reservations
     WHERE status IN ('allocated','awaiting_payment') AND payment_deadline > ? AND payment_deadline <= ? LIMIT 100`)
     .bind(at,new Date(Date.now()+86400000).toISOString()).all<{id:string;email:string;deadline:string}>();
-  for (const r of (reminders.results ?? [])) await eventStatement({id:`payment-reminder-${r.id}-${r.deadline}`,reservationId:r.id,actor:"system",kind:"payment_reminder",recipient:r.email,detail:{message:"Your allocated stock is held until the exact deadline below. Unpaid reservations expire without a fee.",paymentDeadline:r.deadline}}).run();
+  for (const r of (reminders.results ?? [])) await eventStatement({id:`payment-reminder-${r.id}-${r.deadline}`,reservationId:r.id,actor:"system",kind:"payment_reminder",recipient:r.email,detail:{message:"Your items are held until the deadline below. If you miss the balance deadline, your preorder expires under its accepted deposit and cancellation terms.",paymentDeadline:r.deadline}}).run();
   const batches=await db.prepare("SELECT DISTINCT batch_id id FROM preorder_reservations WHERE status='reserved' AND consent_state='accepted' LIMIT 30").all<{id:string}>();
   for (const b of (batches.results ?? [])) await allocateBatch(b.id,"system");
   const watches = await db.prepare(`SELECT DISTINCT a.product_id id FROM availability_alerts a
@@ -49,6 +52,8 @@ export async function processPreorders() {
     WHERE a.status='active' AND b.status='open' AND b.opens_at <= ? AND b.cutoff_at > ? LIMIT 20`).bind(at,at).all<{id:string}>();
   for (const watch of (watches.results ?? [])) await notifyRestockSubscribers(watch.id);
   await recoverPreorderRefunds();
+  await recoverPreorderOrderRefunds();
+  await settleForfeitedPreorderDeposits();
   return deliverPreorderNotices();
 }
 
@@ -72,7 +77,7 @@ export async function deliverPreorderNotices(limit=40) {
       detail.allocatedQuantity?`Inspected units allocated: ${detail.allocatedQuantity}.`:null,
       terms?`Original dispatch estimate: ${terms.dispatch.label}.`:null,
       batch?`Current dispatch estimate: ${termsOf(batch).dispatch.label}.`:null,
-      detail.consent==="required"||event.kind==="consent_required"?`Choose Keep reservation (when a revised estimate is available) or Cancel by ${detail.consentDeadline??detail.responseDeadline}. No response cancels your unpaid reservation without a fee. Payment is blocked until you consent.`:null,
+      detail.consent==="required"||event.kind==="consent_required"?`Accept the revised estimate or cancel by ${detail.consentDeadline??detail.responseDeadline}. ${terms?.paymentModel === "deposit_10" ? "Cancelling or not responding requests a full deposit refund." : "No response cancels your unpaid reservation without a fee."} Payment is blocked until you consent.`:null,
       detail.paymentDeadline?`Payment deadline: ${detail.paymentDeadline}.`:null,
       event.kind==="refund_update"?`Refund status: ${detail.status}. A pending or failed refund has not completed.`:null,
       detail.refundedCents!=null?`Returned: ${formatMoney(detail.refundedCents,detail.currency)}. Still owed: ${formatMoney(detail.outstandingCents,detail.currency)}. Pending: ${formatMoney(detail.pendingCents,detail.currency)}.`:null,

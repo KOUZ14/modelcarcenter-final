@@ -107,7 +107,8 @@ test("promotion lifecycle, ledger and placements use real migrated SQLite with m
   for (let n = 0; n < 32; n++) run(`INSERT INTO products (id,seller_id,seller_sku,slug,title,description,scale,model_manufacturer,vehicle_make,vehicle_model,condition,price_cents,currency,inventory_quantity,status,availability_type,primary_image_url,created_at,catalog_product_id)
     VALUES (?,?,?,?,?,'Description','1:18','AUTOart','Porsche','911','new',10000,'usd',2,'active','in_stock','https://example.test/car.jpg',?,'model')`, `p-${n}`, n % 2 ? "b" : "a", `sku-${n}`, `listing-${n}`, `Porsche 911 ${n}`, new Date(Date.now() - n * 86_400_000).toISOString());
   const settings = { purchasesEnabled: true, servingEnabled: true, priceCents: 299, taxMode: "none", taxCode: "", sellerIds: "", reason: "Launch test" };
-  assert.equal((await api.getPromotionSettings()).purchasesEnabled, false);
+  assert.equal((await api.getPromotionSettings()).purchasesEnabled, true);
+  assert.equal((await api.getPromotionSettings()).taxCode, 'txcd_10701000');
   await api.savePromotionSettings(settings, "admin");
   const start = async (n, extra = {}) => api.startPromotionPurchase(n % 2 ? "b" : "a", `p-${n}`, extra.key ?? crypto.randomUUID(), PROMOTION_TERMS_VERSION);
   const pay = async result => { const s = [...sessions.values()].find(s => s.metadata.campaign_id === result.campaignId); s.payment_status = "paid"; s.status = "complete"; await api.synchronizePromotionSession(result.campaignId, s); return s; };
@@ -134,11 +135,13 @@ test("promotion lifecycle, ledger and placements use real migrated SQLite with m
     assert.equal(row("SELECT count(*) n FROM orders").n, 0);
     assert.equal(row("SELECT count(*) n FROM checkout_reservations").n, 0);
   });
-  await t.test("pause/resume keep expiry; placements obey filters and organic exclusions", async () => {
+  await t.test("pause/resume keep expiry; placements obey filters and can promote first-page listings", async () => {
     const second = await start(25); await pay(second);
     const firstPage = await start(2); await pay(firstPage);
     const placements = await api.getPromotionPlacements({}, null);
-    assert.deepEqual(new Set(placements.map(p => p.product.id)), new Set(["p-24", "p-25"]));
+    assert.equal(placements.length,2);assert.equal(new Set(placements.map(p=>p.product.sellerId)).size,2);
+    const rotations=await Promise.all(Array.from({length:20},(_,n)=>api.getPromotionPlacements({},null,Date.now()+n*60000)));
+    assert.ok(rotations.some(rows=>rows.some(p=>p.product.id==='p-2')),'A listing on the first organic page still receives paid placement');
     assert.equal((await api.getPromotionPlacements({ scale: "1:64" }, null)).length, 0);
     assert.equal((await api.getPromotionPlacements({ page: 2 }, null)).length, 0);
     assert.equal((await api.getPromotionPlacements({ seller: "a" }, null)).length, 0);

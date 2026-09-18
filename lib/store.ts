@@ -9,6 +9,7 @@ import {
   sql,
 } from "drizzle-orm";
 import { getDb } from "@/db";
+import { listingPreorderWrites } from "./listing-preorders";
 import { listingPayloadWithCatalog, persistCatalogListing, prepareListingCatalog } from "./catalog-products";
 import { catalogListingSnapshot } from "./catalog-product-rules";
 import {
@@ -16,6 +17,7 @@ import {
   orders,
   productImages,
   products,
+  incomingBatches,
   sellers,
   shipmentOrders,
   shipments,
@@ -217,11 +219,13 @@ export async function getStoreDashboardData(userId: string) {
   const analytics = buildStoreAnalytics(orderRows, items, inventory);
   const now = new Date();
   const demand = await getSellerHubDemand(store.id, userId, inventory, now);
+  const preorderBatches = inventory.some(p => p.availabilityType === "preorder") ? await db.select({batch:incomingBatches}).from(incomingBatches).innerJoin(products,eq(products.id,incomingBatches.listingId)).where(eq(products.sellerId,store.id)) : [];
   return {
     store,
     fee: determineMarketplaceFee(store),
     inventory: inventory.map((item) => ({
       ...item,
+      preorder: (() => { const batch = preorderBatches.find(b => b.batch.listingId === item.id)?.batch; return batch ? { batchId:batch.id,capacity:batch.capacity,cutoff:batch.cutoffAt.slice(0,10),buyerLimit:JSON.parse(batch.terms).buyerLimit } : null; })(),
       images: inventoryImages.filter((image) => image.productId === item.id),
     })),
     orders: orderRows.map((order) => ({
@@ -262,7 +266,7 @@ export async function saveStoreProduct(
   if (requestedId && !existingRows[0])
     throw new ValidationError("Inventory item not found.");
   const existing = existingRows[0];
-  if (payload.availabilityType === "preorder" || existing?.availabilityType === "preorder") throw new ValidationError("Manage preorder offers, receipts and estimates in Incoming preorders.");
+  if (existing && existing.availabilityType !== (payload.availabilityType ?? "in_stock")) throw new ValidationError("Create a separate listing to change between in-stock and preorder sales.");
   const catalog = await prepareListingCatalog(payload, store.ownerUserId, existing?.catalogProductId);
   payload = listingPayloadWithCatalog(payload, catalog.model);
   const id = existing?.id ?? crypto.randomUUID();
@@ -328,11 +332,13 @@ export async function saveStoreProduct(
     packageWidth: packageOverride?.width ?? null,
     packageHeight: packageOverride?.height ?? null,
     packageWeight: packageOverride?.weight ?? null,
-    inventoryQuantity,
+    inventoryQuantity: availability.availabilityType === "preorder" ? existing?.inventoryQuantity ?? 0 : inventoryQuantity,
     ...availability,
     primaryImageUrl: existing?.primaryImageUrl ?? null,
     keywords: cleanText(payload.keywords, 1_000),
   };
+
+  const preorderWrites = availability.availabilityType === "preorder" ? await listingPreorderWrites(store,payload,{id,...values},existing) : undefined;
 
   if (existing) {
     const wasSoldOut =
@@ -347,7 +353,7 @@ export async function saveStoreProduct(
       .set({ ...values, ...catalogListingSnapshot(model), status: nextStatus, updatedAt: new Date().toISOString() })
       .where(
         and(eq(products.id, existing.id), eq(products.sellerId, store.id)),
-      ).toSQL());
+      ).toSQL(),preorderWrites);
     if (wasSoldOut && inventoryQuantity - existing.reservedQuantity > 0) {
       await notifyRestockSubscribers(existing.id);
     }
@@ -367,7 +373,7 @@ export async function saveStoreProduct(
       ...catalogListingSnapshot(model),
       currency: "usd",
       status: "draft",
-    }).toSQL());
+    }).toSQL(),preorderWrites);
   }
   return { productId: id };
 }
@@ -401,10 +407,15 @@ export async function setStoreProductStatus(
     );
   if (
     requestedStatus === "active" &&
-    product.inventoryQuantity - product.reservedQuantity < 1
+    product.availabilityType !== "preorder" && product.inventoryQuantity - product.reservedQuantity < 1
   )
     throw new ValidationError("Add available inventory before publishing.");
-  if (requestedStatus === "active") {
+  if (requestedStatus === "active" && product.availabilityType === "preorder") {
+    const [batch] = await getDb().select().from(incomingBatches).where(eq(incomingBatches.listingId,productId)).limit(1);
+    if (!batch || !batch.dispatchEnd || batch.dispatchEnd <= new Date().toISOString() || batch.capacity < 1 || batch.supplyState === "cancelled") throw new ValidationError("Add preorder quantity and a future expected ship date before publishing.");
+    if (!product.primaryImageUrl) throw new ValidationError("Add a product photo or clearly identified preview before publishing.");
+  }
+  if (requestedStatus === "active" && product.availabilityType !== "preorder") {
     const imageCount = await getDb()
       .select({ count: sql<number>`count(*)` })
       .from(productImages)

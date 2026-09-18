@@ -327,9 +327,11 @@ async function handleDisputeEvent(event: StripeEvent) {
       stripe_transfer_id AS stripeTransferId,
       seller_transfer_status AS sellerTransferStatus
       FROM orders
-      WHERE stripe_charge_id = ? OR stripe_payment_intent_id = ?
+      WHERE stripe_charge_id = ? OR stripe_payment_intent_id = ? OR id IN (
+        SELECT r.order_id FROM preorder_payment_ledger l JOIN preorder_reservations r ON r.id=l.reservation_id
+        WHERE l.charge_id=? OR l.payment_intent_id=?)
       LIMIT 1`)
-    .bind(chargeId ?? "__missing_charge__", paymentIntentId ?? "__missing_intent__")
+    .bind(chargeId ?? "__missing_charge__", paymentIntentId ?? "__missing_intent__", chargeId ?? "__missing_charge__", paymentIntentId ?? "__missing_intent__")
     .first<{
       id: string;
       sellerId: string;
@@ -389,8 +391,8 @@ async function handleDisputeEvent(event: StripeEvent) {
             ELSE seller_transfer_last_error
           END,
           updated_at = CURRENT_TIMESTAMP
-          WHERE stripe_transfer_id IS NULL AND (stripe_charge_id = ? OR stripe_payment_intent_id = ?)`)
-        .bind(`Stripe dispute ${dispute.id} was lost.`, chargeId ?? "__missing_charge__", paymentIntentId ?? "__missing_intent__"),
+          WHERE stripe_transfer_id IS NULL AND (stripe_charge_id = ? OR stripe_payment_intent_id = ? OR id=?)`)
+        .bind(`Stripe dispute ${dispute.id} was lost.`, chargeId ?? "__missing_charge__", paymentIntentId ?? "__missing_intent__",order.id),
     );
   }
   if (order && disposition === "release") {
@@ -400,8 +402,8 @@ async function handleDisputeEvent(event: StripeEvent) {
           seller_transfer_status = 'pending',
           seller_transfer_last_error = NULL,
           updated_at = CURRENT_TIMESTAMP
-          WHERE stripe_transfer_id IS NULL AND (stripe_charge_id = ? OR stripe_payment_intent_id = ?) AND seller_transfer_last_error LIKE 'Stripe dispute %'`)
-        .bind(chargeId ?? "__missing_charge__", paymentIntentId ?? "__missing_intent__"),
+          WHERE stripe_transfer_id IS NULL AND (stripe_charge_id = ? OR stripe_payment_intent_id = ? OR id=?) AND seller_transfer_last_error LIKE 'Stripe dispute %'`)
+        .bind(chargeId ?? "__missing_charge__", paymentIntentId ?? "__missing_intent__",order.id),
     );
   }
 

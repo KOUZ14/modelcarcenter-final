@@ -179,6 +179,11 @@ export const preorderPaymentLedger = sqliteTable("preorder_payment_ledger", {
   paymentIntentId: text("payment_intent_id").notNull(),
   chargeId: text("charge_id"),
   amountCents: integer("amount_cents").notNull(),
+  kind: text("kind").notNull().default("balance"),
+  subtotalCents: integer("subtotal_cents").notNull().default(0),
+  taxCents: integer("tax_cents").notNull().default(0),
+  processingFeeCents: integer("processing_fee_cents"),
+  refundedCents: integer("refunded_cents").notNull().default(0),
   currency: text("currency").notNull(),
   status: text("status").notNull(),
   refundId: text("refund_id"),
@@ -186,6 +191,28 @@ export const preorderPaymentLedger = sqliteTable("preorder_payment_ledger", {
   error: text("error"),
   ...timestamps,
 }, t => [uniqueIndex("preorder_payment_session_idx").on(t.sessionId)]);
+
+export const preorderDepositCheckouts = sqliteTable("preorder_deposit_checkouts", {
+  reservationId: text("reservation_id").primaryKey().references(() => preorderReservations.id, { onDelete: "restrict" }),
+  sessionId: text("session_id").unique(),
+  request: text("request").notNull(),
+  status: text("status").notNull().default("pending"),
+  error: text("error"),
+  disputeStatus: text("dispute_status").notNull().default("none"),
+  sellerTransferId: text("seller_transfer_id"),
+  sellerTransferAmountCents: integer("seller_transfer_amount_cents").notNull().default(0),
+  sellerTransferReversedCents: integer("seller_transfer_reversed_cents").notNull().default(0),
+  createdAt: text("created_at").notNull(),
+});
+
+export const preorderRefundRequests = sqliteTable("preorder_refund_requests", {
+  id: text("id").primaryKey(),
+  orderId: text("order_id").notNull().references(() => orders.id, { onDelete: "restrict" }),
+  targetCents: integer("target_cents").notNull(),
+  status: text("status").notNull().default("pending"),
+  error: text("error"),
+  createdAt: text("created_at").notNull(),
+}, t => [uniqueIndex("preorder_refund_target").on(t.orderId,t.targetCents), uniqueIndex("preorder_refund_pending_order").on(t.orderId).where(sql`${t.status} = 'pending'`)]);
 
 export const preorderCheckouts = sqliteTable("preorder_checkouts", {
   checkoutId: text("checkout_id").primaryKey().references(() => checkoutReservations.id, { onDelete: "restrict" }),
@@ -1019,6 +1046,7 @@ export const orders = sqliteTable(
     stripePaymentIntentId: text("stripe_payment_intent_id"),
     stripeChargeId: text("stripe_charge_id"),
     stripeRefundId: text("stripe_refund_id"),
+    preorderDepositCents: integer("preorder_deposit_cents").notNull().default(0),
     paymentFlow: text("payment_flow", {
       enum: ["destination", "separate"],
     })

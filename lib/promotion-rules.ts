@@ -13,8 +13,8 @@ export type PromotionSettings = {
 };
 
 export const defaultPromotionSettings: PromotionSettings = {
-  purchasesEnabled: false, servingEnabled: true, priceCents: 299,
-  currency: "usd", taxMode: "unconfigured", taxCode: "", sellerIds: [],
+  purchasesEnabled: true, servingEnabled: true, priceCents: 299,
+  currency: "usd", taxMode: "automatic", taxCode: "txcd_10701000", sellerIds: [],
 };
 
 export type PromotionListing = {

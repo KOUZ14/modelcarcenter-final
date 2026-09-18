@@ -1,65 +1,56 @@
 "use client";
+
 import Link from "next/link";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import type { sellerPreorders } from "@/lib/preorders";
-import { CatalogModelPicker } from "./catalog-model-picker";
 import { preorderAction } from "./preorder-offer";
 import { formatMoney } from "@/lib/format";
-import { PREORDER_TERMS } from "@/lib/preorder-rules";
 
-export function WindowFields({prefix,label}:{prefix:string;label:string}) {
-  return <fieldset><legend>{label}</legend><div className="preorder-grid"><label>Precision<select name={`${prefix}Precision`} defaultValue="month"><option value="day">Day</option><option value="month">Month</option><option value="quarter">Quarter</option><option value="unknown">Unknown</option></select></label><label>Start<input name={`${prefix}Start`} placeholder="2027-01 or 2027-Q1"/></label><label>End<input name={`${prefix}End`} placeholder="2027-02 or 2027-Q2"/></label></div></fieldset>;
-}
-function windowInput(data:Record<string,FormDataEntryValue>,prefix:string) {return {precision:data[`${prefix}Precision`],start:data[`${prefix}Start`],end:data[`${prefix}End`]||data[`${prefix}Start`]};}
 export function PreorderSeller() {
-  const [data,setData]=useState<Awaited<ReturnType<typeof sellerPreorders>>|null>(null),[error,setError]=useState(""),[busy,setBusy]=useState(false),[message,setMessage]=useState(""),[ready,setReady]=useState(false);
+  const [data,setData]=useState<Awaited<ReturnType<typeof sellerPreorders>>|null>(null);
+  const [error,setError]=useState(""),[busy,setBusy]=useState(false),[message,setMessage]=useState("");
+  const [search,setSearch]=useState("");
   const load=useCallback(async()=>{const r=await fetch("/api/preorders?view=seller",{cache:"no-store"});const b=await r.json();if(!r.ok)throw new Error(b.error);setData(b);},[]);
   useEffect(()=>{queueMicrotask(()=>void load().catch(e=>setError(e.message)));},[load]);
-  async function submit(event:FormEvent<HTMLFormElement>,payload:Record<string,unknown>) {
-    event.preventDefault();setBusy(true);setError("");setMessage("");const form=event.currentTarget,d=Object.fromEntries(new FormData(form));
-    try{await preorderAction({...d,...payload,view:"seller",dispatch:windowInput(d,"dispatch"),receipt:d.receiptPrecision?windowInput(d,"receipt"):undefined,opensAt:d.opensAt?new Date(String(d.opensAt)).toISOString():undefined,cutoffAt:d.cutoffAt?new Date(String(d.cutoffAt)).toISOString():undefined,previewMedia:d.previewMedia==="on",complete:d.complete==="on",guaranteedChase:d.guaranteedChase==="on"});setMessage("Saved. Affected reservations retain their accepted terms and update history.");await load();}catch(e){setError(e instanceof Error?e.message:"Update failed.");}finally{setBusy(false);}
+  async function run(payload:Record<string,unknown>,success:string) {
+    setBusy(true);setError("");setMessage("");
+    try {await preorderAction({...payload,view:"seller"});await load();setMessage(success);}
+    catch(e){setError(e instanceof Error?e.message:"Preorder could not be updated.");}
+    finally{setBusy(false);}
   }
-  return <div className="preorder-dashboard"><p><Link href="/store">Seller Hub</Link> · <Link href="/store?view=orders">Paid orders and shipping</Link></p>
-    <p>Dedicate incoming quantity to MCC separately from other sales channels. Free reservations measure demand; they do not fund supplier purchases or count as paid sales.</p>
-    {error&&<p role="alert" className="form-error">{error}</p>}{message&&<p role="status">{message}</p>}
-    {data&&!data.eligible&&<p className="preorder-notice">Preorder creation is paused until an administrator reviews your supply source and eligibility. Existing fulfillment and refund work remains available.</p>}
-    {data?.eligible&&<details className="preorder-panel"><summary>Create incoming preorder offer</summary><form className="preorder-form" onSubmit={e=>submit(e,{action:"create_batch"})}>
-      <CatalogModelPicker onReady={setReady}/>
-      <div className="preorder-grid">
-        <label>Exact variant and packaging<input name="variant" required placeholder="Regular blue livery, boxed"/></label>
-        <label>Selling unit<select name="saleUnit"><option value="model">Individual model</option><option value="set">Set</option><option value="assortment">Assortment</option><option value="case">Sealed case</option></select></label>
-        <NumberField name="unitsPerPack" label="Models per selling unit" initial={1} min={1}/>
-        <label>Disclosed contents<textarea name="contents" required placeholder="List contents and any assortment uncertainty"/></label>
-        <label>Item price per selling unit (USD)<input name="price" type="number" step="0.01" min="0.01" placeholder="Leave blank for interest only"/></label>
-        <NumberField name="buyerLimit" label="Buyer limit (selling units)" initial={2} min={1} max={10}/>
-        <label>Supplier reference (private)<input name="supplierReference" required/></label>
-        <label>Allocation evidence reference (private)<input name="evidenceReference" placeholder="Private invoice / supplier confirmation reference"/></label>
-        <NumberField name="requestedQuantity" label="Requested selling units"/><NumberField name="confirmedAllocation" label="Confirmed supplier allocation"/>
-        <NumberField name="capacity" label="Selling units dedicated to MCC"/><NumberField name="safetyBuffer" label="Safety buffer"/>
-        <label>Estimate source<input name="estimateSource" required/></label>
-        <label>Reservation opens (your local time)<input name="opensAt" type="datetime-local" required/></label>
-        <label>Reservation cutoff (your local time)<input name="cutoffAt" type="datetime-local" required/></label>
-        <label>Timezone for entered local times<input name="timezone" value={Intl.DateTimeFormat().resolvedOptions().timeZone} readOnly/></label>
-        <label>Shipping method and rate basis<input name="shippingBasis" required placeholder="USPS Ground, calculated for delivery address"/></label>
-        <label>Estimated shipping (USD)<input name="shippingEstimate" type="number" step="0.01" min="0"/></label>
-        <NumberField name="handlingDays" label="Handling business days after payment" initial={3} min={1} max={10}/>
-      </div><WindowFields prefix="receipt" label="Expected store receipt"/><WindowFields prefix="dispatch" label="Estimated buyer dispatch"/>
-      <label className="preorder-check"><input name="previewMedia" type="checkbox" defaultChecked/>Images are renders, prototypes or previews</label>
-      <label className="preorder-check"><input name="guaranteedChase" type="checkbox"/>Guaranteed chase inclusion</label><label>Evidence supporting any chase guarantee<input name="chaseEvidence"/></label>
-      <p>{PREORDER_TERMS}</p><p>Offers start closed. Allocation evidence must be reviewed before reservations can open.</p><button className="button dark" disabled={busy||!ready}>Create preorder offer</button>
-    </form></details>}
-    {data?.batches.map(b=><article key={b.id} className="preorder-panel"><h2>{b.terms.title}</h2><p>{b.terms.variant} · {b.terms.saleUnit} · {b.status} · {b.supplyState.replaceAll("_"," ")}</p><p><Link href={`/products/preorder-${b.listingId}`}>View seller offer</Link></p>
-      <div className="preorder-grid"><p><strong>{b.committed}</strong> committed units including converted orders<br/>{formatMoney(b.reservations.filter(r=>["reserved","allocated","awaiting_payment"].includes(r.status)).reduce((n,r)=>n+r.quantity*JSON.parse(r.terms).priceCents,0),b.terms.currency)} unpaid reserved merchandise<br/>{b.reservations.filter(r=>r.status==="converted").length} paid conversions</p><p><strong>{b.remaining}</strong> reservable slots<br/>{b.holds} temporary holds</p><p><strong>{b.sellableQuantity}</strong> inspected sellable<br/>{b.damagedQuantity} damaged / {b.receivedQuantity} received</p></div>
-      <p>Allocation evidence: {b.evidenceState} · Dispatch: {b.terms.dispatch.label}</p>{b.shortage>0&&<p className="preorder-notice">Shortage: {b.shortage} committed units exceed capacity. New reservations are paused.</p>}
-      <p>{b.metrics?.watchers??0} availability watchers · {b.metrics?.waitlisted??0} waitlisted buyers · {b.metrics?.shipped??0} shipped orders · {b.reservations.filter(r=>r.reason==="payment_deadline_expired").length} missed payment deadlines · {b.reservations.filter(r=>r.status==="cancelled"&&r.reason==="seller_failure").length} seller cancellations{b.metrics?.receiptToDispatchDays!=null&&` · ${b.metrics.receiptToDispatchDays.toFixed(1)} average days from receipt to dispatch`}</p>
-      <form className="preorder-form" onSubmit={e=>submit(e,{batchId:b.id})}><label>Action<select name="action"><option value="close">Close new reservations</option><option value="open">Open reservations</option><option value="allocate">Allocate inspected stock in queue order</option><option value="invite_next">Invite next waitlisted buyer (up to 48 hours)</option></select></label><Reason/><button className="button outline" disabled={busy}>Apply</button></form>
-      <details><summary>Record stock receipt and inspection</summary><form className="preorder-form" onSubmit={e=>submit(e,{action:"receipt",batchId:b.id})}><p>Enter cumulative selling-unit totals for this batch. Do not convert cases to individual cars here.</p><NumberField name="receivedQuantity" label="Total received" initial={b.receivedQuantity}/><NumberField name="sellableQuantity" label="Total inspected sellable" initial={b.sellableQuantity}/><NumberField name="damagedQuantity" label="Total damaged" initial={b.damagedQuantity}/><label className="preorder-check"><input type="checkbox" name="complete"/>Supplier shipment is complete</label><Reason/><p>Eligible buyers will receive allocations in acceptance order. Partial allocations require buyer acceptance.</p><button className="button dark" disabled={busy}>Record receipt and allocate</button></form></details>
-      <details><summary>Change dispatch estimate</summary><form className="preorder-form" onSubmit={e=>submit(e,{action:"delay",batchId:b.id})}><WindowFields prefix="dispatch" label="Revised dispatch window"/><Reason/><p>This affects {b.reservations.filter(r=>["reserved","allocated","awaiting_payment"].includes(r.status)).length} unpaid reservations. Buyers must affirmatively accept; original terms remain available.</p><button className="button outline" disabled={busy}>Update estimate and request consent</button></form></details>
-      <details><summary>Reduce supplier allocation</summary><form className="preorder-form" onSubmit={e=>submit(e,{action:"capacity",batchId:b.id})}><NumberField name="confirmedAllocation" label="Confirmed allocation" initial={b.confirmedAllocation}/><NumberField name="capacity" label="Quantity dedicated to MCC" initial={b.capacity}/><Reason/><button className="button outline" disabled={busy}>Update capacity and notify affected buyers</button></form></details>
-      <details><summary>Cancel batch or report a material product change</summary><form className="preorder-form" onSubmit={e=>submit(e,{action:"cancel_batch",batchId:b.id})}><label>Reason category<select name="reasonCode"><option value="manufacturer_cancelled">Manufacturer cancelled production</option><option value="seller_failure">Seller cannot fulfill</option><option value="material_product_change">Material variant or packaging change</option></select></label><Reason/><p>Unpaid commitments will be cancelled and unshipped paid orders refunded. Create a separate offer for a materially different product.</p><button className="button outline" disabled={busy}>Cancel affected commitments</button></form></details>
-      <details><summary>Buyer queue ({b.reservations.filter(r=>r.acceptedAt).length})</summary><div className="preorder-table"><table><thead><tr><th>Priority</th><th>Quantity</th><th>Status</th><th>Consent</th><th>Allocated</th><th>Next deadline</th></tr></thead><tbody>{b.reservations.filter(r=>r.acceptedAt).map(r=><tr key={r.id}><td>{r.acceptedSequence}</td><td>{r.quantity}</td><td>{r.status}</td><td>{r.consentState}</td><td>{r.allocatedQuantity}</td><td>{r.consentDeadline??r.paymentDeadline??"Awaiting supply"}</td></tr>)}</tbody></table></div></details>
-    </article>)}
+  function stock(event:FormEvent<HTMLFormElement>,batch:NonNullable<typeof data>["batches"][number]) {
+    event.preventDefault();const form=new FormData(event.currentTarget),ready=Number(form.get("ready"));
+    void run({action:"receipt",batchId:batch.id,sellableQuantity:ready,receivedQuantity:Math.max(batch.receivedQuantity,ready+batch.damagedQuantity),damagedQuantity:batch.damagedQuantity,complete:form.get("complete")==="on",reason:"Seller marked inspected stock ready to ship"},"Stock updated. Buyers with available items will be invited to pay their balance.");
+  }
+  const batches=data?.batches.filter(b=>`${b.terms.title} ${b.terms.sellerSku}`.toLowerCase().includes(search.toLowerCase())) ?? [];
+  return <div className="preorder-dashboard">
+    <div className="preorder-toolbar"><p>Manage incoming stock, balance payments and refunds.</p><Link className="button dark small" href="/store?view=inventory&edit=new">Create listing</Link></div>
+    <p className="form-note">Choose <strong>Preorder · 10% deposit</strong> when creating a listing. <Link href="/store?view=inventory">Back to inventory</Link></p>
+    {error&&<p role="alert" className="form-error">{error}</p>}{message&&<p role="status" className="preorder-notice">{message}</p>}
+    {!data&&<p role="status">Loading preorders…</p>}
+    {data&&!data.batches.length&&<section className="preorder-panel"><h2>No preorders yet</h2><p>Create a listing, select Preorder and enter the quantity and expected ship date. Buyers pay a 10% deposit when they preorder.</p></section>}
+    {data&&data.batches.length>0&&<label className="promotion-search">Find a preorder<input type="search" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Listing title or SKU"/></label>}
+    {batches.map(batch=>{
+      const active=batch.reservations.filter(r=>["reserved","allocated","awaiting_payment"].includes(r.status));
+      const collected=batch.deposits.reduce((n,d)=>n+d.amountCents-d.refundedCents,0);
+      return <article className="preorder-panel seller-preorder-card" key={batch.id}>
+        <div className="preorder-heading"><div><h2>{batch.terms.title}</h2><p>{batch.terms.sellerSku} · {formatMoney(batch.terms.priceCents,batch.terms.currency)}</p></div><span className="preorder-state">{batch.supplyState === "cancelled" ? "Cancelled" : batch.status === "open" ? "Accepting preorders" : "Preorders closed"}</span></div>
+        <p>Expected to ship <strong>{batch.terms.dispatch.label}</strong></p>
+        <div className="preorder-price-breakdown"><div><span>Awaiting stock / payment</span><strong>{active.reduce((n,r)=>n+r.quantity,0)} units</strong></div><div><span>Deposits collected</span><strong>{formatMoney(collected,batch.terms.currency)}</strong></div><div><span>Balance paid</span><strong>{batch.reservations.filter(r=>r.status==="converted").length} orders</strong></div></div>
+        {batch.supplyState!=="cancelled"&&<>
+          <details className="preorder-primary-action"><summary>Mark stock ready</summary><form className="preorder-form" onSubmit={e=>stock(e,batch)}><label>Total units ready to ship<input name="ready" type="number" min={batch.sellableQuantity} max={100000} defaultValue={batch.sellableQuantity || batch.capacity} required/></label><label className="preorder-check"><input name="complete" type="checkbox" defaultChecked/>This is the final supplier delivery</label><p className="form-note">Buyers are served in preorder order. If the final delivery cannot fulfill a preorder, it is cancelled and its deposit refunded.</p><button className="button dark small" disabled={busy}>Mark ready and notify buyers</button></form></details>
+          <div className="row-actions"><button className="text-button" disabled={busy} onClick={()=>void run({action:batch.status === "open" ? "close" : "open",batchId:batch.id,reason:"Seller changed preorder availability"},"Preorder availability updated.")}>{batch.status === "open" ? "Pause new preorders" : "Reopen preorders"}</button><Link href={`/store?view=inventory&edit=${encodeURIComponent(batch.listingId)}`}>Edit listing</Link><Link href="/store?view=orders">Paid orders</Link></div>
+          <details><summary>Change expected ship date</summary><form className="preorder-form" onSubmit={e=>{e.preventDefault();const d=new FormData(e.currentTarget);void run({action:"delay",batchId:batch.id,dispatch:{precision:"day",start:d.get("date")},reason:d.get("reason")},"Buyers have been notified of the revised date and can accept it or receive a refund.");}}><label>New expected ship date<input name="date" type="date" required min={new Date().toISOString().slice(0,10)}/></label><Reason/><p>Buyers can accept the new date or cancel for a refund. No response by their notice deadline also cancels and refunds their deposit.</p><button className="button outline small" disabled={busy}>Update date and notify buyers</button></form></details>
+          <details><summary>Cannot fulfill this preorder</summary><form className="preorder-form" onSubmit={e=>{e.preventDefault();if(!window.confirm("Cancel this preorder offer and refund affected customers?"))return;void run({action:"cancel_batch",batchId:batch.id,reasonCode:"seller_failure",reason:new FormData(e.currentTarget).get("reason")},"Offer cancelled. Customer refunds are being processed.");}}><Reason/><p>Deposits and payments for unshipped orders will be refunded.</p><button className="button outline small" disabled={busy}>Cancel and refund</button></form></details>
+        </>}
+        {batch.reservations.some(r=>r.acceptedAt)&&<details><summary>Customer preorders</summary><div className="preorder-table"><table><thead><tr><th>Customer</th><th>Quantity</th><th>Status</th><th>Deposit</th><th>Action</th></tr></thead><tbody>{batch.reservations.filter(r=>r.acceptedAt).map(r=>{
+          const deposit=batch.deposits.find(d=>d.reservationId===r.id);
+          return <tr key={r.id}><td>{r.contactEmail}</td><td>{r.quantity}</td><td>{r.status === "awaiting_payment" ? "Balance due" : r.status === "converted" ? "Paid" : r.status === "reserved" ? "Awaiting stock" : r.status.replaceAll("_"," ")}</td><td>{deposit ? <>{formatMoney(deposit.amountCents-deposit.refundedCents,batch.terms.currency)}{deposit.refundStatus !== "not_required" && <small>Refund {deposit.refundStatus.replaceAll("_"," ")}</small>}</> : "No deposit"}</td><td>{deposit && deposit.status === "paid" && deposit.refundStatus === "not_required" && !r.orderId && <button className="text-button" disabled={busy} onClick={()=>{if(window.confirm(`Refund ${formatMoney(deposit.amountCents,batch.terms.currency)} and cancel this customer's preorder?`))void run({action:"refund_deposit",id:r.id,reason:"Seller approved a full deposit refund"},"Deposit refund requested.");}}>Refund deposit</button>}</td></tr>;
+        })}</tbody></table></div></details>}
+      </article>;
+    })}
   </div>;
 }
+
 export function NumberField({name,label,initial=0,min=0,max=100000}:{name:string;label:string;initial?:number;min?:number;max?:number}) {return <label>{label}<input name={name} type="number" min={min} max={max} defaultValue={initial} required/></label>;}
-export function Reason() {return <label>Reason / supporting detail<textarea name="reason" required maxLength={2000}/></label>;}
+export function Reason() {return <label>Reason<textarea name="reason" required maxLength={2000}/></label>;}

@@ -63,6 +63,7 @@ type Store = {
 };
 
 type Product = {
+  preorder?: { batchId: string; capacity: number; cutoff: string; buyerLimit: number } | null;
   catalogProductId?: string | null;
   conditionNotes?: string;
   id: string;
@@ -284,7 +285,7 @@ export function StoreDashboard({
           </span>
         </div>
         <nav aria-label="Seller Hub sections">
-          <Link href="/store/preorders">Incoming preorders</Link>
+          <Link href="/store/preorders">Preorders</Link>
           {tabs.map((tab) => (
             <button
               key={tab}
@@ -496,13 +497,13 @@ function Inventory({
                       {product.scale} · {product.modelManufacturer}
                     </small>
                     {product.availabilityType === "preorder" && product.releaseDate && (
-                      <small>Preorder · releases {formatUtcDate(product.releaseDate)}</small>
+                      <small>Preorder · expected to ship {formatUtcDate(product.releaseDate)}</small>
                     )}
                   </td>
                   <td>{product.sellerSku}</td>
                   <td>{formatMoney(product.priceCents, product.currency)}</td>
                   <td>
-                    {product.inventoryQuantity - product.reservedQuantity} available
+                    {product.availabilityType === "preorder" ? `${product.preorder?.capacity ?? 0} preorder units` : `${product.inventoryQuantity - product.reservedQuantity} available`}
                     {product.reservedQuantity > 0 && (
                       <small>{product.reservedQuantity} reserved</small>
                     )}
@@ -518,6 +519,7 @@ function Inventory({
                         Edit
                       </button>
                       {!disabled && product.status === "active" && product.availabilityType === "in_stock" && product.inventoryQuantity > product.reservedQuantity && <Link href={`/store?view=marketing&filter=promoted&promotion_product=${encodeURIComponent(product.id)}`}>Promote</Link>}
+                      {product.availabilityType === "preorder" && <Link href={`/store/preorders?listing=${encodeURIComponent(product.id)}`}>Manage preorder</Link>}
                       {product.status === "active" ? (
                         <button disabled={disabled} onClick={() => void setStatus(product, "inactive")}>
                           Unpublish
@@ -579,6 +581,7 @@ function ProductEditor({
   );
   const [primaryUploadFinished, setPrimaryUploadFinished] = useState(false);
   const [imageError, setImageError] = useState("");
+  const [price, setPrice] = useState(product ? (product.priceCents / 100).toFixed(2) : "");
   const [availabilityType, setAvailabilityType] = useState<
     "in_stock" | "preorder"
   >(product?.availabilityType ?? "in_stock");
@@ -696,7 +699,7 @@ function ProductEditor({
         <div className="panel-heading">
           <div>
             <p className="eyebrow">Inventory item</p>
-            <h2 id="product-editor-title">{product ? "Edit product" : "Add product"}</h2>
+            <h2 id="product-editor-title">{product ? "Edit listing" : "Create listing"}</h2>
           </div>
           <button type="button" className="dialog-close" aria-label="Close" onClick={onClose}>×</button>
         </div>
@@ -710,15 +713,15 @@ function ProductEditor({
           <label>Condition notes<textarea name="conditionNotes" maxLength={2000} defaultValue={product?.conditionNotes ?? ""} /></label>
           <label>Description<textarea name="description" rows={4} maxLength={4000} defaultValue={product?.description ?? ""} /></label>
           <div className="form-row">
-            <label>Price (USD)<input name="price" inputMode="decimal" required defaultValue={product ? (product.priceCents / 100).toFixed(2) : ""} /></label>
-            <label>Inventory quantity<input name="inventoryQuantity" type="number" min={product?.reservedQuantity ?? 0} max={1000000} required defaultValue={product?.inventoryQuantity ?? 1} /></label>
+            <label>Full item price (USD)<input name="price" inputMode="decimal" required value={price} onChange={e => setPrice(e.target.value)} /></label>
+            <label>{availabilityType === "preorder" ? "Quantity available to preorder" : "Inventory quantity"}<input name="inventoryQuantity" type="number" min={availabilityType === "preorder" ? 1 : product?.reservedQuantity ?? 0} max={100000} required defaultValue={product?.preorder?.capacity ?? product?.inventoryQuantity ?? 1} /></label>
           </div>
           <p className="form-note">You pay {feePercent(marketplaceFeeBps)} commission on the item subtotal, plus actual payment processing on the full customer payment (including shipping and tax). Both are deducted from your proceeds. <Link href="/seller-terms#fees">Fee and payout terms</Link></p>
           <fieldset className="availability-fields">
             <legend>Availability</legend>
             <div className="form-row">
               <label>
-                Sales workflow
+                Listing type
                 <select
                   name="availabilityType"
                   value={availabilityType}
@@ -729,11 +732,11 @@ function ProductEditor({
                   }
                 >
                   <option value="in_stock">In stock · ships after purchase</option>
-
+                  <option value="preorder">Preorder · 10% deposit</option>
                 </select>
               </label>
-              <label>
-                Expected release date
+              {availabilityType === "preorder" && <label>
+                Expected ship date
                 <input
                   name="releaseDate"
                   type="date"
@@ -741,11 +744,12 @@ function ProductEditor({
                   disabled={availabilityType !== "preorder"}
                   defaultValue={product?.releaseDate ?? ""}
                 />
-              </label>
+              </label>}
             </div>
-            <p className="form-note">
-              Create unpaid preorder offers in Incoming preorders. This inventory form is for stock you physically possess.
-            </p>
+            {availabilityType === "preorder" && <>
+              <div className="form-row"><label>Close preorders on (optional)<input name="preorderCutoff" type="date" defaultValue={product?.preorder?.cutoff ?? ""}/></label><label>Maximum per buyer<input name="preorderBuyerLimit" type="number" min="1" max="10" defaultValue={product?.preorder?.buyerLimit ?? 10}/></label></div>
+              <div className="preorder-deposit-preview"><strong>10% deposit{Number(price) > 0 ? ` · ${formatMoney(Math.round(Number(price) * 10), "usd")} per item` : ""}</strong><p>Buyers pay the deposit now and the remaining balance when you mark stock ready. Shipping and applicable tax are shown before payment.</p><p>The deposit is non-refundable for a change of mind, unless you approve a refund. If you cannot fulfill, the buyer is refunded. Required refunds for delays and other consumer rights still apply.</p></div>
+            </>}
           </fieldset>
           <fieldset><legend>Package override (optional)</legend><p className="form-note">Leave all four blank to use the store default package for calculated checkout rates.</p><div className="parcel-grid"><label>Length (in)<input name="packageLength" inputMode="decimal" defaultValue={product?.packageLength ?? ""} /></label><label>Width (in)<input name="packageWidth" inputMode="decimal" defaultValue={product?.packageWidth ?? ""} /></label><label>Height (in)<input name="packageHeight" inputMode="decimal" defaultValue={product?.packageHeight ?? ""} /></label><label>Weight (lb)<input name="packageWeight" inputMode="decimal" defaultValue={product?.packageWeight ?? ""} /></label></div></fieldset>
           <CollectibleListingFields product={product} includeIdentity={false}/>
@@ -759,7 +763,7 @@ function ProductEditor({
             onRemoveLegacy={productId ? removeLegacyImage : undefined}
             onReorder={productId ? reorderImages : undefined}
           />
-          <RequiredPhotoChecklist product={product}/>
+          {availabilityType !== "preorder" ? <RequiredPhotoChecklist product={product}/> : <p className="form-note">Upload a product image or preview. Describe any prototype images or expected production differences in the listing.</p>}
           <label>Search keywords<input name="keywords" maxLength={1000} defaultValue={product?.keywords ?? ""} /></label>
           {imageError && <p className="form-error" role="alert">{imageError}</p>}
           {product && product.reservedQuantity > 0 && <p className="form-note">Inventory cannot be reduced below {product.reservedQuantity} reserved units.</p>}

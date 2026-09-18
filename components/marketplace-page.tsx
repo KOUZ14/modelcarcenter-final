@@ -5,8 +5,7 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 import { formatCondition } from "@/lib/format";
 import type { CatalogResponse } from "@/lib/types";
 import { Icon } from "./icons";
-import { ProductCard } from "./product-card";
-import { SponsoredListings } from "./sponsored-listings";
+import { MarketplaceListings } from "./sponsored-listings";
 import { SiteFooter } from "./site-footer";
 import { SiteHeader } from "./site-header";
 
@@ -303,12 +302,7 @@ export function MarketplacePage({
               </div>
             ) : catalog.products.length ? (
               <>
-                {page === 1 && !seller && <SponsoredListings key={promotionQuery} queryString={promotionQuery} organicIds={catalog.products.map(p => p.id)} />}
-                <div className="product-grid marketplace-product-grid">
-                  {catalog.products.map((product) => (
-                    <ProductCard key={product.id} product={product} />
-                  ))}
-                </div>
+                <MarketplaceListings key={promotionQuery} queryString={promotionQuery} products={catalog.products} sponsored={page === 1 && !seller} />
                 <div className="pagination" aria-label="Marketplace pages">
                   <button
                     type="button"

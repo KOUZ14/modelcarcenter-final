@@ -34,7 +34,7 @@ export function ProductCard({ product, sponsored = false, onProductClick }: { pr
           )}
         </Link>
         {product.availabilityType === "preorder" ? (
-          <span className="product-badge preorder">Upcoming · Pay when ready</span>
+          <span className="product-badge preorder">Preorder</span>
         ) : product.availableQuantity < 1 ? (
           <span className="product-badge sold-out">Sold out</span>
         ) : product.availableQuantity <= 2 ? (

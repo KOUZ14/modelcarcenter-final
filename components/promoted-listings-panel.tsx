@@ -1,11 +1,14 @@
 "use client";
+
+import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { formatMoney } from "@/lib/format";
 import type { PromotionSettings } from "@/lib/promotion-rules";
 
-type Campaign = { id: string; product_id: string; title: string; status: string; reason: string; deliveryReason: string | null; price_cents: number; currency: string; starts_at: number | null; ends_at: number | null; payment_status: string; total_cents: number; refunded_cents: number; dispute_status: string; impressions: number; clicks: number; refund_status: string | null };
-type Data = { settings: PromotionSettings; pilotEligible: boolean; termsVersion: string; listings: Array<{ id: string; title: string; unavailable: string | null }>; campaigns: Campaign[] };
+type Campaign = { id: string; product_id: string; title: string; status: string; reason: string; deliveryReason: string | null; currency: string; ends_at: number | null; refunded_cents: number; impressions: number; clicks: number; refund_status: string | null };
+type Listing = { id: string; title: string; sku: string; priceCents: number; currency: string; quantity: number; imageUrl: string | null; unavailable: string | null };
+type Data = { settings: PromotionSettings; pilotEligible: boolean; termsVersion: string; listings: Listing[]; campaigns: Campaign[] };
 
 export async function promotionRequest(url: string, payload?: Record<string, unknown>) {
   const response = await fetch(url, payload ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) } : { cache: "no-store" });
@@ -15,73 +18,80 @@ export async function promotionRequest(url: string, payload?: Record<string, unk
 }
 
 export function PromotedListingsPanel() {
-  const [data, setData] = useState<Data | null>(null), [error, setError] = useState(""), [busy, setBusy] = useState(false), [message, setMessage] = useState("");
-  const [productId, setProductId] = useState(""), [accepted, setAccepted] = useState(false);
+  const [data, setData] = useState<Data | null>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [selected, setSelected] = useState("");
+  const [search, setSearch] = useState("");
+  const [accepted, setAccepted] = useState(false);
   const requestKey = useRef("");
-  const load = useCallback(async () => { setData(await promotionRequest("/api/store/promotions")); }, []);
+  const load = useCallback(async () => setData(await promotionRequest("/api/store/promotions")), []);
+  useEffect(() => { queueMicrotask(() => {
+    setSelected(new URLSearchParams(window.location.search).get("promotion_product") ?? "");
+    void load().catch(e => setError(e.message));
+  }); }, [load]);
   useEffect(() => {
-    queueMicrotask(() => {
-      setProductId(new URLSearchParams(window.location.search).get("promotion_product") ?? "");
-      void load().catch(e => setError(e.message));
-    });
-  }, [load]);
-  useEffect(() => {
-    if (!data?.campaigns.some(c => c.status === "pending_payment" || c.refund_status?.includes("queued") || c.refund_status?.includes("pending"))) return;
+    if (!data?.campaigns.some(c => c.status === "pending_payment" || /queued|pending/.test(c.refund_status ?? ""))) return;
     const timer = setInterval(() => void load().catch(() => {}), 15_000);
     return () => clearInterval(timer);
   }, [data, load]);
+  function choose(id: string) { setSelected(id); setAccepted(false); requestKey.current = ""; setError(""); }
   async function purchase(event: FormEvent) {
-    event.preventDefault(); setBusy(true); setError("");
-    requestKey.current ||= crypto.randomUUID();
+    event.preventDefault(); setBusy(true); setError(""); requestKey.current ||= crypto.randomUUID();
     try {
-      const result = await promotionRequest("/api/store/promotions/checkout", { productId, requestKey: requestKey.current, termsVersion: accepted ? data?.termsVersion : "" });
+      const result = await promotionRequest("/api/store/promotions/checkout", { productId: selected, requestKey: requestKey.current, termsVersion: accepted ? data?.termsVersion : "" });
       if (result.checkoutUrl) window.location.assign(result.checkoutUrl);
-      else { await load(); setMessage("Payment status refreshed."); }
-    } catch (e) { setError(e instanceof Error ? e.message : "Purchase failed."); await load().catch(() => {}); }
+      else await load();
+    } catch (e) { setError(e instanceof Error ? e.message : "Payment could not start."); await load().catch(() => {}); }
     finally { setBusy(false); }
   }
-  async function action(campaignId: string, action: string) {
-    setBusy(true); setError(""); setMessage("");
+  async function action(campaign: Campaign, action: string) {
+    setBusy(true); setError("");
     try {
-      const result = await promotionRequest("/api/store/promotions", { campaignId, action });
+      const result = await promotionRequest("/api/store/promotions", { campaignId: campaign.id, action });
       if (result.checkoutUrl) window.location.assign(result.checkoutUrl);
-      await load(); setMessage("Campaign updated.");
-    } catch (e) { setError(e instanceof Error ? e.message : "Action failed."); }
+      await load();
+    } catch (e) { setError(e instanceof Error ? e.message : "Promotion could not be updated."); }
     finally { setBusy(false); }
   }
   const settings = data?.settings;
-  const canBuy = settings?.purchasesEnabled && settings.servingEnabled && settings.priceCents >= 50 && settings.taxMode !== "unconfigured" && data?.pilotEligible;
-  const listing = data?.listings.find(l => l.id === productId);
-  return <div className="store-stack">
-    {error && <p className="form-error" role="alert">{error}</p>}{message && <p role="status">{message}</p>}
-    <section className="store-panel"><h3>Promote a listing</h3>
-      <p>Show an in-stock listing in sponsored marketplace placements for seven calendar days. Placements match the collector&apos;s search and rotate between stores. Views and sales are not guaranteed.</p>
-      {!data ? <p role="status">Loading promotions…</p> : !canBuy ? <p className="hub-note">{!data.pilotEligible ? "Promotions are currently available to participating pilot stores." : "New promotion purchases are currently unavailable. Existing campaigns remain below."}</p> : <form className="promotion-form" onSubmit={purchase}>
-        <label>Listing<select value={productId} required onChange={e => { setProductId(e.target.value); requestKey.current = ""; setAccepted(false); }}><option value="">Choose a listing</option>{data.listings.map(l => <option key={l.id} value={l.id} disabled={Boolean(l.unavailable)}>{l.title}{l.unavailable ? ` — ${l.unavailable}` : ""}</option>)}</select></label>
-        {listing?.unavailable && <p>{listing.unavailable}</p>}
-        <p><strong>{formatMoney(settings.priceCents, settings.currency)} for seven days</strong>{settings.taxMode === "automatic" ? ". Applicable tax is calculated and the full total shown in Stripe before payment." : ". No additional promotion tax is configured."}</p>
-        <p>Pauses do not extend the end date. Voluntary cancellation after activation is not refundable. If activation fails, the payment is refunded. Renewals require a new purchase.</p>
-        <label className="promotion-check"><input type="checkbox" checked={accepted} onChange={e => setAccepted(e.target.checked)} required/>I accept the <Link href="/promotion-terms" target="_blank">promotion terms</Link>.</label>
-        <button className="button dark small" disabled={busy || !accepted || !listing || Boolean(listing.unavailable)}>Continue to payment</button>
-      </form>}
-    </section>
-    <section className="store-panel"><div className="panel-heading"><h3>Your campaigns</h3><button className="text-button" disabled={busy} onClick={() => void load().catch(e => setError(e.message))}>Refresh</button></div>
-      <p className="hub-note">Recorded impressions require at least half the card to be visible for one second. Clicks count product links in sponsored cards. These counts are not unique people or attributed sales.</p>
-      {data && !data.campaigns.length && <p>No campaigns yet.</p>}
-      <div className="promotion-campaigns">{data?.campaigns.map(c => <article className="promotion-campaign" key={c.id}>
-        <div><h4>{c.title}</h4><p><strong>{c.status.replaceAll("_", " ")}</strong>{c.reason ? ` · ${c.reason.replaceAll("_", " ")}` : ""}</p>
-          <p>{c.starts_at ? `${new Date(c.starts_at).toLocaleString()} – ${new Date(c.ends_at!).toLocaleString()}` : "Starts after payment is confirmed."}</p>
-          <p>{formatMoney(c.total_cents || c.price_cents, c.currency)} · Payment {c.payment_status}{c.refund_status ? ` · Refund ${c.refund_status}` : ""}{c.refunded_cents > 0 ? ` · ${formatMoney(c.refunded_cents, c.currency)} refunded` : ""}</p>
-          <p>{c.impressions} impressions · {c.clicks} clicks · {c.impressions ? `${(c.clicks / c.impressions * 100).toFixed(1)}% CTR` : "CTR unavailable"}</p>
-          {c.status === "active" && c.deliveryReason && <p>Currently not showing: {c.deliveryReason}</p>}
-        </div><div className="row-actions">
-          {c.status === "pending_payment" && <><button className="button outline small" disabled={busy} onClick={() => void action(c.id, "continue")}>Continue payment</button><button className="text-button" disabled={busy} onClick={() => void action(c.id, "reconcile")}>Check payment</button></>}
-          {c.status === "active" && <button className="button outline small" disabled={busy} onClick={() => void action(c.id, "pause")}>Pause</button>}
-          {c.status === "paused" && c.reason === "seller_paused" && <button className="button outline small" disabled={busy} onClick={() => void action(c.id, "resume")}>Resume</button>}
-          {["active", "paused", "pending_payment"].includes(c.status) && <button className="text-button" disabled={busy} onClick={() => { if (window.confirm("End this campaign? Activated campaigns do not receive a refund for voluntary cancellation.")) void action(c.id, "end"); }}>End campaign</button>}
-          {["ended", "expired"].includes(c.status) && canBuy && <button className="text-button" disabled={busy} onClick={() => { setProductId(c.product_id); requestKey.current = ""; setAccepted(false); }}>Promote again</button>}
+  const canBuy = Boolean(settings?.purchasesEnabled && settings.servingEnabled && settings.taxMode !== "unconfigured" && data?.pilotEligible);
+  const listings = data?.listings.filter(l => `${l.title} ${l.sku}`.toLowerCase().includes(search.toLowerCase())) ?? [];
+  const history = data?.campaigns.filter(c => ["ended", "expired"].includes(c.status)) ?? [];
+  return <section className="store-panel promotion-inventory">
+    <div className="panel-heading"><div><h3>Promote your listings</h3><p>Choose a listing to feature in sponsored marketplace results.</p></div>
+      {settings && <div className="promotion-price"><strong>{formatMoney(settings.priceCents, settings.currency)}</strong><span>per listing · 7 days</span></div>}
+    </div>
+    {error && <p className="form-error" role="alert">{error}</p>}
+    {data && !canBuy && <p className="hub-note">{data.pilotEligible ? "Promotion payments are not enabled yet. You can browse your inventory below." : "Your store is not included in the current promotion pilot."}</p>}
+    <label className="promotion-search">Search your inventory<input type="search" value={search} onChange={e => setSearch(e.target.value)} placeholder="Listing title or SKU" /></label>
+    {!data && <p role="status">Loading your inventory…</p>}
+    {data && !data.listings.length && <p>No listings yet. <Link href="/store?view=inventory">Create your first listing</Link> to get started.</p>}
+    {data && data.listings.length > 0 && !listings.length && <p>No listings match your search.</p>}
+    <div className="promotion-inventory-list">{listings.map(listing => {
+      const campaign = data!.campaigns.find(c => c.product_id === listing.id && ["active", "paused", "pending_payment"].includes(c.status));
+      const expanded = selected === listing.id && !campaign && canBuy && !listing.unavailable;
+      return <article className="promotion-inventory-item" key={listing.id}>
+        <div className="promotion-inventory-row">
+          <div className="promotion-thumbnail">{listing.imageUrl ? <Image src={listing.imageUrl} alt="" width={80} height={64} unoptimized/> : <span>No photo</span>}</div>
+          <div className="promotion-listing-title"><h4>{listing.title}</h4><p>{listing.sku} · {formatMoney(listing.priceCents, listing.currency)} · {listing.quantity} available</p>
+            {campaign ? <p className="promotion-status">{campaign.status === "pending_payment" ? "Payment incomplete" : campaign.status === "paused" ? "Paused" : "Promoted"}{campaign.ends_at ? ` · Ends ${new Date(campaign.ends_at).toLocaleDateString()}` : ""}</p> : listing.unavailable && <p className="muted">{listing.unavailable}</p>}
+            {campaign?.status === "active" && campaign.deliveryReason && <p className="muted">{campaign.deliveryReason}</p>}
+          </div>
+          {campaign && campaign.status !== "pending_payment" && <div className="promotion-counts"><strong>{campaign.impressions}<small>Views</small></strong><strong>{campaign.clicks}<small>Clicks</small></strong></div>}
+          <div className="promotion-listing-actions">{campaign ? <>
+            {campaign.status === "pending_payment" ? <button className="button dark small" disabled={busy} onClick={() => void action(campaign, "continue")}>Complete payment</button> : campaign.status === "active" ? <button className="button outline small" disabled={busy} onClick={() => void action(campaign, "pause")}>Pause</button> : campaign.reason === "seller_paused" ? <button className="button outline small" disabled={busy} onClick={() => void action(campaign, "resume")}>Resume</button> : <span>Needs review</span>}
+            <button className="text-button" disabled={busy} onClick={() => { if (window.confirm("End this promotion? Its remaining time will end, and voluntary cancellation is not refunded.")) void action(campaign, "end"); }}>End</button>
+          </> : <button className="button dark small" aria-expanded={expanded} disabled={busy || !canBuy || Boolean(listing.unavailable)} onClick={() => choose(expanded ? "" : listing.id)}>Promote</button>}</div>
         </div>
-      </article>)}</div>
-    </section>
-  </div>;
+        {expanded && <form className="promotion-confirmation" onSubmit={purchase}>
+          <p><strong>{formatMoney(settings!.priceCents, settings!.currency)} for 7 days</strong>{settings!.taxMode === "automatic" ? ", plus applicable tax." : "."} Starts after payment. No automatic renewal.</p>
+          <label className="promotion-check"><input type="checkbox" checked={accepted} onChange={e => setAccepted(e.target.checked)} required/>I accept the <Link href="/promotion-terms" target="_blank">promotion terms</Link>, including no guaranteed views or sales.</label>
+          <div className="row-actions"><button className="button dark small" disabled={busy || !accepted}>{busy ? "Opening payment…" : "Pay and promote"}</button><button className="text-button" type="button" disabled={busy} onClick={() => choose("")}>Cancel</button></div>
+        </form>}
+      </article>;
+    })}</div>
+    {history.length > 0 && <details className="promotion-history"><summary>Past promotions ({history.length})</summary>{history.map(c => <div key={c.id}><strong>{c.title}</strong><p>{c.impressions} views · {c.clicks} clicks · {c.status}{c.refunded_cents > 0 ? ` · ${formatMoney(c.refunded_cents,c.currency)} refunded` : ""}</p></div>)}</details>}
+    <p className="form-note">Listings rotate in matching sponsored placements. Views count a listing visible for at least one second. Pausing does not extend the seven-day period.</p>
+  </section>;
 }
