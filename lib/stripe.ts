@@ -229,8 +229,8 @@ export async function createCheckoutSession(input: CheckoutSessionInput) {
 
 export function buildPreorderDepositBody(input: CheckoutSessionInput) {
   const body = buildCheckoutSessionBody(input);
-  body.set("success_url", `${config.siteUrl}/preorders?deposit=paid`);
-  body.set("cancel_url", `${config.siteUrl}/preorders?deposit=cancelled`);
+  body.set("success_url", `${config.siteUrl}/account?view=orders&deposit=paid`);
+  body.set("cancel_url", `${config.siteUrl}/account?view=orders&deposit=cancelled`);
   body.set("payment_method_types[0]", "card");
   body.set("custom_text[submit][message]", "10% merchandise deposit, credited toward your preorder. Non-refundable for a change of mind unless the seller approves a refund. Refunded if the seller cannot fulfill or a required refund applies. Remaining balance and shipping are paid when ready; no automatic balance charge.");
   for (const prefix of ["metadata", "payment_intent_data[metadata]"]) {

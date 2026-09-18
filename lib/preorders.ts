@@ -288,7 +288,7 @@ export async function sellerPreorders(userId: string) {
   return { sellerId:seller.id,eligible:Boolean(seller.status === "active" && seller.stripeChargesEnabled && seller.stripePayoutsEnabled && sellerAcceptedCurrentTerms(seller)),batches:await Promise.all(batches.map(async ({batch})=>({
     ...batch,terms:termsOf(batch),...await batchCapacity(batch),
     reservations:await getDb().select().from(preorderReservations).where(eq(preorderReservations.batchId,batch.id)).orderBy(asc(preorderReservations.acceptedSequence)),
-    deposits:(await getD1().prepare("SELECT l.reservation_id reservationId,l.amount_cents amountCents,l.refunded_cents refundedCents,l.refund_status refundStatus,l.status FROM preorder_payment_ledger l JOIN preorder_reservations r ON r.id=l.reservation_id WHERE r.batch_id=? AND l.kind='deposit'").bind(batch.id).all<{reservationId:string;amountCents:number;refundedCents:number;refundStatus:string;status:string}>()).results ?? [],
+    deposits:(await getD1().prepare("SELECT l.reservation_id reservationId,l.amount_cents amountCents,l.subtotal_cents subtotalCents,l.refunded_cents refundedCents,l.refund_status refundStatus,l.status FROM preorder_payment_ledger l JOIN preorder_reservations r ON r.id=l.reservation_id WHERE r.batch_id=? AND l.kind='deposit'").bind(batch.id).all<{reservationId:string;amountCents:number;subtotalCents:number;refundedCents:number;refundStatus:string;status:string}>()).results ?? [],
     metrics:await getD1().prepare(`SELECT
       (SELECT count(*) FROM availability_alerts WHERE product_id=? AND status='active') AS watchers,
       (SELECT count(*) FROM preorder_waitlist WHERE batch_id=? AND status IN ('waiting','invited')) AS waitlisted,

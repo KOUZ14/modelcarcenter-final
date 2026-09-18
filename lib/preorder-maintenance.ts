@@ -21,7 +21,7 @@ export async function processPreorders() {
     AND EXISTS (SELECT 1 FROM preorder_reservations r WHERE r.batch_id=b.id AND r.status IN ('reserved','allocated','awaiting_payment')) LIMIT 50`)
     .bind(at,new Date(Date.now()+7*86400000).toISOString()).all<{id:string;revision:number;deadline:string;title:string;email:string}>();
   for (const b of (approaching.results??[])) await eventStatement({id:`dispatch-approaching-${b.id}-${b.revision}`,batchId:b.id,actor:"system",kind:"dispatch_approaching",recipient:b.email,
-    detail:{message:`The dispatch window for ${b.title} ends ${b.deadline}. Check incoming stock and unpaid allocations. If the estimate is no longer supported, update the batch and request buyer consent in Seller Hub.`,url:`${config.siteUrl}/store/preorders`}}).run();
+    detail:{message:`The dispatch window for ${b.title} ends ${b.deadline}. Check incoming stock and unpaid allocations. If the estimate is no longer supported, update the ship date from the inventory item in Seller Hub.`,url:`${config.siteUrl}/store?view=inventory&filter=preorders`}}).run();
   const expired=await db.prepare(`SELECT id FROM preorder_reservations WHERE
     (status='hold' AND hold_expires_at <= ?) OR
     (status IN ('reserved','allocated','awaiting_payment') AND consent_state='required' AND consent_deadline <= ?) OR
@@ -81,7 +81,7 @@ export async function deliverPreorderNotices(limit=40) {
       detail.paymentDeadline?`Payment deadline: ${detail.paymentDeadline}.`:null,
       event.kind==="refund_update"?`Refund status: ${detail.status}. A pending or failed refund has not completed.`:null,
       detail.refundedCents!=null?`Returned: ${formatMoney(detail.refundedCents,detail.currency)}. Still owed: ${formatMoney(detail.outstandingCents,detail.currency)}. Pending: ${formatMoney(detail.pendingCents,detail.currency)}.`:null,
-      detail.url??`${config.siteUrl}/preorders`].filter(Boolean).join("\n\n");
+      detail.url??`${config.siteUrl}/account?view=orders`].filter(Boolean).join("\n\n");
     try {
       const result=await sendEmail({to:event.recipient,subject:`MCC preorder: ${event.kind.replaceAll("_"," ")}`,text:lines,html:`<h1>Preorder update</h1><p>${escapeHtml(lines).replaceAll("\n\n","</p><p>")}</p>`,idempotencyKey:`preorder-${event.id}`});
       if (!result.sent) throw new Error("Email not configured.");

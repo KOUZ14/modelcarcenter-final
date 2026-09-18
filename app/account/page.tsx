@@ -16,8 +16,8 @@ export default async function AccountPage({
 }: {
   searchParams: Promise<{ view?: string; new?: string }>;
 }) {
-  const collector = await requireCollector("/account");
   const query = await searchParams;
+  const collector = await requireCollector(query.view ? `/account?${new URLSearchParams({view:query.view})}` : "/account");
   const data = await getGarageData(collector.user.id);
   return (
     <main>

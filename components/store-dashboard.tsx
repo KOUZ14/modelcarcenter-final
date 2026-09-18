@@ -2,6 +2,7 @@
 
 import { SellerFeeDisclosure } from "./seller-fee-disclosure";
 import { SellerOrderAmounts } from "./seller-order-amounts";
+import { PreorderSeller, SellerPreorderOrders } from "./preorder-seller";
 
 import Link from "next/link";
 import { CatalogModelPicker } from "./catalog-model-picker";
@@ -217,12 +218,14 @@ export function StoreDashboard({
   data,
   initialView,
   initialProductId,
+  initialPreorderId,
   initialFilter,
   email,
 }: {
   data: StoreData;
   initialView: string;
   initialProductId?: string;
+  initialPreorderId?: string;
   initialFilter?: string;
   email: string;
 }) {
@@ -285,7 +288,6 @@ export function StoreDashboard({
           </span>
         </div>
         <nav aria-label="Seller Hub sections">
-          <Link href="/store/preorders">Preorders</Link>
           {tabs.map((tab) => (
             <button
               key={tab}
@@ -337,10 +339,11 @@ export function StoreDashboard({
         {view === "marketing" && <HubMarketing data={data} navigate={selectView} filter={initialFilter} />}
         {view === "inventory" && (
           <Inventory
-            key={`inventory-${initialFilter}-${initialProductId}`}
+            key={`inventory-${initialFilter}-${initialProductId}-${initialPreorderId}`}
             marketplaceFeeBps={data.fee.marketplaceFeeBps}
             rows={data.inventory}
             initialProductId={initialProductId}
+            initialPreorderId={initialPreorderId}
             queue={inventoryViews.some(([value]) => value === initialFilter) ? initialFilter! : "all"}
             slowIds={data.hub.slowIds}
             navigate={selectView}
@@ -379,6 +382,7 @@ function Inventory({
   marketplaceFeeBps,
   rows,
   initialProductId,
+  initialPreorderId,
   queue,
   slowIds,
   navigate,
@@ -388,6 +392,7 @@ function Inventory({
   marketplaceFeeBps: number;
   rows: Product[];
   initialProductId?: string;
+  initialPreorderId?: string;
   queue: string;
   slowIds: string[];
   navigate: HubNavigate;
@@ -399,6 +404,7 @@ function Inventory({
 }) {
   const initial = rows.find((row) => row.id === initialProductId) ?? null;
   const [editing, setEditing] = useState<Product | "new" | null>(disabled ? null : initialProductId === "new" ? "new" : initial);
+  const [preorder, setPreorder] = useState(rows.find(row=>row.id===initialPreorderId&&row.availabilityType==="preorder") ?? null);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
   const visible = useMemo(
@@ -519,7 +525,7 @@ function Inventory({
                         Edit
                       </button>
                       {!disabled && product.status === "active" && product.availabilityType === "in_stock" && product.inventoryQuantity > product.reservedQuantity && <Link href={`/store?view=marketing&filter=promoted&promotion_product=${encodeURIComponent(product.id)}`}>Promote</Link>}
-                      {product.availabilityType === "preorder" && <Link href={`/store/preorders?listing=${encodeURIComponent(product.id)}`}>Manage preorder</Link>}
+                      {product.availabilityType === "preorder" && <button onClick={()=>setPreorder(product)}>Manage preorder</button>}
                       {product.status === "active" ? (
                         <button disabled={disabled} onClick={() => void setStatus(product, "inactive")}>
                           Unpublish
@@ -543,6 +549,7 @@ function Inventory({
       </section>
       <SellerFeeDisclosure marketplaceFeeBps={marketplaceFeeBps} />
       <InventoryImporter disabled={disabled} action={action} />
+      {preorder && <PreorderInventoryDialog listing={preorder} onClose={()=>setPreorder(null)}/>}
       {editing && (
         <ProductEditor
           marketplaceFeeBps={marketplaceFeeBps}
@@ -554,6 +561,14 @@ function Inventory({
       )}
     </div>
   );
+}
+
+function PreorderInventoryDialog({listing,onClose}:{listing:Product;onClose:()=>void}) {
+  const dialog=useDialogFocus(onClose);
+  return <div className="store-editor-backdrop"><section ref={dialog} tabIndex={-1} className="store-editor" role="dialog" aria-modal="true" aria-labelledby="preorder-editor-title">
+    <div className="panel-heading"><div><p className="eyebrow">Inventory item</p><h2 id="preorder-editor-title">Manage preorder</h2></div><button type="button" className="dialog-close" aria-label="Close preorder details" onClick={onClose}>×</button></div>
+    <PreorderSeller listingId={listing.id}/>
+  </section></div>;
 }
 
 function ProductEditor({
@@ -853,7 +868,7 @@ function Orders({
     options?: { reload?: boolean; message?: string },
   ): Promise<Record<string, unknown>>;
 }) {
-  const filter = ["open", "all", "shipped", "returns", "refunded", "cancelled"].includes(initialFilter ?? "") ? initialFilter! : "open";
+  const filter = ["open", "all", "shipped", "returns", "refunded", "cancelled", "preorders"].includes(initialFilter ?? "") ? initialFilter! : "open";
   const urgentCount = rows.filter((order) =>
     ["overdue", "due_today", "due_soon"].includes(
       orderHandlingReminder(order).level,
@@ -865,12 +880,13 @@ function Orders({
       <header className="store-page-heading">
         <div><p className="eyebrow">Fulfillment</p><h2>Orders</h2><p>Compare protected carrier rates, print labels, and follow tracking events.</p>{urgentCount > 0 && <p className="handling-summary"><b>{urgentCount} handling reminder{urgentCount === 1 ? "" : "s"}</b> need attention.</p>}</div>
         <select aria-label="Filter orders" value={filter} onChange={(event) => navigate("orders", event.target.value)}>
-          <option value="open">Awaiting shipment</option><option value="all">All orders</option><option value="shipped">Shipped</option><option value="returns">Returns</option><option value="refunded">Refunded</option><option value="cancelled">Cancelled</option>
+          <option value="open">Awaiting shipment</option><option value="preorders">Preorders</option><option value="all">All orders</option><option value="shipped">Shipped</option><option value="returns">Returns</option><option value="refunded">Refunded</option><option value="cancelled">Cancelled</option>
         </select>
       </header>
-      <nav className="hub-filters" aria-label="Order queues">{orderViews.map(([value, label]) => <button key={value} aria-pressed={filter === value} onClick={() => navigate("orders", value)}>{label}<span>{rows.filter((row) => matchesOrderView(row, value, returnOrderIds)).length}</span></button>)}</nav>
+      <nav className="hub-filters" aria-label="Order queues">{orderViews.map(([value, label]) => <button key={value} aria-pressed={filter === value} onClick={() => navigate("orders", value)}>{label}<span>{rows.filter((row) => matchesOrderView(row, value, returnOrderIds)).length}</span></button>)}<button aria-pressed={filter === "preorders"} onClick={()=>navigate("orders","preorders")}>Preorders</button></nav>
       {filter === "returns" && <div className="hub-callout"><p>Orders with a return-and-refund request. Review each case and respond in the Resolution Center.</p><Link className="button outline small" href="/resolution">Manage returns</Link></div>}
       <div className="store-orders">
+        {["preorders","all"].includes(filter)&&<SellerPreorderOrders showEmpty={filter==="preorders"}/>}
         {visible.map((order) => (
           <article className="store-order" key={order.id}>
             <div className="store-order-header">
@@ -892,7 +908,7 @@ function Orders({
             </div>
           </article>
         ))}
-        {!visible.length && <p className="store-empty">No orders match this view.</p>}
+        {!visible.length && filter!=="preorders" && <p className="store-empty">{filter==="all" ? "No fully paid orders yet." : "No orders match this view."}</p>}
       </div>
     </div>
   );

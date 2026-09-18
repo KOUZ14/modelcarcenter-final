@@ -44,6 +44,8 @@ export async function depositScenarios({t,api,sqlite,row,all,buyer,buyer2,sessio
     assert.equal(s.id,retry.id);assert.match(s.request,/10%25\+preorder\+deposit/);
     const body=new URLSearchParams(s.request);assert.equal(body.get('line_items[0][price_data][unit_amount]'),'180');
     assert.equal(body.get('payment_method_types[0]'),'card');assert.equal(body.get('payment_intent_data[transfer_data][destination]'),null);
+    assert.equal(body.get('success_url'),'https://mcc.test/account?view=orders&deposit=paid');
+    assert.equal(body.get('cancel_url'),'https://mcc.test/account?view=orders&deposit=cancelled');
   });
 
   await t.test('late deposits and outdated seller terms refund instead of creating a commitment',async()=>{

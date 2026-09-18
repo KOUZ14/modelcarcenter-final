@@ -33,11 +33,11 @@ export async function startPreorderDeposit(user:{id:string;email:string},id:stri
     [saved] = await getDb().select().from(preorderDepositCheckouts).where(eq(preorderDepositCheckouts.reservationId,id)).limit(1);
   }
   const request:DepositRequest = JSON.parse(saved.request);
-  if (saved.status !== "pending" || !["none","won","warning_closed"].includes(saved.disputeStatus)) throw new ValidationError("This deposit is being reconciled. Check My Preorders for its status.");
+  if (saved.status !== "pending" || !["none","won","warning_closed"].includes(saved.disputeStatus)) throw new ValidationError("This deposit is being reconciled. Check My Orders for its status.");
   if (!saved.sessionId && request.input.expiresAt <= now()) throw new ValidationError("This payment checkout has expired. Start a new preorder from the listing.");
   const session = saved.sessionId ? await retrieveCheckoutSession(saved.sessionId) : await createPreorderDepositCheckout({...request.input,expiresAt:new Date(request.input.expiresAt)},request.body);
   await getD1().prepare("UPDATE preorder_deposit_checkouts SET session_id=? WHERE reservation_id=? AND (session_id IS NULL OR session_id=?)").bind(session.id,id,session.id).run();
-  if (session.payment_status === "paid") { await finalizePreorderDeposit(session); return {url:"/preorders"}; }
+  if (session.payment_status === "paid") { await finalizePreorderDeposit(session); return {url:"/account?view=orders"}; }
   if (session.status !== "open" || !session.url) throw new ValidationError("This payment checkout has ended. Start a new preorder from the listing.");
   return {url:session.url};
 }

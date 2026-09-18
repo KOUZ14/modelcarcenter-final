@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import type { buyerPreorders } from "@/lib/preorders";
 import type { buyerWaitlist } from "@/lib/preorder-waitlist";
 import { formatMoney } from "@/lib/format";
@@ -10,27 +11,32 @@ import { AdultConsent } from "./adult-consent";
 import { AddressFields } from "./address-fields";
 
 type Reservation=Awaited<ReturnType<typeof buyerPreorders>>[number];
-export function PreorderDashboard() {
+export function PreorderDashboard({orderIds,children}:{orderIds:string[];children:(preorders:Reservation[])=>ReactNode}) {
+  const router=useRouter();
+  const refreshedOrders=useRef(new Set<string>());
   const [rows,setRows]=useState<Reservation[]>([]),[error,setError]=useState(""),[busy,setBusy]=useState(false),[loading,setLoading]=useState(true);
   const [waitlist,setWaitlist]=useState<Awaited<ReturnType<typeof buyerWaitlist>>>([]);
   const load=useCallback(async()=>{const r=await fetch("/api/preorders",{cache:"no-store"});const b=await r.json();if(!r.ok)throw new Error(b.error);setRows(b.reservations);setWaitlist(b.waitlist??[]);setLoading(false);},[]);
   useEffect(()=>{queueMicrotask(()=>void load().catch(e=>{setError(e.message);setLoading(false);}));},[load]);
   useEffect(()=>{if(!rows.some(r=>r.status === "hold" || r.deposit?.refundStatus === "pending" || r.deposit?.refundStatus === "required"))return;const timer=setInterval(()=>void load().catch(()=>{}),15000);return()=>clearInterval(timer);},[rows,load]);
+  useEffect(()=>{
+    const missing=rows.flatMap(r=>r.orderId&&!orderIds.includes(r.orderId)&&!refreshedOrders.current.has(r.orderId)?[r.orderId]:[]);
+    if(missing.length){missing.forEach(id=>refreshedOrders.current.add(id));router.refresh();}
+  },[rows,orderIds,router]);
   async function action(id:string,payload:Record<string,unknown>) {setBusy(true);setError("");try{const result=await preorderAction({id,...payload});if(result.url){window.location.assign(result.url);return;}await load();}catch(e){setError(e instanceof Error?e.message:"Update failed.");}finally{setBusy(false);}}
-  const outstanding=rows.filter(r=>["reserved","allocated","awaiting_payment"].includes(r.status));
-  const totals=Object.entries(outstanding.reduce<Record<string,number>>((sum,r)=>({...sum,[r.terms.currency]:(sum[r.terms.currency]??0)+r.quantity*r.terms.priceCents-(r.deposit?.subtotalCents ?? 0)}),{}));
-  return <div className="preorder-dashboard">
-    <p>Track your deposits, expected ship dates and remaining balances. <Link href="/account?view=orders">Paid orders and tracking</Link></p>
-    <div className="preorder-panel"><h2>Your preorders</h2><p>{outstanding.length} active · {totals.length?totals.map(([currency,value])=>formatMoney(value,currency)).join(" + "):"$0.00"} remaining item balance, plus shipping and applicable tax.</p></div>
+  const preorders=rows.filter(r=>!r.orderId||!orderIds.includes(r.orderId));
+  return <div className="garage-list integrated-preorders">
     {error&&<p className="form-error" role="alert">{error}</p>}{loading&&<p role="status">Loading reservations…</p>}
-    {!loading&&!rows.length&&<p>No reservations yet. <Link href="/marketplace?availability=preorder">Browse upcoming releases</Link>.</p>}
-    {waitlist.length>0&&<section className="preorder-panel"><h2>Seller waitlists</h2><p>Interest only; no reserved unit, payment or reservation priority until you accept an invitation.</p>{waitlist.map(w=><p key={w.id}>{w.title} · {w.sellerName} · {w.quantity} requested · {w.status} {["waiting","invited"].includes(w.status)&&<button className="text-link" disabled={busy} onClick={()=>action(w.id,{action:"cancel_waitlist"})}>Leave waitlist</button>}</p>)}</section>}
-    {rows.map(r=><article key={r.id} className="preorder-panel">
-      <div className="preorder-heading"><h2>{r.terms.title}</h2><span className="preorder-state">{r.status === "hold" ? "Deposit not paid" : r.status === "reserved" ? "Awaiting stock" : r.status === "awaiting_payment" ? "Balance due" : r.status === "converted" ? "Paid" : r.status.replaceAll("_"," ")}</span></div>
+    {!loading&&!error&&!rows.length&&!orderIds.length&&<p>No orders yet. <Link href="/marketplace">Find a model</Link>.</p>}
+    {preorders.map(r=><article key={r.id} id={`preorder-${r.id}`} className="order-preorder">
+      <div><b>Preorder</b><span className="status">{r.status === "hold" ? "Deposit not paid" : r.status === "reserved" ? "Awaiting stock" : r.status === "awaiting_payment" ? "Balance due" : r.status === "converted" ? "Paid" : r.status.replaceAll("_"," ")}</span></div>
+      <h3>{r.terms.title}</h3>
       <p>{r.terms.sellerName} · {r.quantity} {r.terms.saleUnit}{r.quantity===1?"":"s"} · {formatMoney(r.quantity*r.terms.priceCents,r.terms.currency)} item subtotal</p>
       {r.deposit&&<p><strong>Deposit paid: {formatMoney(r.deposit.amountCents,r.terms.currency)}</strong>{r.deposit.taxCents > 0 ? ` (includes ${formatMoney(r.deposit.taxCents,r.terms.currency)} tax)` : ""}{r.deposit.refundedCents > 0 ? ` · ${formatMoney(r.deposit.refundedCents,r.terms.currency)} refunded` : ""}</p>}
       {["reserved","allocated","awaiting_payment","hold"].includes(r.status)&&<p>Remaining item balance: <strong>{formatMoney(r.quantity*r.terms.priceCents-(r.deposit?.subtotalCents ?? 0),r.terms.currency)}</strong>, plus shipping and applicable tax.</p>}
-      <p>Original dispatch: <strong>{r.terms.dispatch.label}</strong><br/>Current estimate: <strong>{r.currentTerms.dispatch.label}</strong></p>
+      <p>Expected to ship: <strong>{r.currentTerms.dispatch.label}</strong></p>
+      <details className="order-preorder-details" open={["hold","awaiting_payment","allocated"].includes(r.status)||r.consentState==="required"}>
+      <summary>{r.status==="hold" ? "Review and pay deposit" : r.consentState==="required" ? "Review updated ship date" : r.status==="awaiting_payment" ? "Pay remaining balance" : "Order details and options"}</summary>
       {r.status==="hold"&&<form className="preorder-form" onSubmit={e=>{e.preventDefault();const form=new FormData(e.currentTarget);void action(r.id,{action:r.terms.paymentModel === "deposit_10" ? "deposit" : "confirm",acceptedTerms:form.get("accepted")==="on",adultConsent:form.get("adultConsent")});}}><ReservationTerms terms={r.terms} quantity={r.quantity}/><p>Complete checkout by {new Date(r.holdExpiresAt).toLocaleString()}.</p><label className="preorder-check"><input type="checkbox" name="accepted" required/>I accept the expected ship date and preorder cancellation terms.</label><AdultConsent/><button className="button dark" disabled={busy}>{r.terms.paymentModel === "deposit_10" ? "Pay deposit" : "Confirm reservation"}</button></form>}
       {r.paymentDeadline&&<p>Payment / allocation deadline: <time dateTime={r.paymentDeadline}>{new Date(r.paymentDeadline).toLocaleString()}</time></p>}
       {r.checkoutReservationId && r.status !== "converted" && <button className="button outline" disabled={busy} onClick={()=>action(r.id,{action:"close_checkout"})}>Close payment checkout to change details</button>}
@@ -44,8 +50,19 @@ export function PreorderDashboard() {
       {r.deposit && r.deposit.refundStatus !== "not_required" && <p role="status">Deposit refund: {r.deposit.refundStatus === "succeeded" ? "Completed" : ["required","pending"].includes(r.deposit.refundStatus) ? "Processing" : "Needs attention — contact support"}.</p>}
       {r.deposit && ["cancelled","expired"].includes(r.status) && r.deposit.refundStatus === "not_required" && <p>Your preorder has ended. The deposit is retained under the accepted cancellation terms. Contact the seller to request a discretionary refund.</p>}
       <details><summary>Accepted terms and update history</summary><ReservationTerms terms={r.terms} quantity={r.quantity}/>{r.events.map(e=><div key={e.id} className="preorder-event"><strong>{e.kind.replaceAll("_"," ")}</strong> · {e.createdAt}<EventDetail detail={e.detail}/></div>)}</details>
+      </details>
     </article>)}
+    {children(rows)}
+    {waitlist.length>0&&<details className="order-preorder-details"><summary>Upcoming release waitlists ({waitlist.length})</summary><p>No payment or reserved unit until you accept an invitation.</p>{waitlist.map(w=><p key={w.id}>{w.title} · {w.sellerName} · {w.quantity} requested · {w.status} {["waiting","invited"].includes(w.status)&&<button className="text-link" disabled={busy} onClick={()=>action(w.id,{action:"cancel_waitlist"})}>Leave waitlist</button>}</p>)}</details>}
   </div>;
+}
+export function PreorderOrderHistory({reservation:r}:{reservation:Reservation|undefined}) {
+  if(!r)return null;
+  return <details className="order-preorder-details"><summary>Preorder payment and history</summary>
+    {r.deposit&&<p>{formatMoney(r.deposit.amountCents,r.terms.currency)} deposit credited to this order{r.deposit.refundedCents>0 ? ` · ${formatMoney(r.deposit.refundedCents,r.terms.currency)} refunded` : ""}.</p>}
+    {r.deposit&&r.deposit.refundStatus!=="not_required"&&<p>Deposit refund: {r.deposit.refundStatus==="succeeded" ? "Completed" : ["required","pending"].includes(r.deposit.refundStatus) ? "Processing" : "Needs attention"}.</p>}
+    <ReservationTerms terms={r.terms} quantity={r.quantity}/>{r.events.map(e=><div key={e.id} className="preorder-event"><strong>{e.kind.replaceAll("_"," ")}</strong> · {e.createdAt}<EventDetail detail={e.detail}/></div>)}
+  </details>;
 }
 function EventDetail({detail}:{detail:string}) { const d=JSON.parse(detail); return <p>{[d.message,d.status?`Status: ${d.status}`:null,d.reason?.replaceAll("_"," "),d.currentDispatch?.label?`Dispatch: ${d.currentDispatch.label}`:null,d.responseDeadline?`Respond by ${d.responseDeadline}`:null,d.affectedUnits?`${d.affectedUnits} units affected`:null,d.refundedCents!=null?`Returned ${formatMoney(d.refundedCents,d.currency)}; still owed ${formatMoney(d.outstandingCents,d.currency)}; pending ${formatMoney(d.pendingCents,d.currency)}`:null].filter(Boolean).join(" · ")}</p>; }
 function PreorderPayment({reservation:r}:{reservation:Reservation}) {

@@ -15,10 +15,12 @@ export const metadata: Metadata = {
 export default async function StorePage({
   searchParams,
 }: {
-  searchParams: Promise<{ view?: string; edit?: string; filter?: string }>;
+  searchParams: Promise<{ view?: string; edit?: string; filter?: string; preorder?: string }>;
 }) {
-  const account = await requireCollector("/store");
   const query = await searchParams;
+  const returnParams=new URLSearchParams();
+  for(const key of ["view","edit","filter","preorder"] as const)if(query[key])returnParams.set(key,query[key]);
+  const account = await requireCollector(returnParams.size ? `/store?${returnParams}` : "/store");
   const data = await getStoreDashboardData(account.user.id);
   if (!data)
     return (
@@ -49,6 +51,7 @@ export default async function StorePage({
       data={data}
       initialView={query.view ?? (query.edit ? "inventory" : "overview")}
       initialProductId={query.edit}
+      initialPreorderId={query.preorder}
       initialFilter={query.filter}
       email={account.user.email}
     />

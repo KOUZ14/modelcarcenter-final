@@ -114,7 +114,7 @@ export default async function ProductPage({
             </p>
             {product.availabilityType !== "preorder" && <ProductShippingEstimate key={product.id} product={product} />}
             <p className="stock-line">
-              {product.availabilityType === "preorder" ? "Upcoming release · Reserve now, pay after inspection" : product.availableQuantity < 1 ? "Sold out"
+              {product.availabilityType === "preorder" ? "Upcoming release · See preorder terms below" : product.availableQuantity < 1 ? "Sold out"
                   : product.availableQuantity === 1
                     ? "Only 1 available"
                     : `${product.availableQuantity} available`}{" "}

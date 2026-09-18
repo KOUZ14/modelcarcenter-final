@@ -1,6 +1,7 @@
 "use client";
 
 import { SellerOrderAmounts } from "./seller-order-amounts";
+import { PreorderDashboard, PreorderOrderHistory } from "./preorder-dashboard";
 
 import Image from "next/image";
 import Link from "next/link";
@@ -97,7 +98,6 @@ export function AccountDashboard({
   return (
     <div className="garage-layout">
       <aside className="garage-nav">
-        <Link href="/preorders">My Preorders</Link>
         <p className="eyebrow">Collector account</p>
         <h1>My Garage</h1>
         <p>
@@ -119,6 +119,8 @@ export function AccountDashboard({
                 ? "Model Hunts"
                 : tab === "listings"
                   ? "My Listings"
+                  : tab === "orders"
+                    ? "My Orders"
                   : tab === "sales"
                     ? "My Sales"
                     : tab[0].toUpperCase() + tab.slice(1)}
@@ -333,24 +335,14 @@ function Orders({
   rows: GarageData["orders"];
   action(payload: Record<string, unknown>): Promise<unknown>;
 }) {
-  if (!rows.length)
-    return (
-      <EmptyOrCount
-        count={0}
-        title="Orders"
-        empty="No orders yet."
-        cta="Find a Model"
-        href="/marketplace"
-        detail=""
-      />
-    );
   return (
     <div className="garage-section">
       <p className="eyebrow">Orders</p>
-      <h2>Purchase history</h2>
-      <div className="garage-list">
-        {rows.map((order) => (
-          <article key={String(order.id)}>
+      <h2>My Orders</h2>
+      <p>Purchases, preorder deposits, payments and delivery updates.</p>
+      <PreorderDashboard orderIds={rows.map(order => String(order.id))}>
+        {preorders=>rows.map((order) => (
+          <article key={String(order.id)} id={`order-${String(order.id)}`}>
             <div>
               <b>{String(order.orderNumber)}</b>
               <span>{date(String(order.createdAt))}</span>
@@ -391,13 +383,14 @@ function Orders({
               </p>
             )}
             {order.shipment && <ShipmentTimeline shipment={order.shipment} />}
+            <PreorderOrderHistory reservation={preorders.find(r=>r.orderId===String(order.id))}/>
             <Link className="button outline small" href={`/resolution?order=${String(order.id)}`}>
               Get help with this order
             </Link>
             <VerifiedFeedbackAvailability order={order} action={action} />
           </article>
         ))}
-      </div>
+      </PreorderDashboard>
     </div>
   );
 }

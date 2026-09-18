@@ -5,10 +5,12 @@ Preorders are an availability option in **Seller Hub → Inventory → Create li
 ## Buyer and seller flow
 
 1. The buyer chooses a quantity on the listing, accepts the ship estimate and cancellation terms, and pays a **10% merchandise deposit** in Stripe Checkout. Applicable tax is shown before payment. The deposit is rounded to the nearest cent per unit; the minimum item price is $5.
-2. The preorder appears in `/preorders`, with the deposit paid, expected ship date and remaining balance. A successful, verified deposit confirms the reservation. Abandoned checkout does not reserve stock indefinitely.
-3. The seller opens `/store/preorders` and chooses **Mark stock ready**, entering the number of inspected, available units. Receipt totals are cumulative, so submitting the same receipt twice does not add stock twice.
+2. The preorder appears alongside other purchases in **My Garage → My Orders** (`/account?view=orders`), with the deposit paid, expected ship date and remaining balance. A successful, verified deposit confirms the reservation. Abandoned checkout does not reserve stock indefinitely.
+3. The seller opens **Seller Hub → Inventory**, chooses **Manage preorder** on the listing, and selects **Mark stock ready**, entering the number of inspected, available units. Stock, dates and cancellation controls open within the inventory screen. Customer deposits and refunds also appear under **Orders → Preorders**. Receipt totals are cumulative, so submitting the same receipt twice does not add stock twice.
 4. The buyer receives a notice and has **seven calendar days** to pay the remaining **90%**, plus shipping and applicable tax. The merchandise deposit is deducted from the item price. The buyer selects shipping and explicitly pays in Stripe; no automatic later charge is made.
 5. Payment creates an ordinary order containing the complete item price and both payments. Shipping, tracking, disputes and returns continue through the existing Orders and Resolution Center screens.
+
+The former `/preorders` and `/store/preorders` URLs redirect into My Orders and Inventory, preserving old payment and email links. They no longer render separate pages. Fully paid preorders use the ordinary order card instead of appearing twice.
 
 For example, a $100 item requires a $10 merchandise deposit and a $90 merchandise balance. Shipping is collected with the balance; any tax on each payment is shown separately at checkout.
 

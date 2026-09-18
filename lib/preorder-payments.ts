@@ -18,7 +18,7 @@ const now = () => new Date().toISOString();
 export async function preorderPaymentCart(userId: string, id: string) {
   const r = await buyerReservation(userId,id), terms = termsOf(r);
   const [batch] = await getDb().select().from(incomingBatches).where(eq(incomingBatches.id,r.batchId)).limit(1);
-  if (r.status !== "awaiting_payment" || r.allocatedQuantity !== r.quantity || r.consentState !== "accepted" || !r.paymentDeadline || r.paymentDeadline <= now() || r.acceptedRevision !== batch.revision || batch.supplyState === "cancelled" || !batch.dispatchEnd || (terms.paymentModel !== "deposit_10" && batch.dispatchEnd <= now())) throw new ValidationError("Payment is not available. Review your allocation, deadline and any required consent in My Preorders.");
+  if (r.status !== "awaiting_payment" || r.allocatedQuantity !== r.quantity || r.consentState !== "accepted" || !r.paymentDeadline || r.paymentDeadline <= now() || r.acceptedRevision !== batch.revision || batch.supplyState === "cancelled" || !batch.dispatchEnd || (terms.paymentModel !== "deposit_10" && batch.dispatchEnd <= now())) throw new ValidationError("Payment is not available. Review your allocation, deadline and any required consent in My Orders.");
   const deposit = terms.paymentModel === "deposit_10" ? await paidPreorderDeposit(r.id) : undefined;
   if (terms.paymentModel === "deposit_10") {
     const saved = await getD1().prepare("SELECT dispute_status disputeStatus FROM preorder_deposit_checkouts WHERE reservation_id=?").bind(r.id).first<{disputeStatus:string}>();

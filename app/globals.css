@@ -1661,6 +1661,17 @@ html:has(.cookie-notice) { scroll-padding-bottom: 240px; }
 .preorder-purchase .preorder-form > label:not(.preorder-check) { max-width: 150px; }
 .preorder-purchase .preorder-cancellation-terms { font-size: 12px; color: var(--muted); }
 .preorder-table td small { display: block; margin-top: 4px; }
+.integrated-preorders { margin-top: 24px; }
+.integrated-preorders > article > div:first-of-type { flex-wrap: wrap; }
+.order-preorder-details { border-top: 1px solid var(--line); padding-top: 16px; }
+.order-preorder-details summary, .preorder-listing summary { cursor: pointer; font-weight: 650; line-height: 1.5; }
+.order-preorder-details > details, .preorder-listing details { border-top: 1px solid var(--line); padding-block: 16px; margin-top: 16px; }
+.order-preorder-details .row-actions, .preorder-listing .row-actions { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-block: 16px; }
+.preorder-listing p { color: var(--muted); line-height: 1.6; margin-block: 12px; }
+.preorder-listing h3 { font-size: 22px; margin-bottom: 8px; }
+.preorder-listing .preorder-heading { margin-bottom: 20px; }
+.preorder-listing .preorder-price-breakdown { margin-block: 20px; }
+.store-order-header h3 { overflow-wrap: anywhere; }
 @media(max-width:640px) {
   .promotion-inventory-row { flex-wrap: wrap; gap: 12px; }
   .promotion-listing-title { flex-basis: calc(100% - 96px); }

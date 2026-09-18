@@ -50,7 +50,7 @@ export function PreorderOffer({product}:{product:ProductSummary}) {
   return <section className="preorder-panel preorder-purchase" aria-label="Preorder">
     <p className="eyebrow">Preorder</p>
     {error&&<p role="alert" className="form-error">{error}</p>}
-    {loading ? <p role="status">Loading preorder details…</p> : confirmed ? <p role="status">Reservation confirmed. Follow updates in <Link href="/preorders">My Preorders</Link>.</p> : <>
+    {loading ? <p role="status">Loading preorder details…</p> : confirmed ? <p role="status">Reservation confirmed. Follow updates in <Link href="/account?view=orders">My Orders</Link>.</p> : <>
       {offers.map(offer=><div key={offer.id}>
         <ReservationTerms terms={offer.terms} quantity={quantity}/>
         {offer.canReserve ? <form className="preorder-form" onSubmit={e=>reserve(e,offer)}>
@@ -63,7 +63,7 @@ export function PreorderOffer({product}:{product:ProductSummary}) {
       </div>)}
       {!offers.length && <p>This upcoming listing is not accepting preorders yet.</p>}
       <details><summary>Notify me about availability</summary>{notified ? <p role="status">Availability alert saved.</p> : <form className="preorder-form" onSubmit={notify}><label>Email<input name="email" type="email" required autoComplete="email"/></label><AdultConsent/><button className="button outline" disabled={busy}>Notify me</button></form>}</details>
-      <p className="form-note"><Link href="/preorders">My preorders</Link> · <Link href={`/sign-in?returnTo=${encodeURIComponent(`/products/${product.slug}`)}`}>Sign in to preorder</Link></p>
+      <p className="form-note"><Link href="/account?view=orders">My Orders</Link> · <Link href={`/sign-in?returnTo=${encodeURIComponent(`/products/${product.slug}`)}`}>Sign in to preorder</Link></p>
     </>}
   </section>;
 }
