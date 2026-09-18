@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ModelCommunity } from "@/components/model-community";
 import { notFound, permanentRedirect } from "next/navigation";
 import { getCatalogListings } from "@/lib/catalog";
 import { SiteHeader } from "@/components/site-header";
@@ -32,5 +33,6 @@ export default async function CatalogModelPage({ params }: { params: Promise<{ i
         <div><strong>{listing.availabilityType === "preorder" && !listing.priceCents ? "Price to be announced" : formatMoney(listing.priceCents, listing.currency)}</strong><p>{listing.shippingMode === "calculated" ? "Shipping calculated for your address" : listing.shippingMode === "free" || listing.defaultShippingCents === 0 ? "Free shipping" : `Shipping ${formatMoney(listing.defaultShippingCents, listing.currency)}`}</p><Link className="button dark small" href={`/products/${listing.slug}`}>View seller listing</Link></div>
       </li>)}</ul>}
     </section>
+    <ModelCommunity catalogId={model.id}/>
   </div><SiteFooter /></main>;
 }

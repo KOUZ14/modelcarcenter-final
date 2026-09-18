@@ -14,6 +14,8 @@ import {
   messagePreview,
 } from "./messaging-rules";
 import { POLICY_VERSION } from "./legal";
+import { assertContact } from "./community";
+import { startCollectorThread,collectorMessageAction } from "./collector-messaging";
 import { ValidationError } from "./validation";
 
 const conversationSelection = {
@@ -221,45 +223,11 @@ export async function startConversation(
     );
   if (product.sellerOwnerUserId === userId)
     throw new ValidationError("You cannot message your own listing.");
+  await assertContact(userId, product.sellerOwnerUserId);
 
-  const now = new Date().toISOString();
-  const candidateId = crypto.randomUUID();
-  await getD1()
-    .prepare(
-      `INSERT OR IGNORE INTO conversations
-      (id, buyer_user_id, seller_id, product_id, product_title_snapshot,
-       product_slug_snapshot, product_image_url_snapshot, last_message_at,
-       buyer_last_read_at, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .bind(
-      candidateId,
-      userId,
-      product.sellerId,
-      product.id,
-      product.title,
-      product.slug,
-      product.primaryImageUrl,
-      now,
-      now,
-      now,
-      now,
-    )
-    .run();
-  const existing = await getDb()
-    .select({ id: conversations.id })
-    .from(conversations)
-    .where(
-      and(
-        eq(conversations.buyerUserId, userId),
-        eq(conversations.sellerId, product.sellerId),
-        eq(conversations.productId, product.id),
-      ),
-    )
-    .limit(1);
-  if (!existing[0]) throw new Error("The conversation could not be created.");
-  await insertMessage(existing[0].id, userId, body, "buyer");
-  return { conversationId: existing[0].id };
+  const conversationId=await startCollectorThread(userId,product.sellerOwnerUserId,undefined,false,product.title);
+  await collectorMessageAction(userId,{action:'send',id:conversationId,body});
+  return {conversationId,collectorThread:true};
 }
 
 export async function sendConversationMessage(
@@ -269,6 +237,7 @@ export async function sendConversationMessage(
 ) {
   const body = requireMessageBody(rawBody);
   const access = await requireConversationAccess(userId, conversationId);
+  if (access.sellerOwnerUserId) await assertContact(access.buyerUserId, access.sellerOwnerUserId);
   await insertMessage(conversationId, userId, body, access.role);
   return { conversationId };
 }

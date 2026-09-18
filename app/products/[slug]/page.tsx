@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { ModelCommunity } from "@/components/model-community";
 import { notFound } from "next/navigation";
 import { getProductBySlug, getRelatedProducts } from "@/lib/catalog";
 import { ProductGallery } from "@/components/product-gallery";
@@ -237,6 +238,7 @@ export default async function ProductPage({
             compact
           />
         )}
+        {product.catalogProductId && <ModelCommunity catalogId={product.catalogProductId}/>}
         {related.length > 0 && (
           <section className="related-section">
             <div className="section-heading">

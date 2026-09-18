@@ -561,6 +561,7 @@ export async function getOwnedProductForImages(
 export async function deleteCollectorAccount(userId: string) {
   const d1 = getD1();
   await d1.batch([
+    d1.prepare("UPDATE collection_offers SET status='withdrawn' WHERE (buyer_id=? OR owner_id=?) AND status IN ('proposed','reserved')").bind(userId,userId),
     // End unpaid promises and release inspected stock before unlinking the user.
     // Accepted commercial evidence remains available for service and refunds.
     d1.prepare("UPDATE preorder_reservations SET status='cancelled',allocated_quantity=0,actor=?,reason='account_deleted',updated_at=CURRENT_TIMESTAMP WHERE buyer_user_id=? AND status IN ('hold','reserved','allocated','awaiting_payment')").bind(userId,userId),

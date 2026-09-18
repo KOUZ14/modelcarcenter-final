@@ -370,7 +370,7 @@ function Orders({
                   <span />
                 )}
                 <p>
-                  {String(item.productTitleSnapshot)} × {String(item.quantity)}
+                  {String(item.productTitleSnapshot)}{order.fulfillmentStatus === 'delivered' && <Link href={`/collection?fromOrderItem=${encodeURIComponent(String(item.id))}`}> · Add to my collection</Link>} × {String(item.quantity)}
                   {item.availabilityTypeSnapshot === "preorder" && item.releaseDateSnapshot ? ` · Preorder releases ${date(String(item.releaseDateSnapshot))}` : ""}
                 </p>
               </div>

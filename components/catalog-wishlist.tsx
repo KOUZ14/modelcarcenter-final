@@ -1,0 +1,5 @@
+"use client";
+import Link from "next/link";
+import { useEffect,useState } from "react";
+import { Action } from "./community-ui";
+export function CatalogWishlist(){const[models,setModels]=useState<Array<{id:string;title:string;scale:string;modelManufacturer:string}>>([]);const load=()=>fetch('/api/collectors?view=wishlist').then(r=>r.json()).then(d=>setModels(d.models||[]));useEffect(()=>{void load();},[]);return <section className="model-community"><h2>Wanted catalog models</h2><p>Models you want, including releases with no current listings. Saved community posts remain in <Link href="/community?tab=saved">Saved posts</Link>.</p>{models.map(m=><article className="collector-card" key={m.id}><div><Link href={`/models/${m.id}`}><strong>{m.title}</strong></Link><p>{m.scale} · {m.modelManufacturer}</p></div><Action payload={{action:'wishlist',catalogId:m.id,enabled:false}} onDone={()=>void load()}>Remove</Action></article>)}{!models.length&&<p>Add a model to your wishlist from the catalog or a collector’s post.</p>}</section>;}

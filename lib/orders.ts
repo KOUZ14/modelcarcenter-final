@@ -1,4 +1,5 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
+import { guardCollectionPayment } from "./collection-payment-guard";
 import { getD1, getDb } from "@/db";
 import {
   checkoutReservationItems,
@@ -564,6 +565,7 @@ async function finalizePaidCheckout(event: StripeEvent, session: StripeCheckoutS
   const reservationId = session.metadata?.reservation_id;
   if (!reservationId) throw new Error("Paid Checkout Session is missing reservation metadata.");
   if (await preorderForCheckout(reservationId)) return finalizePreorderPayment(event, session, preparePaidOrder);
+  await guardCollectionPayment(reservationId, session.id, session);
   const db = getDb();
   const existingOrder = await db
     .select({ id: orders.id })

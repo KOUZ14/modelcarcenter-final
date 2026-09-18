@@ -283,11 +283,12 @@ export async function releaseReservation(reservationId: string) {
     .where(eq(checkoutReservationItems.reservationId, reservationId));
   const d1 = getD1();
   const pendingGuard = `EXISTS (SELECT 1 FROM checkout_reservations WHERE id = ? AND status = 'pending')
-    AND NOT EXISTS (SELECT 1 FROM preorder_checkouts WHERE checkout_id = ?)`;
+    AND NOT EXISTS (SELECT 1 FROM preorder_checkouts WHERE checkout_id = ?)
+    AND NOT EXISTS (SELECT 1 FROM collection_offer_checkouts WHERE checkout_id = ?)`;
   const statements = items.map((item) =>
     d1.prepare(`UPDATE products SET reserved_quantity = reserved_quantity - ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ? AND reserved_quantity >= ? AND ${pendingGuard}`)
-      .bind(item.quantity, item.productId, item.quantity, reservationId, reservationId),
+      .bind(item.quantity, item.productId, item.quantity, reservationId, reservationId, reservationId),
   );
   statements.push(
     d1.prepare(`UPDATE preorder_reservations SET checkout_reservation_id = NULL, updated_at = CURRENT_TIMESTAMP

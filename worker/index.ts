@@ -9,6 +9,7 @@ import { pruneSecurityRateLimits } from "../lib/security-rate-limit";
 import { logSecurityEvent } from "../lib/security-events";
 import { processPreorders } from "../lib/preorder-maintenance";
 import { processPromotions } from "../lib/promotion-payments";
+import { expireCollectionOffersIn } from "../lib/collection-offer-maintenance";
 
 interface Env {
   ASSETS: Fetcher;
@@ -98,6 +99,7 @@ async function runScheduledMaintenance(database: D1Database, now: Date) {
       pruneSecurityRateLimits(database, now.getTime()),
       processPreorders(),
       processPromotions(now.getTime()),
+      expireCollectionOffersIn(database,now.getTime()),
     ]);
     console.info(
       "Scheduled marketplace maintenance completed.",
@@ -132,6 +134,7 @@ function withSecurityHeaders(response: Response, request: Request) {
   let path = "";
   try { path = securityPath(request); } catch { /* Rejected malformed path. */ }
   if (path.startsWith("/api/")) headers.set("Cache-Control", "private, no-store");
+  if (/^\/(community|collectors|collection|profile|messages|notifications|search)(\/|$)/.test(path)) headers.set("Cache-Control", "private, no-store");
   if (path.startsWith("/api/auth/")) headers.set("Referrer-Policy", "no-referrer");
   return new Response(response.body, {
     status: response.status,

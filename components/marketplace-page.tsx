@@ -140,8 +140,9 @@ export function MarketplacePage({
       <section id="main-content" tabIndex={-1} className="marketplace-hero" aria-labelledby="marketplace-title">
         <div className="shell marketplace-hero-layout">
           <div>
-            <h1 id="marketplace-title">Marketplace</h1>
+            <h1 id="marketplace-title">Shop</h1>
             <p>Browse model cars from stores and collectors.</p>
+            <Link className="text-link" href="/sell">Sell on MCC →</Link>
           </div>
           <form
             className="marketplace-search"

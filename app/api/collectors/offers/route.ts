@@ -1,0 +1,10 @@
+import { requireCollectorApi } from "@/lib/collector-auth";
+import { changeCollectionOffer,configureCollectionCommerce,createCollectionOffer,getCollectionOffers } from "@/lib/collection-offers";
+import { cancelCollectionReservation,closeCollectionCheckout,payCollectionOffer,quoteCollectionOffer } from "@/lib/collection-offer-payments";
+import { readJsonObject,routeError } from "@/lib/http";
+import { requireAdultConsent } from "@/lib/form-consent";
+import { assertLiveCheckoutConfigured } from "@/lib/production-readiness";
+import { config } from "@/lib/config";
+import { checkoutReturnCookie } from "@/lib/checkout-return";
+export async function GET(request:Request){try{const c=await requireCollectorApi(request);if(c instanceof Response)return c;return Response.json({offers:await getCollectionOffers(c.user.id)},{headers:{'Cache-Control':'no-store'}});}catch(e){return routeError(e);}}
+export async function POST(request:Request){try{const c=await requireCollectorApi(request);if(c instanceof Response)return c;const p=await readJsonObject(request),action=String(p.action);if(action==='configure')return Response.json(await configureCollectionCommerce(c.user.id,p));if(action==='create')return Response.json(await createCollectionOffer(c.user.id,p));if(action==='quote')return Response.json(await quoteCollectionOffer(c.user,String(p.id),p.destination));if(action==='cancel_reservation'){await cancelCollectionReservation(c.user.id,String(p.id));return Response.json({ok:true});}if(action==='close_checkout'){await closeCollectionCheckout(c.user.id,String(p.id));return Response.json({ok:true});}if(action==='pay'){assertLiveCheckoutConfigured(config);requireAdultConsent(p.adultConsent);const result=await payCollectionOffer(c.user,String(p.id),p);return Response.json(result,{headers:{'Cache-Control':'no-store','Set-Cookie':checkoutReturnCookie(result.reservationId,result.sessionId,result.returnToken)}});}return Response.json(await changeCollectionOffer(c.user.id,p));}catch(e){return routeError(e);}}

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import {useRouter} from "next/navigation";
 import Image from "next/image";
 import {
   FormEvent,
@@ -17,6 +18,7 @@ export function MessageCenter({
 }: {
   initialData: MessagingCenterData;
 }) {
+  const router=useRouter();
   const [data, setData] = useState(initialData);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
@@ -95,6 +97,7 @@ export function MessageCenter({
         : { action: "send", conversationId: active?.id, body: draft };
       const response = await post(payload);
       const body = (await response.json()) as ApiResponse;
+      if (response.ok && body.redirect) {router.push(body.redirect);router.refresh();return;}
       if (!response.ok || !body.data)
         throw new Error(body.error || "The message could not be sent.");
       setData(body.data);
@@ -330,6 +333,7 @@ function EmptyThread() {
 }
 
 type ApiResponse = {
+  redirect?:string;
   ok?: boolean;
   error?: string;
   data?: MessagingCenterData;

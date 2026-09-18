@@ -1,54 +1,12 @@
-import type { Metadata } from "next";
-import { MessageCenter } from "@/components/message-center";
+﻿import { MessageCenter } from "@/components/message-center";
 import { CombinedShippingRequests } from "@/components/combined-shipping-requests";
-import { SiteFooter } from "@/components/site-footer";
+import { CollectorInbox } from "@/components/collector-inbox";
 import { SiteHeader } from "@/components/site-header";
+import { SiteFooter } from "@/components/site-footer";
 import { requireCollector } from "@/lib/collector-auth";
 import { getMessagingCenterData } from "@/lib/messaging";
-
-export const dynamic = "force-dynamic";
-export const metadata: Metadata = {
-  title: "Messages",
-  description: "Private buyer and seller conversations.",
-  robots: { index: false, follow: false },
-};
-
-export default async function MessagesPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ conversation?: string; product?: string }>;
-}) {
-  const query = await searchParams;
-  const returnTo = query.product
-    ? `/messages?product=${encodeURIComponent(query.product)}`
-    : query.conversation
-      ? `/messages?conversation=${encodeURIComponent(query.conversation)}`
-      : "/messages";
-  const collector = await requireCollector(returnTo);
-  const data = await getMessagingCenterData(collector.user.id, {
-    conversationId: query.conversation,
-    productId: query.product,
-  });
-  return (
-    <main className="messages-page">
-      <SiteHeader />
-      <section id="main-content" tabIndex={-1} className="messages-hero">
-        <div className="shell messages-hero-layout">
-          <div>
-            <p className="eyebrow">Buyer · Seller</p>
-            <h1>Messages</h1>
-          </div>
-          <p>
-            Ask about condition, shipping, or anything else you need
-            before a model joins your collection.
-          </p>
-        </div>
-      </section>
-      <div className="shell messages-shell">
-        <CombinedShippingRequests />
-        <MessageCenter initialData={data} />
-      </div>
-      <SiteFooter />
-    </main>
-  );
-}
+import { collectorInbox,threadMessages } from "@/lib/collector-messaging";
+import { getCollectionOffers } from "@/lib/collection-offers";
+export const dynamic='force-dynamic';
+export const metadata={title:'Inbox',description:'Private collector and marketplace conversations.',robots:{index:false,follow:false}};
+export default async function MessagesPage({searchParams}:{searchParams:Promise<Record<string,string>>}){const q=await searchParams,c=await requireCollector(`/messages?${new URLSearchParams(q)}`),[data,threads,messages,offers]=await Promise.all([getMessagingCenterData(c.user.id,{conversationId:q.conversation,productId:q.product}),collectorInbox(c.user.id),q.thread?threadMessages(c.user.id,q.thread):[],getCollectionOffers(c.user.id)]);return <><SiteHeader/><main id="main-content" className="messages-shell shell"><div className="community-title"><div><p className="eyebrow">Collectors & marketplace</p><h1>Inbox</h1></div></div><CollectorInbox userId={c.user.id} threads={threads} messages={messages} offers={offers} selectedId={q.thread} recipient={q.collector} itemId={q.item} tab={q.tab||'messages'}/>{(!q.tab||q.tab==='messages')&&<section className="marketplace-conversations"><h2>Marketplace conversations</h2><CombinedShippingRequests/><MessageCenter initialData={data}/></section>}</main><SiteFooter/></>;}

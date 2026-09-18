@@ -114,6 +114,7 @@ test("account deletion removes optional email data before removing the verified 
     CREATE TABLE orders (id TEXT, buyer_email TEXT);
     CREATE TABLE preorder_reservations (id TEXT,buyer_user_id TEXT,status TEXT,allocated_quantity INTEGER,actor TEXT,reason TEXT,updated_at TEXT);
     CREATE TABLE preorder_waitlist (id TEXT,buyer_user_id TEXT,status TEXT);
+    CREATE TABLE collection_offers (id TEXT,buyer_id TEXT,owner_id TEXT,status TEXT);
     INSERT INTO user VALUES ('account-1','one@example.test'), ('account-2','two@example.test');
     INSERT INTO session VALUES ('session-1','account-1'), ('session-2','account-2');
     INSERT INTO community_subscribers VALUES ('sub-1','ONE@example.test'), ('sub-2','two@example.test');
@@ -124,6 +125,7 @@ test("account deletion removes optional email data before removing the verified 
     INSERT INTO orders VALUES ('order-1','one@example.test');
     INSERT INTO preorder_reservations VALUES ('reserve-1','account-1','awaiting_payment',1,NULL,NULL,NULL);
     INSERT INTO preorder_waitlist VALUES ('wait-1','account-1','waiting');
+    INSERT INTO collection_offers VALUES ('offer-1','account-1','account-2','reserved'),('offer-paid','account-1','account-2','completed');
   `);
   try {
     // Compile and execute the actual production function against an isolated SQL database.
@@ -144,5 +146,7 @@ test("account deletion removes optional email data before removing the verified 
     assert.equal(sqlite.prepare("SELECT status FROM preorder_reservations").get().status, "cancelled");
     assert.equal(sqlite.prepare("SELECT allocated_quantity FROM preorder_reservations").get().allocated_quantity, 0);
     assert.equal(sqlite.prepare("SELECT status FROM preorder_waitlist").get().status, "cancelled");
+    assert.equal(sqlite.prepare("SELECT status FROM collection_offers WHERE id='offer-1'").get().status, "withdrawn");
+    assert.equal(sqlite.prepare("SELECT status FROM collection_offers WHERE id='offer-paid'").get().status, "completed");
   } finally { sqlite.close(); }
 });

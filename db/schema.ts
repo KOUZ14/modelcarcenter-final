@@ -9,6 +9,7 @@ import {
   type AnySQLiteColumn,
 } from "drizzle-orm/sqlite-core";
 import { user as authUser } from "./auth-schema.generated";
+export * from "./community-schema";
 
 export {
   account,

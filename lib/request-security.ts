@@ -48,7 +48,7 @@ export function requestBodyLimit(request: Request) {
   if (path === "/api/promotions/events") return 4 * KiB;
   if (webhookPaths.has(path)) return MiB;
   const multipart = request.headers.get("content-type")?.toLowerCase().startsWith("multipart/form-data");
-  if (multipart && ["/api/listings/images", "/api/admin/images", "/api/resolution"].includes(path)) return 11 * MiB;
+  if (multipart && ["/api/listings/images", "/api/admin/images", "/api/resolution", "/api/collectors/photos"].includes(path)) return 11 * MiB;
   // Room for the existing 5 MB CSV import and JSON framing.
   if (["/api/admin", "/api/store"].includes(path)) return 6 * MiB;
   return 64 * KiB;
@@ -98,6 +98,8 @@ export function requestRateRules(request: Request): RateLimitRule[] {
     }
   } else if (["/api/community", "/api/model-hunts", "/api/seller-applications", "/api/availability-alerts"].includes(path)) {
     rules.push({ scope: "public-submissions", max: 10, windowSeconds: 600 });
+  } else if (path.startsWith("/api/collectors") && request.method === "POST") {
+    rules.push({ scope: "community-writes", max: 30, windowSeconds: 60 });
   } else if (path === "/api/promotions/events") {
     rules.push({ scope: "promotion-events", max: 60, windowSeconds: 60 });
   } else if (path === "/api/promotions/placements") {

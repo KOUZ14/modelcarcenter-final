@@ -41,6 +41,7 @@ export async function POST(request: Request) {
         requiredString(payload.productId, "productId", 100),
         payload.body,
       );
+      if (result.collectorThread) return Response.json({ok:true,redirect:`/messages?thread=${encodeURIComponent(result.conversationId)}&tab=requests`});
       return Response.json({
         ok: true,
         data: await getMessagingCenterData(collector.user.id, {
