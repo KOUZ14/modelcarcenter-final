@@ -17,7 +17,7 @@ export function eventStatement(input: { id?: string; batchId?: string; reservati
     .bind(input.id ?? crypto.randomUUID(), input.batchId ?? null, input.reservationId ?? null, input.actor, input.kind, JSON.stringify(input.detail), input.recipient ?? null);
 }
 export async function ownedBatch(userId: string, batchId: string) {
-  const [row] = await getDb().select({ batch: incomingBatches, listing: products, seller: sellers }).from(incomingBatches)
+  const [row] = await getDb().select({ batch: incomingBatches }).from(incomingBatches)
     .innerJoin(products, eq(products.id, incomingBatches.listingId)).innerJoin(sellers, eq(sellers.id, products.sellerId))
     .where(and(eq(incomingBatches.id, batchId), eq(sellers.ownerUserId, userId))).limit(1);
   if (!row) throw new ValidationError("This incoming batch does not belong to your store.");
@@ -87,7 +87,7 @@ export async function batchCapacity(batch: Batch) {
   return { committed: row!.committed, holds: row!.holds, ...capacitySummary(batch.capacity,batch.safetyBuffer,row!.committed,row!.holds) };
 }
 export async function publicPreorderOffers(listingId: string) {
-  const rows = await getDb().select({ batch: incomingBatches, seller: sellers, listing: products }).from(incomingBatches)
+  const rows = await getDb().select({ batch: incomingBatches, seller: sellers }).from(incomingBatches)
     .innerJoin(products,eq(products.id,incomingBatches.listingId)).innerJoin(sellers,eq(sellers.id,products.sellerId))
     .where(and(eq(incomingBatches.listingId,listingId),eq(sellers.status,"active"),eq(products.status,"active")));
   return Promise.all(rows.map(async ({ batch, seller }) => {
