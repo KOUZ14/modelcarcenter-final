@@ -63,4 +63,6 @@ WHEN NEW.revision=OLD.revision AND NEW.terms!=OLD.terms AND EXISTS (
  SELECT 1 FROM preorder_reservations r WHERE r.batch_id=OLD.id AND
  (r.accepted_at IS NOT NULL OR (r.status='hold' AND r.hold_expires_at > strftime('%Y-%m-%dT%H:%M:%fZ','now')))
 )
-BEGIN SELECT RAISE(ABORT,'Accepted preorder terms must be changed through the buyer notice workflow.'); END;
+BEGIN
+ SELECT RAISE(ABORT,'Accepted preorder terms must be changed through the buyer notice workflow.');
+END;
