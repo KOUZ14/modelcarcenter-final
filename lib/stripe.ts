@@ -234,6 +234,77 @@ export async function expireCheckoutSession(sessionId: string) {
   });
 }
 
+export type PromotionCheckoutInput = {
+  campaignId: string; paymentId: string; sellerId: string; title: string;
+  priceCents: number; currency: string; taxMode: string; taxCode: string;
+  termsVersion: string; expiresAt: number;
+};
+
+export function buildPromotionCheckoutBody(input: PromotionCheckoutInput) {
+  const body = new URLSearchParams({
+    mode: "payment", submit_type: "pay",
+    success_url: `${config.siteUrl}/store?view=marketing&filter=promoted&promotion_return=1`,
+    cancel_url: `${config.siteUrl}/store?view=marketing&filter=promoted`,
+    client_reference_id: input.campaignId,
+    expires_at: String(Math.floor(input.expiresAt / 1000)),
+    "line_items[0][price_data][currency]": input.currency,
+    "line_items[0][price_data][unit_amount]": String(input.priceCents),
+    "line_items[0][price_data][tax_behavior]": "exclusive",
+    "line_items[0][price_data][product_data][name]": `7-day promotion: ${input.title}`.slice(0, 250),
+    "line_items[0][quantity]": "1",
+    "automatic_tax[enabled]": String(input.taxMode === "automatic"),
+    "billing_address_collection": "required",
+    "custom_text[submit][message]": "Seven calendar days from activation. Pauses do not extend expiry. No guaranteed views or sales. No automatic renewal. Voluntary cancellation after activation is not refundable.",
+  });
+  if (input.taxMode === "automatic") body.set("line_items[0][price_data][product_data][tax_code]", input.taxCode);
+  for (const [key, value] of Object.entries({ purpose: "listing_promotion", campaign_id: input.campaignId, promotion_payment_id: input.paymentId, seller_id: input.sellerId, promotion_terms_version: input.termsVersion })) {
+    body.set(`metadata[${key}]`, value);
+    body.set(`payment_intent_data[metadata][${key}]`, value);
+  }
+  return body;
+}
+
+export async function createPromotionCheckout(input: PromotionCheckoutInput) {
+  assertLiveCheckoutConfigured(config);
+  const liveKey = /^(sk|rk)_live_/.test(config.stripeSecretKey);
+  if (liveKey !== (config.marketplaceMode === "live")) throw new Error("Stripe mode does not match marketplace mode.");
+  return stripeRequest<StripeCheckoutSession>("/v1/checkout/sessions", {
+    method: "POST", body: buildPromotionCheckoutBody(input), idempotencyKey: `promotion-checkout-${input.paymentId}`,
+  });
+}
+
+export async function createPromotionRefund(input: { id: string; campaignId: string; paymentIntentId: string; amountCents: number }) {
+  return stripeRequest<{ id: string; status: string; amount: number }>("/v1/refunds", {
+    method: "POST", idempotencyKey: `promotion-refund-${input.id}`,
+    body: new URLSearchParams({ payment_intent: input.paymentIntentId, amount: String(input.amountCents), "metadata[promotion_refund_id]": input.id, "metadata[campaign_id]": input.campaignId }),
+  });
+}
+
+export async function retrievePromotionDispute(id: string) {
+  return stripeRequest<{ id: string; status: string }>(`/v1/disputes/${encodeURIComponent(id)}`);
+}
+
+export async function retrievePromotionPaymentIntent(id: string) {
+  return stripeRequest<{ id: string; metadata: Record<string, string> }>(`/v1/payment_intents/${encodeURIComponent(id)}`);
+}
+
+export async function findPromotionCheckout(paymentId: string, createdAt: number) {
+  let after = "";
+  for (let page = 0; page < 20; page++) {
+    const result = await stripeRequest<{ data: StripeCheckoutSession[]; has_more: boolean }>(`/v1/checkout/sessions?limit=100&created[gte]=${Math.floor(createdAt / 1000) - 60}&created[lte]=${Math.ceil(createdAt / 1000) + 3600}${after ? `&starting_after=${encodeURIComponent(after)}` : ""}`);
+    const match = result.data.find(s => s.metadata?.promotion_payment_id === paymentId);
+    if (match) return match;
+    if (!result.has_more) return null;
+    if (!result.data.length) break;
+    after = result.data[result.data.length - 1].id;
+  }
+  throw new Error("Promotion checkout lookup requires administrator reconciliation.");
+}
+
+export async function retrieveRefund(refundId: string) {
+  return stripeRequest<{ id: string; status: string; failure_reason?: string }>(`/v1/refunds/${encodeURIComponent(refundId)}`);
+}
+
 export type StripeAccount = {
   id: string;
   charges_enabled: boolean;

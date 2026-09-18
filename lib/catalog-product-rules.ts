@@ -1,4 +1,5 @@
 import { cleanText, requiredString, ValidationError } from "./validation.ts";
+import { dateWindow } from "./preorder-rules.ts";
 
 export const catalogScales = ["1:12", "1:18", "1:24", "1:32", "1:43", "1:64", "1:87", "Other"] as const;
 export const catalogManufacturers = ["AUTOart", "MINI GT", "Tarmac Works", "Kaido House", "Hot Wheels", "Matchbox", "Kyosho", "Minichamps", "BBR", "Looksmart", "Solido", "Maisto"] as const;
@@ -33,6 +34,7 @@ function barcode(value: unknown, name: string, lengths: number[]) {
 }
 
 export function parseCatalogProduct(payload: Record<string, unknown>) {
+  if (payload.manufacturerReleasePrecision && payload.manufacturerReleasePrecision !== "unknown" && !cleanText(payload.releaseSource,2000)) throw new ValidationError("Provide the source for a manufacturer release window.");
   const modelManufacturer = normalizeManufacturer(requiredString(payload.modelManufacturer, "model-car manufacturer", 100));
   const manufacturerSku = cleanText(payload.manufacturerSku ?? payload.productNumber, 150) || null;
   const vehicleMake = requiredString(payload.vehicleMake, "vehicle make", 100);
@@ -56,6 +58,15 @@ export function parseCatalogProduct(payload: Record<string, unknown>) {
     color,
     livery: cleanText(payload.livery, 150) || null,
     releaseYear: cleanText(payload.releaseYear, 20) || null,
+    edition: cleanText(payload.edition, 150) || null,
+    packagingVariant: cleanText(payload.packagingVariant, 150) || null,
+    versionKind: payload.versionKind === "chase" ? "chase" : "regular",
+    setContents: cleanText(payload.setContents, 2000) || null,
+    releaseStatus: payload.releaseStatus === "announced" ? "announced" : "unknown",
+    manufacturerRelease: payload.manufacturerReleasePrecision ? JSON.stringify(dateWindow({precision:payload.manufacturerReleasePrecision,start:payload.manufacturerReleaseStart,end:payload.manufacturerReleaseEnd||payload.manufacturerReleaseStart})) : null,
+    releaseSource: cleanText(payload.releaseSource, 2000) || null,
+    releaseCheckedAt: payload.releaseSource ? new Date().toISOString() : null,
+    previewMedia: payload.catalogPreviewMedia === "true" || payload.catalogPreviewMedia === "on" || payload.catalogPreviewMedia === true,
     material: cleanText(payload.material, 120),
     upc,
     ean,

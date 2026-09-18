@@ -97,6 +97,7 @@ export function AccountDashboard({
   return (
     <div className="garage-layout">
       <aside className="garage-nav">
+        <Link href="/preorders">My Preorders</Link>
         <p className="eyebrow">Collector account</p>
         <h1>My Garage</h1>
         <p>

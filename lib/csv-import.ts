@@ -3,7 +3,7 @@ import { getD1, getDb } from "@/db";
 import { catalogProducts, products, sellers } from "@/db/schema";
 import { catalogListingSnapshot } from "./catalog-product-rules";
 import { prepareListingCatalog } from "./catalog-products";
-import { parseCsv, planImportUpserts, validateImportRows } from "./validation";
+import { parseCsv, planImportUpserts, validateImportRows, ValidationError } from "./validation";
 import {
   notifyRestockSubscribers,
   syncPreorderReleaseSchedule,
@@ -82,6 +82,7 @@ export async function commitInventoryCsv(sellerId: string, csv: string, retry = 
   const statement = (query: { sql: string; params: unknown[] }) => d1.prepare(query.sql).bind(...query.params);
   for (const row of planned) {
     const previous = existing.find((item) => item.id === row.id);
+    if (row.availabilityType === "preorder" || previous?.availabilityType === "preorder") throw new ValidationError("Manage preorder allocations in Incoming preorders; CSV inventory cannot create or overwrite them.");
     const payload = { ...row, manufacturerSku: row.productNumber };
     const resolved = await prepareListingCatalog(payload, seller[0].ownerUserId, previous?.catalogProductId);
     const key = resolved.model.skuKey ? JSON.stringify([resolved.model.manufacturerKey, resolved.model.skuKey]) : resolved.model.id;
@@ -109,7 +110,7 @@ export async function commitInventoryCsv(sellerId: string, csv: string, retry = 
   try { await d1.batch(statements); }
   catch (error) {
     const message = String(error instanceof Error ? error.message + " " + error.cause : error);
-    if (retry && message.includes("UNIQUE constraint failed") && message.includes("catalog_products.")) return commitInventoryCsv(sellerId, csv, false);
+    if (retry && message.includes("UNIQUE constraint failed") && (message.includes("catalog_products.") || message.includes("catalog_sku_identity_unique"))) return commitInventoryCsv(sellerId, csv, false);
     throw error;
   }
   const existingById = new Map(existing.map((item) => [item.id, item]));

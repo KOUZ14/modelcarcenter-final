@@ -262,6 +262,7 @@ export async function saveStoreProduct(
   if (requestedId && !existingRows[0])
     throw new ValidationError("Inventory item not found.");
   const existing = existingRows[0];
+  if (payload.availabilityType === "preorder" || existing?.availabilityType === "preorder") throw new ValidationError("Manage preorder offers, receipts and estimates in Incoming preorders.");
   const catalog = await prepareListingCatalog(payload, store.ownerUserId, existing?.catalogProductId);
   payload = listingPayloadWithCatalog(payload, catalog.model);
   const id = existing?.id ?? crypto.randomUUID();
@@ -589,10 +590,8 @@ export async function shipOwnedStoreOrder(
   const row = rows[0];
   if (!row || !["paid", "partially_refunded"].includes(row.order.paymentStatus))
     throw new ValidationError("Only your paid orders can be marked shipped.");
-  if (row.seller.status === "suspended")
-    throw new ValidationError(
-      "This store is suspended. Contact Model Car Center support.",
-    );
+  if (!["unfulfilled", "processing", "shipped"].includes(row.order.fulfillmentStatus))
+    throw new ValidationError("Cancelled or delivered orders cannot be marked shipped.");
   if (!config.shippoApiKey)
     throw new ValidationError(
       "Carrier tracking is unavailable. Contact Model Car Center support before shipping.",
@@ -630,7 +629,7 @@ export async function shipOwnedStoreOrder(
     trackingNumber,
     `MCC ${row.order.orderNumber}`,
   );
-  await getDb()
+  const shipmentUpdate = await getDb()
     .update(orders)
     .set({
       carrier,
@@ -642,8 +641,15 @@ export async function shipOwnedStoreOrder(
       updatedAt: new Date().toISOString(),
     })
     .where(
-      and(eq(orders.id, orderId), eq(orders.sellerId, row.seller.id)),
+      and(
+        eq(orders.id, orderId),
+        eq(orders.sellerId, row.seller.id),
+        inArray(orders.paymentStatus, ["paid", "partially_refunded"]),
+        inArray(orders.fulfillmentStatus, ["unfulfilled", "processing", "shipped"]),
+      ),
     );
+  if (!shipmentUpdate.meta?.changes)
+    throw new ValidationError("This order changed while tracking was registered. Refresh its payment and fulfillment status before shipping.");
   await recordOrderTrackingUpdate([orderId], tracking);
   const email = await sendShipmentEmail({
     buyerEmail: row.order.buyerEmail,

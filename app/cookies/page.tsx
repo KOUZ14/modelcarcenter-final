@@ -26,6 +26,7 @@ export default function CookiesPage() {
     </tbody></table></div>
 
     <h2>3. No advertising or analytics cookies</h2>
+    <p>We measure sponsored listing impressions and clicks with temporary page-view identifiers held in page memory. This measurement does not add advertising cookies, local-storage identifiers, or cross-site tracking. See the <Link href="/privacy">Privacy Policy</Link> for measurement and retention details.</p>
     <p>We do not currently use cookies for behavioral advertising, cross-site tracking, or audience analytics. Stripe may use cookies and similar technology on its hosted checkout and onboarding pages under Stripe’s own policy.</p>
 
     <h2>4. Your controls</h2>

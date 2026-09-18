@@ -35,10 +35,16 @@ async function exactCatalogMatch(identity: CatalogIdentity) {
   if (identity.skuKey) identifiers.push(and(eq(catalogProducts.manufacturerKey, identity.manufacturerKey), eq(catalogProducts.skuKey, identity.skuKey))!);
   if (identity.gtinKey) identifiers.push(eq(catalogProducts.gtinKey, identity.gtinKey));
   if (!identifiers.length) return null;
-  const rows = await getDb().select().from(catalogProducts).where(or(...identifiers)).limit(3);
+  const rows = await getDb().select().from(catalogProducts).where(or(...identifiers)).limit(100);
   const resolved = await Promise.all(rows.map((row) => getCatalogProduct(row.id)));
   if (resolved.some((row) => !row)) throw new ValidationError("This identifier belongs to an archived catalog model. Contact support.");
-  const unique = [...new Map(resolved.filter((row) => row !== null).map((row) => [row.id, row])).values()];
+  const compatible = (row: CatalogModel) => (["scale","vehicleMake","vehicleModel","vehicleVariant","color","livery","edition","packagingVariant","versionKind","setContents"] as const)
+    .every(field => String(row[field] ?? "").trim().toLowerCase() === String(identity[field] ?? "").trim().toLowerCase());
+  // A supplier SKU may identify an assortment, several colors, or regular/chase
+  // variants. Reuse requires matching the complete specified collectible identity.
+  const candidates = resolved.filter((row): row is CatalogModel => row !== null);
+  if (identity.gtinKey && candidates.some(row=>row.gtinKey===identity.gtinKey && !compatible(row))) throw new ValidationError("This barcode belongs to a different collectible variant. Check the identity or request a catalog correction.");
+  const unique = [...new Map(candidates.filter(compatible).map((row) => [row.id, row])).values()];
   if (unique.length > 1) throw new ValidationError("The manufacturer SKU and barcode match different catalog models. Check the identifiers before continuing.");
   const match = unique[0] ?? null;
   if (match && identity.gtinKey && match.gtinKey && identity.gtinKey !== match.gtinKey) throw new ValidationError("This SKU has a different barcode in the catalog. Check the identifiers.");
@@ -105,7 +111,7 @@ export async function persistCatalogListing(
     return model;
   } catch (error) {
     const message = String(error instanceof Error ? `${error.message} ${error.cause ?? ""}` : error);
-    if (!message.includes("UNIQUE constraint failed") || !message.includes("catalog_products.")) throw error;
+    if (!message.includes("UNIQUE constraint failed") || (!message.includes("catalog_products.") && !message.includes("catalog_sku_identity_unique"))) throw error;
     const winner = await exactCatalogMatch(model);
     if (!winner) throw error;
     await write(winner).run();

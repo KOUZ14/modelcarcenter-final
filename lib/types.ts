@@ -42,6 +42,8 @@ export type ProductSummary = {
   availableQuantity: number;
   availabilityType: "in_stock" | "preorder";
   releaseDate: string | null;
+  saleUnit?: string | null;
+  unitsPerPack?: number | null;
   primaryImageUrl: string | null;
   keywords: string;
   defaultShippingCents: number;

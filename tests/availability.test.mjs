@@ -62,9 +62,6 @@ test("preorder schedule changes preserve closed and historical order snapshots",
     new URL("../lib/availability.ts", import.meta.url),
     "utf8",
   );
-  assert.match(source, /inArray\(\s*orderItems\.orderId,[\s\S]*affected\.map/);
-  assert.match(
-    source,
-    /inArray\(orders\.fulfillmentStatus, \["unfulfilled", "processing"\]\)/,
-  );
+  assert.doesNotMatch(source, /\.update\(orderItems\)|\.update\(orders\)/);
+  assert.match(source, /Historical paid order snapshots cannot be rewritten/);
 });

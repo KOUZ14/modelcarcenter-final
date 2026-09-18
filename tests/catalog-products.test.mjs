@@ -117,7 +117,7 @@ test("catalog migrations, seller writes, matching and active offers use separate
   await t.test("seller listings share a model but keep condition, price, stock and seller SKU independent", async () => {
     const before = count();
     const first = await api.saveStoreProduct(store("a"), { ...listing, catalogProductId: catalogId, modelManufacturer: "Tampered", scale: "1:64" });
-    const second = await api.saveStoreProduct(store("b"), { ...identity, ...listing, modelManufacturer: "auto-art", scale: "18 scale", price: "279", inventoryQuantity: 2 });
+    const second = await api.saveStoreProduct(store("b"), { ...identity, ...listing, catalogProductId: catalogId, modelManufacturer: "auto-art", scale: "18 scale", price: "279", inventoryQuantity: 2 });
     assert.equal(count(), before);
     assert.equal(row(first.productId).catalog_product_id, row(second.productId).catalog_product_id);
     assert.equal(row(first.productId).model_manufacturer, "AUTOart");
@@ -144,7 +144,8 @@ test("catalog migrations, seller writes, matching and active offers use separate
     const different = await api.saveStoreProduct(store("b"), { ...listing, ...identity, manufacturerSku: "76003", confirmDifferentModel: true, sellerSku: "another" });
     assert.notEqual(row(different.productId).catalog_product_id, catalogId);
     const match = await api.matchCatalogProduct({ ...identity, manufacturerSku: "76002" });
-    assert.equal(match.exact.id, row("different-sku").catalog_product_id);
+    assert.equal(match.exact, null, "A shared SKU must not silently choose a different color or variant");
+    assert.ok(match.similar.some(model => model.id === row("different-sku").catalog_product_id));
   });
 
   await t.test("catalog and listing writes roll back together, including concurrent SKU creation", async () => {
@@ -166,7 +167,7 @@ test("catalog migrations, seller writes, matching and active offers use separate
     const before = count();
     const match = await api.matchCatalogProduct({ ...identity, manufacturerSku: "", ean: "0036000291452" });
     assert.equal(match.exact.id, row(made.productId).catalog_product_id);
-    await assert.rejects(api.matchCatalogProduct({ ...identity, ean: "0036000291452" }), /different catalog models/);
+    await assert.rejects(api.matchCatalogProduct({ ...identity, ean: "0036000291452" }), /different catalog models|different manufacturer or SKU/);
     assert.equal(count(), before);
   });
 

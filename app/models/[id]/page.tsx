@@ -22,12 +22,14 @@ export default async function CatalogModelPage({ params }: { params: Promise<{ i
       {([['Color', model.color], ['Variant', model.vehicleVariant], ['Livery', model.livery], ['Vehicle year', model.vehicleYear], ['Release year', model.releaseYear], ['Material', model.material]] as const).filter(([, value]) => value).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
     </dl>
     {model.description && <p>{model.description}</p>}
+    {model.manufacturerRelease && <p>Manufacturer release window: {JSON.parse(model.manufacturerRelease).label}. Each seller has separate allocation and dispatch terms.</p>}
+    {model.releaseSource && <p>Release source: {model.releaseSource} · Last checked {model.releaseCheckedAt?.slice(0,10)}</p>}
     <section aria-labelledby="catalog-offers-heading" className="catalog-offers">
       <h2 id="catalog-offers-heading">Available from</h2>
       <p>{new Set(listings.map((listing) => listing.sellerId)).size} sellers · {listings.length} available listings</p>
       {!listings.length ? <p>This model is in the MCC catalog. No sellers currently have it available.</p> : <ul className="catalog-model-results">{listings.map((listing) => <li key={listing.id}>
-        <div><Link href={`/sellers/${listing.sellerSlug}`}><strong>{listing.sellerName}</strong></Link><p>{formatCondition(listing.condition)} · Model: {formatCondition(listing.modelCondition)} · {listing.availableQuantity} available</p>{listing.conditionNotes && <p>{listing.conditionNotes}</p>}{listing.availabilityType === "preorder" && <p>Preorder · expected {listing.releaseDate}</p>}</div>
-        <div><strong>{formatMoney(listing.priceCents, listing.currency)}</strong><p>{listing.shippingMode === "calculated" ? "Shipping calculated for your address" : listing.shippingMode === "free" || listing.defaultShippingCents === 0 ? "Free shipping" : `Shipping ${formatMoney(listing.defaultShippingCents, listing.currency)}`}</p><Link className="button dark small" href={`/products/${listing.slug}`}>View seller listing</Link></div>
+        <div><Link href={`/sellers/${listing.sellerSlug}`}><strong>{listing.sellerName}</strong></Link><p>{formatCondition(listing.condition)} · Model: {formatCondition(listing.modelCondition)} · {listing.availabilityType === "preorder" ? "Upcoming release · pay when ready" : `${listing.availableQuantity} in stock`}</p>{listing.conditionNotes && <p>{listing.conditionNotes}</p>}</div>
+        <div><strong>{listing.availabilityType === "preorder" && !listing.priceCents ? "Price to be announced" : formatMoney(listing.priceCents, listing.currency)}</strong><p>{listing.shippingMode === "calculated" ? "Shipping calculated for your address" : listing.shippingMode === "free" || listing.defaultShippingCents === 0 ? "Free shipping" : `Shipping ${formatMoney(listing.defaultShippingCents, listing.currency)}`}</p><Link className="button dark small" href={`/products/${listing.slug}`}>View seller listing</Link></div>
       </li>)}</ul>}
     </section>
   </div><SiteFooter /></main>;

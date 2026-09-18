@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState, type ReactNode } from "react";
 import type { StoreData } from "./store-dashboard";
+import { PromotedListingsPanel } from "./promoted-listings-panel";
 import { availableUnits, inventoryViews, matchesInventoryView, type HubNavigate } from "@/lib/seller-hub";
 import { formatMoney, formatUtcDate } from "@/lib/format";
 
@@ -100,7 +101,7 @@ export function HubMarketing({ data, navigate, filter }: Props & { filter?: stri
     <nav className="hub-filters" aria-label="Marketing tools">{marketingViews.map(([value, label]) => <button key={value} aria-pressed={selected === value} onClick={() => navigate("marketing", value)}>{label}</button>)}</nav>
     {selected === "offers" && <><Unavailable title="Offers" detail="Targeted offers and buyer acceptance are not available yet. Saved listings can help you decide where a price adjustment could make a difference." action={<button className="button outline small" onClick={() => navigate("demand", "saved")}>Review interested collectors</button>} /><section className="hub-callout"><div><h3>Slow inventory</h3><p>{formatMoney(data.hub.slowValueCents)} at list price across {data.hub.slowIds.length} slow listings.</p></div><button className="button dark small" onClick={() => navigate("inventory", "slow")}>Review pricing →</button></section></>}
     {selected === "discounts" && <section className="store-panel hub-unavailable"><span className="hub-status">Price edits available</span><h3>Discounts & pricing</h3><p>Adjust a listing’s current price in the inventory editor. Coupon codes, scheduled sales, and crossed-out sale prices are not available yet.</p><button className="button dark small" onClick={() => navigate("inventory", "slow")}>Choose listings to reprice</button></section>}
-    {selected === "promoted" && <Unavailable title="Promoted listings" detail="Paid placement and promotion campaigns are not available yet. Keep titles, model details, and photos complete so collectors can find your stock." action={<button className="button outline small" onClick={() => navigate("inventory")}>Review listings</button>} />}
+    {selected === "promoted" && <PromotedListingsPanel />}
     {selected === "followers" && <Unavailable title="Followers" detail="Store follows and follower campaigns are not tracked yet. Your public storefront is ready to share with collectors." action={<Link className="button outline small" href={`/sellers/${data.store.slug}`}>Open storefront</Link>} />}
   </div>;
 }

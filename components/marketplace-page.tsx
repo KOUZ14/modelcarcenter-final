@@ -6,6 +6,7 @@ import { formatCondition } from "@/lib/format";
 import type { CatalogResponse } from "@/lib/types";
 import { Icon } from "./icons";
 import { ProductCard } from "./product-card";
+import { SponsoredListings } from "./sponsored-listings";
 import { SiteFooter } from "./site-footer";
 import { SiteHeader } from "./site-header";
 
@@ -15,6 +16,7 @@ export type MarketplaceInitialState = {
   manufacturer: string;
   seller: string;
   condition: string;
+  availability: string;
   sort: "newest" | "price_asc" | "price_desc";
   page: number;
 };
@@ -36,6 +38,7 @@ export function MarketplacePage({
   const [manufacturer, setManufacturer] = useState(initial.manufacturer);
   const [seller, setSeller] = useState(initial.seller);
   const [condition, setCondition] = useState(initial.condition);
+  const [availability, setAvailability] = useState(initial.availability);
   const [sort, setSort] = useState(initial.sort);
   const [page, setPage] = useState(initial.page);
   const [catalog, setCatalog] = useState(emptyCatalog);
@@ -52,6 +55,7 @@ export function MarketplacePage({
         manufacturer,
         seller,
         condition,
+        availability,
         sort,
         page: String(page),
         pageSize: "24",
@@ -73,7 +77,7 @@ export function MarketplacePage({
         if (!signal.aborted) setLoading(false);
       }
     },
-    [activeQuery, condition, manufacturer, page, scale, seller, sort],
+    [activeQuery, condition, availability, manufacturer, page, scale, seller, sort],
   );
 
   useEffect(() => {
@@ -89,6 +93,7 @@ export function MarketplacePage({
     if (manufacturer) params.set("manufacturer", manufacturer);
     if (seller) params.set("seller", seller);
     if (condition) params.set("condition", condition);
+    if (availability) params.set("availability", availability);
     if (sort !== "newest") params.set("sort", sort);
     if (page > 1) params.set("page", String(page));
     const search = params.toString();
@@ -97,7 +102,7 @@ export function MarketplacePage({
       "",
       `/marketplace${search ? `?${search}` : ""}`,
     );
-  }, [activeQuery, condition, manufacturer, page, scale, seller, sort]);
+  }, [activeQuery, condition, availability, manufacturer, page, scale, seller, sort]);
 
   function runSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -112,6 +117,7 @@ export function MarketplacePage({
     setManufacturer("");
     setSeller("");
     setCondition("");
+    setAvailability("");
     setSort("newest");
     setPage(1);
   }
@@ -124,8 +130,9 @@ export function MarketplacePage({
   }
 
   const filtered = Boolean(
-    activeQuery || scale || manufacturer || seller || condition,
+    activeQuery || scale || manufacturer || seller || condition || availability,
   );
+  const promotionQuery = new URLSearchParams({ q: activeQuery, scale, manufacturer, seller, condition, availability, sort, page: String(page) }).toString();
 
   return (
     <main className="marketplace-page">
@@ -166,6 +173,7 @@ export function MarketplacePage({
       <section className="marketplace-browser" id="marketplace-results">
         <div className="shell marketplace-layout">
           <aside className="marketplace-filters" id="filters">
+            <label>Availability<select value={availability} onChange={event => { setAvailability(event.target.value); setPage(1); }}><option value="">All offers</option><option value="in_stock">In stock only</option><option value="preorder">Upcoming releases</option></select></label>
             <div className="marketplace-filter-heading">
               <h2>Filters</h2>
               {filtered && (
@@ -294,6 +302,7 @@ export function MarketplacePage({
               </div>
             ) : catalog.products.length ? (
               <>
+                {page === 1 && !seller && <SponsoredListings key={promotionQuery} queryString={promotionQuery} organicIds={catalog.products.map(p => p.id)} />}
                 <div className="product-grid marketplace-product-grid">
                   {catalog.products.map((product) => (
                     <ProductCard key={product.id} product={product} />

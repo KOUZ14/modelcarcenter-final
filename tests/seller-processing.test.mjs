@@ -74,9 +74,10 @@ test("paid-order persistence and delayed fee reconciliation use actual fees with
     absWorkingDir: root, bundle: true, platform: "node", format: "esm", packages: "external", write: false,
     stdin: { contents: source + "\nexport { finalizePaidCheckout };", resolveDir: join(root, "lib"), sourcefile: "orders.ts", loader: "ts" },
     plugins: [{ name: "order-boundaries", setup(builder) {
-      builder.onResolve({ filter: /^(@\/db|\.\/email|\.\/inventory)$/ }, ({ path }) => ({ path, namespace: "order-test" }));
+      builder.onResolve({ filter: /^(@\/db|\.\/email|\.\/inventory|\.\/preorder-payments)$/ }, ({ path }) => ({ path, namespace: "order-test" }));
       builder.onLoad({ filter: /.*/, namespace: "order-test" }, ({ path }) => ({ contents:
         path === "@/db" ? "export const getDb = () => globalThis.__mccSellerFeeTest.db; export const getD1 = () => globalThis.__mccSellerFeeTest.binding;" :
+        path === "./preorder-payments" ? "export const preorderForCheckout = async () => null; export const syncPreorderRefund = async () => {}; export const finalizePreorderPayment = () => { throw Error('Unexpected preorder'); };" :
         path === "./email" ? "export const sendPaidOrderEmails = async () => {};" : "export const releaseReservation = () => { throw Error('Unexpected release'); };",
       }));
     } }],

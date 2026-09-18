@@ -31,6 +31,7 @@ import {
 } from "./stripe-event-rules";
 import { allocateCheckoutLines } from "./checkout-allocation";
 import { reconcileCheckoutRefunds } from "./checkout-refunds";
+import { finalizePreorderPayment, preorderForCheckout, syncPreorderRefund } from "./preorder-payments";
 
 type StripeEvent = {
   id: string;
@@ -83,7 +84,8 @@ export async function processStripeEvent(event: StripeEvent) {
           ? eq(orders.stripeChargeId, charge.id)
           : eq(orders.stripePaymentIntentId, charge.payment_intent ?? ""),
       );
-    if (matchedOrders.length > 1 || matchedOrders[0]?.checkoutGroupId) return reconcileCheckoutRefunds(event, matchedOrders);
+    if (matchedOrders.length > 1 || matchedOrders[0]?.checkoutGroupId ||
+      (matchedOrders[0]?.checkoutReservationId && await preorderForCheckout(matchedOrders[0].checkoutReservationId))) return reconcileCheckoutRefunds(event, matchedOrders);
     const matchedOrder = matchedOrders[0];
     let sellerTransferReversedCents =
       matchedOrder?.sellerTransferReversedCents ?? 0;
@@ -208,6 +210,7 @@ export async function processStripeEvent(event: StripeEvent) {
           : refund.status === "canceled"
             ? "cancelled"
             : "pending";
+    await syncPreorderRefund({ ...refund, status, failure_reason: refund.failure_reason ?? undefined });
     const d1 = getD1();
     const statements = [
       d1
@@ -560,6 +563,7 @@ async function finalizePaidCheckout(event: StripeEvent, session: StripeCheckoutS
   if (session.metadata?.checkout_group_id) return finalizeGroupedCheckout(event, session);
   const reservationId = session.metadata?.reservation_id;
   if (!reservationId) throw new Error("Paid Checkout Session is missing reservation metadata.");
+  if (await preorderForCheckout(reservationId)) return finalizePreorderPayment(event, session, preparePaidOrder);
   const db = getDb();
   const existingOrder = await db
     .select({ id: orders.id })
@@ -599,7 +603,7 @@ async function finalizeGroupedCheckout(event: StripeEvent, session: StripeChecko
   return { orders: planned.map(({ orderId, orderNumber }) => ({ orderId, orderNumber })) };
 }
 
-async function preparePaidOrder(session: StripeCheckoutSession, reservationId: string, allocation?: { totalCents: number; taxCents: number; paymentProcessingFeeCents: number | null }) {
+export async function preparePaidOrder(session: StripeCheckoutSession, reservationId: string, allocation?: { totalCents: number; taxCents: number; paymentProcessingFeeCents: number | null }) {
   const db = getDb();
   const reservationRows = await db
     .select({
@@ -661,6 +665,7 @@ async function preparePaidOrder(session: StripeCheckoutSession, reservationId: s
     allocation,
   );
   const paidAt = new Date();
+  const preorder = await preorderForCheckout(reservationId);
   const preorderAnchor = preorderShipAnchor(
     items.map((item) =>
       item.availabilityTypeSnapshot === "preorder"
@@ -674,7 +679,7 @@ async function preparePaidOrder(session: StripeCheckoutSession, reservationId: s
     paymentFlow === "separate" ? stripeTransferGroup(session.metadata?.checkout_group_id ?? reservationId) : null;
   const shipByAt = addBusinessDays(
     preorderAnchor && preorderAnchor > paidAt ? preorderAnchor : paidAt,
-    reservation.handlingTimeBusinessDays,
+    preorder ? JSON.parse(preorder.reservation.terms).handlingDays : reservation.handlingTimeBusinessDays,
   );
   const d1 = getD1();
   const pendingGuard = `EXISTS (SELECT 1 FROM checkout_reservations WHERE id = ? AND status = 'pending')`;

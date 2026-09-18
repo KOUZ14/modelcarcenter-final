@@ -45,6 +45,7 @@ export function requestBodyLimit(request: Request) {
   const path = securityPath(request);
   if (path.startsWith("/api/auth/")) return 16 * KiB;
   if (path === "/api/addresses/autocomplete") return 4 * KiB;
+  if (path === "/api/promotions/events") return 4 * KiB;
   if (webhookPaths.has(path)) return MiB;
   const multipart = request.headers.get("content-type")?.toLowerCase().startsWith("multipart/form-data");
   if (multipart && ["/api/listings/images", "/api/admin/images", "/api/resolution"].includes(path)) return 11 * MiB;
@@ -97,7 +98,13 @@ export function requestRateRules(request: Request): RateLimitRule[] {
     }
   } else if (["/api/community", "/api/model-hunts", "/api/seller-applications", "/api/availability-alerts"].includes(path)) {
     rules.push({ scope: "public-submissions", max: 10, windowSeconds: 600 });
-  } else if (path === "/api/checkout") {
+  } else if (path === "/api/promotions/events") {
+    rules.push({ scope: "promotion-events", max: 60, windowSeconds: 60 });
+  } else if (path === "/api/promotions/placements") {
+    rules.push({ scope: "promotion-placements", max: 30, windowSeconds: 60 });
+  } else if (path.startsWith("/api/store/promotions") && request.method === "POST") {
+    rules.push({ scope: "promotion-purchases", max: 10, windowSeconds: 60 });
+  } else if (path === "/api/checkout" || (path === "/api/preorders" && request.method === "POST")) {
     rules.push({ scope: "checkout", max: 10, windowSeconds: 60 });
   } else if (path === "/api/addresses/autocomplete" || path.startsWith("/api/shipping")) {
     rules.push({ scope: "shipping-address", max: 60, windowSeconds: 60 });

@@ -6,6 +6,7 @@ import { FormEvent, useState } from "react";
 import type { ProductSummary } from "@/lib/types";
 import { useMarketplace } from "./marketplace-provider";
 import { Icon } from "./icons";
+import { PreorderOffer } from "./preorder-offer";
 
 export function ProductPurchase({ product }: { product: ProductSummary }) {
   const { addToCart, toggleWishlist, wishlistHas, collector, cart, authReady } = useMarketplace();
@@ -39,6 +40,7 @@ export function ProductPurchase({ product }: { product: ProductSummary }) {
       setAlertState("error");
     }
   }
+  if (product.availabilityType === "preorder") return <PreorderOffer product={product}/>;
   if (product.availableQuantity < 1) {
     return <div className="restock-panel">
       <h2>Get a restock alert</h2>
@@ -56,15 +58,5 @@ export function ProductPurchase({ product }: { product: ProductSummary }) {
       </div>
     </div>;
   }
-  const preorder = product.availabilityType === "preorder";
-  return <div><p className="seller-checkout-notice" id={`seller-checkout-${product.id}`}>Shop several sellers in one checkout. Each seller has separate shipping.{cart.some((item) => item.sellerId !== product.sellerId) && <> Adding this model to {product.sellerName}&apos;s group keeps all your other items in your cart.</>}</p><div className="purchase-actions"><button className="button dark buy-button" type="button" disabled={!authReady} aria-describedby={`seller-checkout-${product.id}`} onClick={() => { if (addToCart(product)) { setAdded(true); setTimeout(() => setAdded(false), 1800); } }}>{added ? <><Icon name="check"/> Added to cart</> : preorder ? "Preorder now" : "Add to cart"}</button><button className="button outline" type="button" aria-pressed={saved} onClick={() => toggleWishlist(product.id)}><Icon name="heart"/>{saved ? "Saved" : "Save model"}</button><Link className="button outline message-seller-button" href={`/messages?product=${encodeURIComponent(product.id)}`}><Icon name="message"/>Message seller</Link></div>{preorder && product.releaseDate && <p className="preorder-terms">Paid in full today. Expected to ship after {formatReleaseDate(product.releaseDate)}. Release dates may change.</p>}</div>;
-}
-
-function formatReleaseDate(value: string) {
-  return new Intl.DateTimeFormat("en-US", {
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-    timeZone: "UTC",
-  }).format(new Date(`${value}T12:00:00.000Z`));
+  return <div><p className="seller-checkout-notice" id={`seller-checkout-${product.id}`}>Shop several sellers in one checkout. Each seller has separate shipping.{cart.some((item) => item.sellerId !== product.sellerId) && <> Adding this model to {product.sellerName}&apos;s group keeps all your other items in your cart.</>}</p><div className="purchase-actions"><button className="button dark buy-button" type="button" disabled={!authReady} aria-describedby={`seller-checkout-${product.id}`} onClick={() => { if (addToCart(product)) { setAdded(true); setTimeout(() => setAdded(false), 1800); } }}>{added ? <><Icon name="check"/> Added to cart</> : "Add to cart"}</button><button className="button outline" type="button" aria-pressed={saved} onClick={() => toggleWishlist(product.id)}><Icon name="heart"/>{saved ? "Saved" : "Save model"}</button><Link className="button outline message-seller-button" href={`/messages?product=${encodeURIComponent(product.id)}`}><Icon name="message"/>Message seller</Link></div></div>;
 }

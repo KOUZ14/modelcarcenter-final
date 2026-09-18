@@ -20,8 +20,10 @@ Page and section headings use straightforward names for the feature or content, 
 
 ## Capability boundaries
 
-Buyer-search events, targeted offers, coupon/scheduled discount campaigns, promoted listings, and followers are not yet implemented. Their sections state that explicitly and link to available work. Pricing opportunities are not offer eligibility or buyer consent.
+Buyer-search events, targeted offers, coupon/scheduled discount campaigns, and followers are not yet implemented. Their sections state that explicitly and link to available work. Pricing opportunities are not offer eligibility or buyer consent.
+
+Promoted listings are managed under Marketing > Promoted listings. The first version supports seven-day campaigns with a $2.99 introductory default price, dedicated Stripe payments, pause/resume/end actions, sponsored marketplace placements, and recorded impression/click reporting. Purchases default to disabled until an administrator configures tax treatment and enables them at `/admin/promotions`. Migration `0028` adds campaign, payment, refund, measurement, settings, and audit records. See [Promoted listings operations](promoted-listings.md) and the [implementation plan](promoted-listings-plan.md).
 
 Profit estimation uses user-entered aggregate costs against lifetime item sales after commission. Inputs are temporary planning assumptions and are not saved as accounting records. Inventory turnover awaits cost-of-goods and historical inventory-cost data.
 
-The hub uses existing tables and requires no new migration.
+The original hub uses existing tables. The linked Incoming preorders workspace adds migrations `0024`–`0027`; see [Pay-when-ready preorders](preorders.md) for setup, payment and exception behavior. Incoming reservations are separate from physical inventory and unpaid commitments remain separate from paid sales.

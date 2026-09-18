@@ -20,6 +20,62 @@ export {
   verification,
 } from "./auth-schema.generated";
 
+export const promotionSettings = sqliteTable("promotion_settings", {
+  id: text("id").primaryKey(), settings: text("settings").notNull(), updatedAt: integer("updated_at").notNull(),
+});
+
+export const promotionCampaigns = sqliteTable("promotion_campaigns", {
+  id: text("id").primaryKey(),
+  sellerId: text("seller_id").notNull().references((): AnySQLiteColumn => sellers.id, { onDelete: "restrict" }),
+  productId: text("product_id").notNull().references((): AnySQLiteColumn => products.id, { onDelete: "restrict" }),
+  title: text("title").notNull(), status: text("status").notNull().default("pending_payment"),
+  reason: text("reason").notNull().default(""), priceCents: integer("price_cents").notNull(),
+  currency: text("currency").notNull(), taxMode: text("tax_mode").notNull(), taxCode: text("tax_code").notNull(),
+  termsVersion: text("terms_version").notNull(), durationMs: integer("duration_ms").notNull(),
+  startsAt: integer("starts_at"), endsAt: integer("ends_at"), createdAt: integer("created_at").notNull(), updatedAt: integer("updated_at").notNull(),
+}, t => [
+  uniqueIndex("promotion_live_listing").on(t.productId).where(sql`${t.status} IN ('pending_payment','active','paused')`),
+  index("promotion_seller_date").on(t.sellerId, t.createdAt), index("promotion_serving").on(t.status, t.endsAt),
+  check("promotion_campaign_status", sql`${t.status} IN ('pending_payment','active','paused','ended','expired')`),
+  check("promotion_price_duration", sql`${t.priceCents} >= 50 AND ${t.durationMs} > 0`),
+]);
+
+export const promotionPayments = sqliteTable("promotion_payments", {
+  id: text("id").primaryKey(), campaignId: text("campaign_id").notNull().unique().references(() => promotionCampaigns.id, { onDelete: "restrict" }),
+  sellerId: text("seller_id").notNull(), requestKey: text("request_key").notNull(),
+  sessionId: text("session_id").unique(), paymentIntentId: text("payment_intent_id").unique(), chargeId: text("charge_id").unique(),
+  status: text("status").notNull().default("pending"), totalCents: integer("total_cents").notNull().default(0),
+  taxCents: integer("tax_cents").notNull().default(0), feeCents: integer("fee_cents"), refundedCents: integer("refunded_cents").notNull().default(0),
+  disputeStatus: text("dispute_status").notNull().default("none"), error: text("error").notNull().default(""),
+  createdAt: integer("created_at").notNull(), checkedAt: integer("checked_at").notNull().default(0),
+}, t => [uniqueIndex("promotion_purchase_request").on(t.sellerId, t.requestKey),
+  check("promotion_payment_status", sql`${t.status} IN ('pending','paid','failed','expired')`),
+  check("promotion_payment_amounts", sql`${t.totalCents} >= 0 AND ${t.taxCents} >= 0 AND ${t.refundedCents} >= 0`),
+]);
+
+export const promotionRefunds = sqliteTable("promotion_refunds", {
+  id: text("id").primaryKey(), campaignId: text("campaign_id").notNull().references(() => promotionCampaigns.id, { onDelete: "restrict" }),
+  operationKey: text("operation_key").notNull().unique(), stripeRefundId: text("stripe_refund_id").unique(),
+  amountCents: integer("amount_cents").notNull(), status: text("status").notNull().default("queued"),
+  reason: text("reason").notNull(), error: text("error").notNull().default(""),
+  createdAt: integer("created_at").notNull(), updatedAt: integer("updated_at").notNull(),
+}, t => [index("promotion_refund_recovery").on(t.status, t.updatedAt), check("promotion_refund_amount", sql`${t.amountCents} > 0`)]);
+
+export const promotionEvents = sqliteTable("promotion_events", {
+  id: text("id").primaryKey(), campaignId: text("campaign_id").notNull().references(() => promotionCampaigns.id),
+  nonce: text("nonce").notNull(), kind: text("kind").notNull(), createdAt: integer("created_at").notNull(),
+}, t => [uniqueIndex("promotion_event_once").on(t.campaignId, t.nonce, t.kind), index("promotion_event_retention").on(t.createdAt), check("promotion_event_kind", sql`${t.kind} IN ('impression','click')`)]);
+
+export const promotionDailyMetrics = sqliteTable("promotion_daily_metrics", {
+  id: text("id").primaryKey(), campaignId: text("campaign_id").notNull().references(() => promotionCampaigns.id),
+  day: text("day").notNull(), impressions: integer("impressions").notNull().default(0), clicks: integer("clicks").notNull().default(0),
+}, t => [uniqueIndex("promotion_metrics_day").on(t.campaignId, t.day)]);
+
+export const promotionAudit = sqliteTable("promotion_audit", {
+  id: text("id").primaryKey(), campaignId: text("campaign_id"), actor: text("actor").notNull(),
+  action: text("action").notNull(), detail: text("detail").notNull(), createdAt: integer("created_at").notNull(),
+}, t => [index("promotion_audit_campaign").on(t.campaignId, t.createdAt)]);
+
 const timestamps = {
   createdAt: text("created_at")
     .notNull()
@@ -28,6 +84,126 @@ const timestamps = {
     .notNull()
     .default(sql`CURRENT_TIMESTAMP`),
 };
+
+export const preorderPolicies = sqliteTable("preorder_policies", {
+  version: text("version").primaryKey(),
+  terms: text("terms").notNull(),
+  delayResponseDays: integer("delay_response_days").notNull(),
+  reviewedBy: text("reviewed_by").notNull(),
+  reviewedAt: text("reviewed_at").notNull(),
+  enabled: integer("enabled").notNull().default(0),
+}, t => [check("preorder_policy_days", sql`${t.delayResponseDays} BETWEEN 1 AND 30`)]);
+
+export const preorderSellerAccess = sqliteTable("preorder_seller_access", {
+  sellerId: text("seller_id").primaryKey().references(() => sellers.id, { onDelete: "restrict" }),
+  approved: integer("approved").notNull().default(0),
+  supplySource: text("supply_source").notNull(),
+  reason: text("reason").notNull(),
+  reviewedBy: text("reviewed_by").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+export const incomingBatches = sqliteTable("incoming_batches", {
+  id: text("id").primaryKey(),
+  listingId: text("listing_id").notNull().references(() => products.id, { onDelete: "restrict" }),
+  supplierReference: text("supplier_reference").notNull(),
+  requestedQuantity: integer("requested_quantity").notNull(),
+  confirmedAllocation: integer("confirmed_allocation").notNull(),
+  capacity: integer("capacity").notNull(),
+  safetyBuffer: integer("safety_buffer").notNull(),
+  evidenceReference: text("evidence_reference").notNull(),
+  evidenceState: text("evidence_state").notNull().default("supplied"),
+  evidenceReviewedBy: text("evidence_reviewed_by"),
+  terms: text("terms").notNull(),
+  dispatchEnd: text("dispatch_end"),
+  opensAt: text("opens_at").notNull(),
+  cutoffAt: text("cutoff_at").notNull(),
+  timezone: text("timezone").notNull(),
+  status: text("status").notNull().default("closed"),
+  supplyState: text("supply_state").notNull().default("expected"),
+  receivedQuantity: integer("received_quantity").notNull().default(0),
+  sellableQuantity: integer("sellable_quantity").notNull().default(0),
+  damagedQuantity: integer("damaged_quantity").notNull().default(0),
+  receivedAt: text("received_at"),
+  inspectedAt: text("inspected_at"),
+  revision: integer("revision").notNull().default(1),
+  shortage: integer("shortage").notNull().default(0),
+  ...timestamps,
+}, t => [index("incoming_listing_idx").on(t.listingId), check("incoming_quantities", sql`${t.capacity} >= 0 AND ${t.confirmedAllocation} >= ${t.capacity} AND ${t.requestedQuantity} >= ${t.confirmedAllocation} AND ${t.safetyBuffer} BETWEEN 0 AND ${t.capacity} AND ${t.sellableQuantity} >= 0 AND ${t.damagedQuantity} >= 0 AND ${t.receivedQuantity} >= ${t.sellableQuantity} + ${t.damagedQuantity}`)]);
+
+export const preorderReservations = sqliteTable("preorder_reservations", {
+  id: text("id").primaryKey(),
+  batchId: text("batch_id").notNull().references(() => incomingBatches.id, { onDelete: "restrict" }),
+  buyerUserId: text("buyer_user_id").references(() => authUser.id, { onDelete: "set null" }),
+  idempotencyKey: text("idempotency_key").notNull(),
+  quantity: integer("quantity").notNull(),
+  status: text("status").notNull().default("hold"),
+  acceptedSequence: integer("accepted_sequence"),
+  terms: text("terms").notNull(),
+  acceptedAt: text("accepted_at"),
+  holdExpiresAt: text("hold_expires_at").notNull(),
+  consentState: text("consent_state").notNull().default("accepted"),
+  consentDeadline: text("consent_deadline"),
+  acceptedRevision: integer("accepted_revision").notNull(),
+  allocatedQuantity: integer("allocated_quantity").notNull().default(0),
+  paymentDeadline: text("payment_deadline"),
+  checkoutReservationId: text("checkout_reservation_id"),
+  orderId: text("order_id").references(() => orders.id, { onDelete: "restrict" }),
+  contactEmail: text("contact_email").notNull(),
+  address: text("address"),
+  reason: text("reason"),
+  actor: text("actor").notNull(),
+  ...timestamps,
+}, t => [uniqueIndex("preorder_idempotency_idx").on(t.buyerUserId, t.idempotencyKey), uniqueIndex("preorder_sequence_idx").on(t.acceptedSequence), index("preorder_queue_idx").on(t.batchId, t.status, t.acceptedSequence), index("preorder_buyer_idx").on(t.buyerUserId), check("preorder_quantity", sql`${t.quantity} > 0 AND ${t.allocatedQuantity} BETWEEN 0 AND ${t.quantity}`), check("preorder_status", sql`${t.status} IN ('hold','reserved','allocated','awaiting_payment','converted','cancelled','expired')`)]);
+
+export const preorderEvents = sqliteTable("preorder_events", {
+  id: text("id").primaryKey(),
+  batchId: text("batch_id").references(() => incomingBatches.id, { onDelete: "restrict" }),
+  reservationId: text("reservation_id").references(() => preorderReservations.id, { onDelete: "restrict" }),
+  actor: text("actor").notNull(),
+  kind: text("kind").notNull(),
+  detail: text("detail").notNull(),
+  recipient: text("recipient"),
+  noticeVersion: text("notice_version").notNull().default("preorder-notice-v1"),
+  deliveryStatus: text("delivery_status").notNull().default("pending"),
+  attempts: integer("attempts").notNull().default(0),
+  nextAttemptAt: text("next_attempt_at"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, t => [index("preorder_event_delivery_idx").on(t.deliveryStatus, t.nextAttemptAt), index("preorder_event_reservation_idx").on(t.reservationId, t.createdAt)]);
+
+export const preorderPaymentLedger = sqliteTable("preorder_payment_ledger", {
+  id: text("id").primaryKey(),
+  reservationId: text("reservation_id").notNull().references(() => preorderReservations.id, { onDelete: "restrict" }),
+  sessionId: text("session_id").notNull(),
+  paymentIntentId: text("payment_intent_id").notNull(),
+  chargeId: text("charge_id"),
+  amountCents: integer("amount_cents").notNull(),
+  currency: text("currency").notNull(),
+  status: text("status").notNull(),
+  refundId: text("refund_id"),
+  refundStatus: text("refund_status").notNull().default("not_required"),
+  error: text("error"),
+  ...timestamps,
+}, t => [uniqueIndex("preorder_payment_session_idx").on(t.sessionId)]);
+
+export const preorderCheckouts = sqliteTable("preorder_checkouts", {
+  checkoutId: text("checkout_id").primaryKey().references(() => checkoutReservations.id, { onDelete: "restrict" }),
+  reservationId: text("reservation_id").notNull().references(() => preorderReservations.id, { onDelete: "restrict" }),
+  acceptedQuote: text("accepted_quote").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, t => [index("preorder_checkout_reservation_idx").on(t.reservationId)]);
+
+export const preorderWaitlist = sqliteTable("preorder_waitlist", {
+  sequence: integer("sequence").primaryKey({autoIncrement:true}),
+  id: text("id").notNull(),
+  batchId: text("batch_id").notNull().references(() => incomingBatches.id, {onDelete:"restrict"}),
+  buyerUserId: text("buyer_user_id").references(() => authUser.id, {onDelete:"set null"}),
+  contactEmail: text("contact_email").notNull(),
+  quantity: integer("quantity").notNull(),
+  status: text("status").notNull().default("waiting"),
+  reservationId: text("reservation_id").references(() => preorderReservations.id, {onDelete:"restrict"}),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, t => [uniqueIndex("preorder_waitlist_id").on(t.id),index("preorder_waitlist_queue").on(t.batchId,t.status,t.sequence),check("waitlist_quantity",sql`${t.quantity} BETWEEN 1 AND 10`)]);
 
 export const securityRateLimits = sqliteTable("security_rate_limits", {
   id: text("id").primaryKey(),
@@ -221,6 +397,15 @@ export const catalogProducts = sqliteTable(
     color: text("color"),
     livery: text("livery"),
     releaseYear: text("release_year"),
+    edition: text("edition"),
+    packagingVariant: text("packaging_variant"),
+    versionKind: text("version_kind").notNull().default("regular"),
+    setContents: text("set_contents"),
+    releaseStatus: text("release_status").notNull().default("unknown"),
+    manufacturerRelease: text("manufacturer_release"),
+    releaseSource: text("release_source"),
+    releaseCheckedAt: text("release_checked_at"),
+    previewMedia: integer("preview_media", { mode: "boolean" }).notNull().default(false),
     material: text("material").notNull().default(""),
     upc: text("upc"),
     ean: text("ean"),
@@ -234,7 +419,12 @@ export const catalogProducts = sqliteTable(
     ...timestamps,
   },
   (table) => [
-    uniqueIndex("catalog_manufacturer_sku_unique").on(table.manufacturerKey, table.skuKey),
+    index("catalog_manufacturer_sku_idx").on(table.manufacturerKey, table.skuKey),
+    uniqueIndex("catalog_sku_identity_unique").on(table.manufacturerKey, table.skuKey,
+      sql`lower(${table.scale})`, sql`lower(${table.vehicleMake})`, sql`lower(${table.vehicleModel})`,
+      sql`lower(coalesce(${table.vehicleVariant}, ''))`, sql`lower(coalesce(${table.color}, ''))`,
+      sql`lower(coalesce(${table.livery}, ''))`, sql`lower(coalesce(${table.edition}, ''))`,
+      sql`lower(coalesce(${table.packagingVariant}, ''))`, table.versionKind, sql`lower(coalesce(${table.setContents}, ''))`),
     uniqueIndex("catalog_gtin_unique").on(table.gtinKey),
     index("catalog_attributes_idx").on(table.manufacturerKey, table.scale, table.vehicleMake, table.vehicleModel),
     index("catalog_status_idx").on(table.catalogStatus, table.createdAt),

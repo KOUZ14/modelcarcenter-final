@@ -967,6 +967,7 @@ async function saveProduct(payload: Record<string, unknown>) {
     .from(products)
     .where(eq(products.id, id))
     .limit(1);
+  if (payload.availabilityType === "preorder" || existing[0]?.availabilityType === "preorder") throw new ValidationError("Manage preorders through Preorder operations and Incoming preorders.");
   const sellerId = requiredString(payload.sellerId, "sellerId", 100);
   const seller = await getDb()
     .select({

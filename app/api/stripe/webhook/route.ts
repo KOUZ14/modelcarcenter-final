@@ -3,6 +3,7 @@ import { verifyStripeWebhook } from "@/lib/stripe";
 import { config } from "@/lib/config";
 import { assertStripeEventMode } from "@/lib/production-readiness";
 import { logSecurityEvent } from "@/lib/security-events";
+import { processPromotionStripeEvent } from "@/lib/promotion-payments";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +17,7 @@ export async function POST(request: Request) {
     const rawBody = await request.text();
     const event = await verifyStripeWebhook(rawBody, signature);
     assertStripeEventMode(event.livemode, config.stripeSecretKey);
-    const result = await processStripeEvent(event);
+    const result = await processPromotionStripeEvent(event) ?? await processStripeEvent(event);
     return Response.json({ received: true, ...result });
   } catch {
     logSecurityEvent("webhook_rejected", { scope: "stripe", status: 400, reason: "verification_or_processing_failed" });

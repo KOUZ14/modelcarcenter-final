@@ -1,5 +1,24 @@
 @import "tailwindcss";
 
+.promotion-form { display: grid; gap: 14px; max-width: 680px; margin-top: 20px; }
+.promotion-form label { display: grid; gap: 6px; font-weight: 600; }
+.promotion-form input:not([type="checkbox"]), .promotion-form select, .promotion-form textarea { width: 100%; padding: 10px 12px; border: 1px solid #d7d3cc; border-radius: 6px; background: #fff; color: #202020; }
+.promotion-form .promotion-check { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-weight: 400; }
+.promotion-check input { width: 18px; height: 18px; }
+.promotion-form .button { justify-self: start; }
+.promotion-campaigns { display: grid; gap: 18px; }
+.promotion-campaign { padding: 18px 0; border-top: 1px solid #dedbd5; overflow-wrap: anywhere; }
+.promotion-campaign h4 { font-size: 1rem; margin: 0 0 8px; }
+.promotion-campaign p { margin: 8px 0; }
+.promotion-metrics { display: flex; flex-wrap: wrap; gap: 12px 28px; }
+.promotion-audit-detail { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+.sponsored-section { margin-bottom: 28px; padding: 18px; border: 1px solid #ddd8cf; border-radius: 8px; background: #f8f6f1; }
+.sponsored-section h3 { margin: 0 0 6px; font-size: 1rem; }
+.sponsored-section > p { margin: 0 0 16px; font-size: .85rem; color: #605d56; }
+.sponsored-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.sponsored-label { display: block; padding: 7px 10px; color: #575047; font-size: .75rem; font-weight: 600; background: #eee9df; }
+@media (max-width: 540px) { .sponsored-grid { grid-template-columns: 1fr; } .promotion-campaign .row-actions { flex-wrap: wrap; } }
+
 :root { --ink: #0b0b0c; --paper: #f7f6f3; --white: #fff; --muted: #62615d; --line: #d9d7d2; --accent: #d5001c; }
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
@@ -1574,3 +1593,28 @@ html:has(.cookie-notice) { scroll-padding-bottom: 240px; }
 
 .catalog-listing-fields { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: 18px; }
 .catalog-listing-fields[hidden] { display: none; }
+/* Seller-specific incoming allocations and unpaid buyer reservations. */
+.preorder-dashboard { display: grid; gap: 24px; padding-block: 16px 48px; }
+.preorder-panel { border: 1px solid #d7d9da; border-radius: 12px; padding: clamp(16px, 3vw, 28px); background: #fff; }
+.preorder-panel h2 { font-size: 1.3rem; margin-bottom: 12px; }
+.preorder-panel p { line-height: 1.6; margin-block: 10px; }
+.preorder-panel details { border-top: 1px solid #e5e7eb; padding-block: 16px; }
+.preorder-panel summary, details.preorder-panel > summary { cursor: pointer; font-weight: 650; line-height: 1.5; }
+.preorder-form { display: grid; gap: 16px; margin-block: 20px; }
+.preorder-form label { display: grid; gap: 7px; font-size: .92rem; font-weight: 550; }
+.preorder-form input:not([type="checkbox"]), .preorder-form select, .preorder-form textarea { width: 100%; padding: 11px 12px; border: 1px solid #bdc3c7; border-radius: 6px; background: white; color: #1e252b; }
+.preorder-form fieldset { padding: 16px; border: 1px solid #d7d9da; border-radius: 8px; min-width: 0; }
+.preorder-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 18px; }
+.preorder-check, .preorder-form .preorder-check { display: flex; align-items: flex-start; gap: 9px; font-weight: 400; line-height: 1.5; flex-wrap: wrap; }
+.preorder-check input { margin-top: 5px; }
+.preorder-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.preorder-state { background: #eaf3f5; color: #244e58; border-radius: 20px; padding: 5px 12px; font-size: .85rem; }
+.preorder-notice { background: #fff7e5; border-left: 3px solid #b78120; padding: 16px; margin-block: 18px; }
+.preorder-terms-summary { margin-block: 20px; }
+.preorder-terms-summary .product-facts { margin-block: 16px; }
+.preorder-event { border-top: 1px solid #e5e7eb; padding-block: 14px; overflow-wrap: anywhere; }
+.preorder-table { overflow-x: auto; margin-top: 16px; }
+.preorder-table table { border-collapse: collapse; width: 100%; text-align: left; font-size: .88rem; }
+.preorder-table th, .preorder-table td { padding: 10px; border-bottom: 1px solid #e5e7eb; }
+.preorder-form button { justify-self: start; }
+.preorder-panel .row-actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-block: 16px; }

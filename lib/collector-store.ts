@@ -561,6 +561,10 @@ export async function getOwnedProductForImages(
 export async function deleteCollectorAccount(userId: string) {
   const d1 = getD1();
   await d1.batch([
+    // End unpaid promises and release inspected stock before unlinking the user.
+    // Accepted commercial evidence remains available for service and refunds.
+    d1.prepare("UPDATE preorder_reservations SET status='cancelled',allocated_quantity=0,actor=?,reason='account_deleted',updated_at=CURRENT_TIMESTAMP WHERE buyer_user_id=? AND status IN ('hold','reserved','allocated','awaiting_payment')").bind(userId,userId),
+    d1.prepare("UPDATE preorder_waitlist SET status='cancelled' WHERE buyer_user_id=? AND status IN ('waiting','invited')").bind(userId),
     // Remove optional/guest records before deleting the account's verified email.
     d1.prepare("DELETE FROM community_subscribers WHERE lower(email) = (SELECT lower(email) FROM user WHERE id = ?)").bind(userId),
     d1.prepare("DELETE FROM availability_alerts WHERE user_id = ? OR lower(email) = (SELECT lower(email) FROM user WHERE id = ?)").bind(userId, userId),

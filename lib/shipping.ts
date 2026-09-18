@@ -148,8 +148,6 @@ export async function purchaseOwnedLabel(
     .limit(1);
   const row = quoteRows[0];
   if (!row) throw new ValidationError("Shipping quote not found.");
-  if (row.store.status === "suspended")
-    throw new ValidationError("This store is suspended. Contact Model Car Center support.");
   if (new Date(row.quote.expiresAt).getTime() <= Date.now()) {
     await getDb()
       .update(shippingQuotes)
@@ -550,8 +548,6 @@ function validateOrdersForShipment(
     throw new ValidationError("One or more orders are unavailable or do not belong to this store.");
   const store = rows[0]?.store;
   if (!store) throw new ValidationError("Store not found.");
-  if (store.status === "suspended")
-    throw new ValidationError("This store is suspended. Contact Model Car Center support.");
   if (new Set(rows.map(({ order }) => order.sellerId)).size !== 1)
     throw new ValidationError("Combined orders must belong to the same store.");
   for (const { order } of rows) {

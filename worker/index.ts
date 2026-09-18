@@ -7,6 +7,8 @@ import { config } from "../lib/config";
 import { protectRequest, requestSecurityFailure, securityPath } from "../lib/request-security";
 import { pruneSecurityRateLimits } from "../lib/security-rate-limit";
 import { logSecurityEvent } from "../lib/security-events";
+import { processPreorders } from "../lib/preorder-maintenance";
+import { processPromotions } from "../lib/promotion-payments";
 
 interface Env {
   ASSETS: Fetcher;
@@ -90,10 +92,12 @@ const worker = {
 
 async function runScheduledMaintenance(database: D1Database, now: Date) {
   try {
-    const [notifications, transfers] = await Promise.all([
+    const [notifications, transfers, , , promotions] = await Promise.all([
       processResolutionNotifications({ database, now }),
       processEligibleSellerTransfers({ database, now }),
       pruneSecurityRateLimits(database, now.getTime()),
+      processPreorders(),
+      processPromotions(now.getTime()),
     ]);
     console.info(
       "Scheduled marketplace maintenance completed.",
@@ -101,6 +105,7 @@ async function runScheduledMaintenance(database: D1Database, now: Date) {
         scheduledAt: now.toISOString(),
         notifications,
         transfers,
+        promotions,
       }),
     );
   } catch (error) {

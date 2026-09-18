@@ -284,6 +284,7 @@ export function StoreDashboard({
           </span>
         </div>
         <nav aria-label="Seller Hub sections">
+          <Link href="/store/preorders">Incoming preorders</Link>
           {tabs.map((tab) => (
             <button
               key={tab}
@@ -310,10 +311,10 @@ export function StoreDashboard({
       <main id="main-content" tabIndex={-1} className="store-main">
         {suspended && (
           <div className="store-alert" role="alert">
-            <b>Store access is read-only.</b>
+            <b>New sales are suspended.</b>
             <p>
-              This store is suspended. Contact Model Car Center support before
-              changing inventory or fulfillment.
+              Inventory changes are paused. Continue fulfilling existing paid
+              orders and handling refunds. Contact support about store eligibility.
             </p>
           </div>
         )}
@@ -355,7 +356,7 @@ export function StoreDashboard({
             rows={data.orders}
             store={data.store}
             shipping={data.shipping}
-            disabled={suspended}
+            disabled={false}
             action={action}
           />
         )}
@@ -516,6 +517,7 @@ function Inventory({
                       <button disabled={disabled} onClick={() => setEditing(product)}>
                         Edit
                       </button>
+                      {!disabled && product.status === "active" && product.availabilityType === "in_stock" && product.inventoryQuantity > product.reservedQuantity && <Link href={`/store?view=marketing&filter=promoted&promotion_product=${encodeURIComponent(product.id)}`}>Promote</Link>}
                       {product.status === "active" ? (
                         <button disabled={disabled} onClick={() => void setStatus(product, "inactive")}>
                           Unpublish
@@ -727,7 +729,7 @@ function ProductEditor({
                   }
                 >
                   <option value="in_stock">In stock · ships after purchase</option>
-                  <option value="preorder">Preorder · ships after release</option>
+
                 </select>
               </label>
               <label>
@@ -742,9 +744,7 @@ function ProductEditor({
               </label>
             </div>
             <p className="form-note">
-              Preorders are paid at checkout and count against the inventory
-              quantity above. The expected release date appears before purchase
-              and in the order confirmation.
+              Create unpaid preorder offers in Incoming preorders. This inventory form is for stock you physically possess.
             </p>
           </fieldset>
           <fieldset><legend>Package override (optional)</legend><p className="form-note">Leave all four blank to use the store default package for calculated checkout rates.</p><div className="parcel-grid"><label>Length (in)<input name="packageLength" inputMode="decimal" defaultValue={product?.packageLength ?? ""} /></label><label>Width (in)<input name="packageWidth" inputMode="decimal" defaultValue={product?.packageWidth ?? ""} /></label><label>Height (in)<input name="packageHeight" inputMode="decimal" defaultValue={product?.packageHeight ?? ""} /></label><label>Weight (lb)<input name="packageWeight" inputMode="decimal" defaultValue={product?.packageWeight ?? ""} /></label></div></fieldset>

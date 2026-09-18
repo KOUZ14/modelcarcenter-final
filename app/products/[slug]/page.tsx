@@ -76,16 +76,7 @@ export default async function ProductPage({
       "@type": "Offer",
       priceCurrency: product.currency.toUpperCase(),
       price: (product.priceCents / 100).toFixed(2),
-      availability:
-        product.availableQuantity < 1
-          ? "https://schema.org/OutOfStock"
-          : product.availabilityType === "preorder"
-            ? "https://schema.org/PreOrder"
-            : "https://schema.org/InStock",
-      availabilityStarts:
-        product.availabilityType === "preorder" && product.releaseDate
-          ? product.releaseDate
-          : undefined,
+      availability: product.availabilityType === "preorder" ? "https://schema.org/PreOrder" : product.availableQuantity < 1 ? "https://schema.org/OutOfStock" : "https://schema.org/InStock",
       seller: { "@type": "Organization", name: product.sellerName },
     },
   };
@@ -120,12 +111,9 @@ export default async function ProductPage({
                 .filter(Boolean)
                 .join(" · ")}
             </p>
-            <ProductShippingEstimate key={product.id} product={product} />
+            {product.availabilityType !== "preorder" && <ProductShippingEstimate key={product.id} product={product} />}
             <p className="stock-line">
-              {product.availableQuantity < 1
-                ? "Sold out"
-                : product.availabilityType === "preorder" && product.releaseDate
-                  ? `Preorder · Expected release ${formatReleaseDate(product.releaseDate)}`
+              {product.availabilityType === "preorder" ? "Upcoming release · Reserve now, pay after inspection" : product.availableQuantity < 1 ? "Sold out"
                   : product.availableQuantity === 1
                     ? "Only 1 available"
                     : `${product.availableQuantity} available`}{" "}
@@ -272,13 +260,4 @@ export default async function ProductPage({
       <SiteFooter />
     </main>
   );
-}
-
-function formatReleaseDate(value: string) {
-  return new Intl.DateTimeFormat("en-US", {
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-    timeZone: "UTC",
-  }).format(new Date(`${value}T12:00:00.000Z`));
 }

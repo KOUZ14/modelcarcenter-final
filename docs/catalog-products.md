@@ -24,8 +24,10 @@ to the listing independently of catalog verification.
 
 All writes use `prepareListingCatalog` and `persistCatalogListing`:
 
-- Exact normalized manufacturer + SKU reuses the catalog record. SKU punctuation
-  is preserved to avoid merging distinct manufacturer part numbers.
+- Exact normalized manufacturer + SKU and collectible identity reuse the catalog
+  record. A shared assortment SKU alone does not merge different colors, liveries,
+  editions, packaging, regular/chase versions or set contents. SKU punctuation is
+  preserved to avoid merging distinct manufacturer part numbers.
 - Valid UPC/EAN identifiers share a padded GTIN lookup key. Conflicting strong
   identifiers return an error instead of choosing one silently.
 - Similar attributes prompt for a choice; confirmation creates a distinct model.
@@ -60,6 +62,12 @@ reject null catalog links. This avoids rebuilding the inventory table or cascadi
 through existing transactional records. Drizzle's nullable column declaration
 reflects SQLite's physical column metadata; the triggers enforce the required
 relationship.
+
+The preorder rollout adds migrations `0024`–`0027`, including the collectible
+identity index that replaces manufacturer/SKU-only uniqueness. Shared catalog
+records also retain manufacturer release precision, source, last-checked date,
+release status and preview-media provenance. These announcements do not override
+seller dispatch promises. See [the preorder workflow](preorders.md).
 
 The current CSV import path also links every listing and reuses manufacturer
 product numbers (`product_number`). Ambiguous new rows stop before committing;

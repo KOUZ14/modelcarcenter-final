@@ -112,6 +112,8 @@ test("account deletion removes optional email data before removing the verified 
     CREATE TABLE sellers (id TEXT, owner_user_id TEXT, status TEXT, updated_at TEXT);
     CREATE TABLE products (id TEXT, seller_id TEXT, status TEXT, updated_at TEXT);
     CREATE TABLE orders (id TEXT, buyer_email TEXT);
+    CREATE TABLE preorder_reservations (id TEXT,buyer_user_id TEXT,status TEXT,allocated_quantity INTEGER,actor TEXT,reason TEXT,updated_at TEXT);
+    CREATE TABLE preorder_waitlist (id TEXT,buyer_user_id TEXT,status TEXT);
     INSERT INTO user VALUES ('account-1','one@example.test'), ('account-2','two@example.test');
     INSERT INTO session VALUES ('session-1','account-1'), ('session-2','account-2');
     INSERT INTO community_subscribers VALUES ('sub-1','ONE@example.test'), ('sub-2','two@example.test');
@@ -120,6 +122,8 @@ test("account deletion removes optional email data before removing the verified 
     INSERT INTO sellers VALUES ('seller-1','account-1','active',NULL), ('seller-2','account-2','active',NULL);
     INSERT INTO products VALUES ('product-1','seller-1','active',NULL), ('product-2','seller-2','active',NULL);
     INSERT INTO orders VALUES ('order-1','one@example.test');
+    INSERT INTO preorder_reservations VALUES ('reserve-1','account-1','awaiting_payment',1,NULL,NULL,NULL);
+    INSERT INTO preorder_waitlist VALUES ('wait-1','account-1','waiting');
   `);
   try {
     // Compile and execute the actual production function against an isolated SQL database.
@@ -137,5 +141,8 @@ test("account deletion removes optional email data before removing the verified 
     assert.equal(sqlite.prepare("SELECT status FROM sellers WHERE id='seller-1'").get().status, "suspended");
     assert.equal(sqlite.prepare("SELECT status FROM products WHERE id='product-2'").get().status, "active");
     assert.equal(sqlite.prepare("SELECT count(*) AS n FROM orders").get().n, 1);
+    assert.equal(sqlite.prepare("SELECT status FROM preorder_reservations").get().status, "cancelled");
+    assert.equal(sqlite.prepare("SELECT allocated_quantity FROM preorder_reservations").get().allocated_quantity, 0);
+    assert.equal(sqlite.prepare("SELECT status FROM preorder_waitlist").get().status, "cancelled");
   } finally { sqlite.close(); }
 });

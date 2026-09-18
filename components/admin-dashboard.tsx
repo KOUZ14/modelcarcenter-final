@@ -121,6 +121,8 @@ export function AdminDashboard({ adminEmail }: { adminEmail: string }) {
         </div>
       </header>
       <nav className="admin-tabs" aria-label="Admin sections">
+        <Link href="/admin/preorders">Preorder operations</Link>
+        <Link href="/admin/promotions">Promoted listings</Link>
         {tabs.map((item) => (
           <button
             key={item}
@@ -1125,7 +1127,7 @@ function ProductEditor({
                 }
               >
                 <option value="in_stock">In stock</option>
-                <option value="preorder">Preorder</option>
+
               </select>
             </label>
             <label>

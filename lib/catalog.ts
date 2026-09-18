@@ -12,12 +12,13 @@ export type CatalogQuery = {
   manufacturer?: string;
   seller?: string;
   condition?: string;
+  availability?: string;
   sort?: "newest" | "price_asc" | "price_desc";
   page?: number;
   pageSize?: number;
 };
 
-const productSelection = {
+export const productSelection = {
   id: products.id,
   catalogProductId: products.catalogProductId,
   conditionNotes: products.conditionNotes,
@@ -61,6 +62,8 @@ const productSelection = {
   availableQuantity: sql<number>`${products.inventoryQuantity} - ${products.reservedQuantity}`,
   availabilityType: products.availabilityType,
   releaseDate: products.releaseDate,
+  saleUnit: sql<string | null>`(SELECT json_extract(b.terms, '$.saleUnit') FROM incoming_batches b WHERE b.listing_id = ${products.id} LIMIT 1)`,
+  unitsPerPack: sql<number | null>`(SELECT json_extract(b.terms, '$.unitsPerPack') FROM incoming_batches b WHERE b.listing_id = ${products.id} LIMIT 1)`,
   primaryImageUrl: products.primaryImageUrl,
   keywords: products.keywords,
   defaultShippingCents: sellers.defaultShippingCents,
@@ -79,16 +82,13 @@ export async function getCatalogListings(catalogProductId: string) {
   return { model, listings: listings as ProductSummary[] };
 }
 
-function activeConditions(query: CatalogQuery): SQL[] {
+export function activeConditions(query: CatalogQuery): SQL[] {
   const conditions: SQL[] = [
     eq(products.status, "active"),
     eq(sellers.status, "active"),
     eq(sellers.sellerTermsVersion, POLICY_VERSION),
     isNotNull(sellers.sellerTermsAcceptedAt),
-    gt(
-      sql<number>`${products.inventoryQuantity} - ${products.reservedQuantity}`,
-      0,
-    ),
+    sql`(${products.availabilityType} = 'preorder' OR ${products.inventoryQuantity} - ${products.reservedQuantity} > 0)`,
   ];
   const search = normalizeSearch(query.q ?? "");
   for (const term of search.split(" ").filter(Boolean)) {
@@ -103,6 +103,8 @@ function activeConditions(query: CatalogQuery): SQL[] {
     ) LIKE ${needle}`);
   }
   if (query.scale) conditions.push(eq(products.scale, query.scale));
+  if (query.availability === "in_stock") conditions.push(eq(products.availabilityType, "in_stock"), gt(sql<number>`${products.inventoryQuantity} - ${products.reservedQuantity}`, 0));
+  if (query.availability === "preorder") conditions.push(eq(products.availabilityType, "preorder"));
   if (query.manufacturer)
     conditions.push(eq(products.modelManufacturer, query.manufacturer));
   if (query.seller) conditions.push(eq(products.sellerId, query.seller));
@@ -132,7 +134,7 @@ export async function searchCatalog(
   const conditions = activeConditions(query);
   const order =
     query.sort === "price_asc"
-      ? [asc(products.priceCents), desc(products.createdAt)]
+      ? [asc(sql`CASE WHEN ${products.availabilityType} = 'preorder' AND ${products.priceCents} = 0 THEN 1 ELSE 0 END`), asc(products.priceCents), desc(products.createdAt)]
       : query.sort === "price_desc"
         ? [desc(products.priceCents), desc(products.createdAt)]
         : [desc(products.createdAt), desc(products.id)];

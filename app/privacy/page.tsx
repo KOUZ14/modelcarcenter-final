@@ -10,7 +10,7 @@ export const metadata: Metadata = {
 };
 
 export default function PrivacyPage() {
-  return <PolicyPage effectiveDate="September 16, 2026" title="Privacy Policy" intro="This Policy explains the personal information Model Car Center collects, why we use it, when we disclose it, and the choices available to you.">
+  return <PolicyPage effectiveDate="September 17, 2026" title="Privacy Policy" intro="This Policy explains the personal information Model Car Center collects, why we use it, when we disclose it, and the choices available to you.">
     <h2>1. Scope and who we are</h2>
     <BusinessIdentity/>
     <p>This Privacy Policy applies to the Model Car Center website, marketplace, accounts, seller tools, Model Hunt, support, and related communications (the <b>“Service”</b>). Model Car Center is responsible for the information described here. Independent sellers are separately responsible for information they receive to fulfill orders and must use it only for that purpose and as law permits. Stripe and other services may separately control information you provide directly to them.</p>
@@ -24,10 +24,12 @@ export default function PrivacyPage() {
       <tr><td>Payment and payout data</td><td>Stripe customer/session/account identifiers, payment status, transaction amounts, refund and payout readiness</td><td>Route payments and payouts, reconcile transactions, and manage refunds and disputes</td></tr>
       <tr><td>Communications and submissions</td><td>Model Hunt details, application answers, profile biography, newsletter signup, feedback and messages</td><td>Respond to requests, provide requested notices, review applications, and operate community features</td></tr>
       <tr><td>Device, usage and security data</td><td>IP address, browser/device information, request logs, cookie/session identifiers, and security events</td><td>Deliver and secure the Service, diagnose errors, prevent abuse, and maintain availability</td></tr>
+      <tr><td>Sponsored placement measurement</td><td>Campaign and listing identifiers, a temporary page-view identifier, recorded impressions and product clicks</td><td>Report campaign delivery to the store and prevent duplicate counts. Stores receive aggregate counts, without collector identities.</td></tr>
     </tbody></table></div>
     <p>We do not receive your full card number, bank account credentials, or identity-verification documents from Stripe. Stripe collects and processes those details under its own privacy notice. Shipping addresses may be considered sensitive personal information in some jurisdictions; we use them only for fulfillment, support, security, and legal compliance.</p>
 
     <h2>3. Sources of information</h2>
+    <p>Sponsored cards send first-party impression and click events. Their temporary identifiers are not stored in cookies or local storage and are not used to follow you across websites. Individual measurement records are scheduled for deletion after seven days; campaign totals and financial records remain. Signed-in store owners are excluded from their own campaign counts. Our normal security request processing also applies to these requests.</p>
     <p>If you use optional address autocomplete, the street address you type is sent to Google Maps to suggest and complete your address. Google&apos;s <a href="https://policies.google.com/privacy" target="_blank" rel="noreferrer">Privacy Policy</a> applies to that processing. Choose manual entry to enter an address without using this service.</p>
     <p>We collect information directly from you; automatically from your browser and device; from sellers and buyers involved in a transaction; from Stripe about checkout, payments, refunds, verification, and payout status; from authentication and email-delivery providers; and from public sources when reasonably needed to review a professional seller application or protect the marketplace.</p>
 

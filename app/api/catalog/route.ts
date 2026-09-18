@@ -12,6 +12,7 @@ export async function GET(request: Request) {
       manufacturer: url.searchParams.get("manufacturer") ?? "",
       seller: url.searchParams.get("seller") ?? "",
       condition: url.searchParams.get("condition") ?? "",
+      availability: url.searchParams.get("availability") ?? "",
       sort: sortParam === "price_asc" || sortParam === "price_desc" ? sortParam : "newest",
       page: Number.parseInt(url.searchParams.get("page") ?? "1", 10) || 1,
       pageSize: Number.parseInt(url.searchParams.get("pageSize") ?? "12", 10) || 12,

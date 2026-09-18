@@ -147,6 +147,8 @@ test("Worker ingress enforces guards before dispatch and preserves security head
     "vinext/server/image-optimization": "export const DEFAULT_DEVICE_SIZES = []; export const DEFAULT_IMAGE_SIZES = []; export function handleImageOptimization() { throw new Error('Unexpected image optimization'); }",
     "../lib/resolution-notifications": "export const processResolutionNotifications = async () => ({});",
     "../lib/seller-transfers": "export const processEligibleSellerTransfers = async () => ({});",
+    "../lib/preorder-maintenance": "export const processPreorders = async () => ({});",
+    "../lib/promotion-payments": "export const processPromotions = async () => ({});",
     "../lib/config": `export const config = { siteUrl: ${JSON.stringify(origin)}, betterAuthSecret: ${JSON.stringify(secret)} };`,
   };
   const result = await build({

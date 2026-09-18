@@ -155,6 +155,7 @@ export function MarketplaceProvider({ children }: { children: React.ReactNode })
     cart, wishlist, collector, authReady: mode !== "loading",
     addToCart(product, quantity = 1) {
       if (mode === "loading") return false;
+      if (product.availabilityType === "preorder") { setCartError("Reserve this upcoming model on its seller offer. Pay through My Preorders when stock is ready."); return false; }
       if (cart.length >= 25 && !cart.some((item) => item.productId === product.id)) {
         setCartError("Your cart can hold up to 25 products. Check out a seller before adding more; your existing items are kept.");
         return false;

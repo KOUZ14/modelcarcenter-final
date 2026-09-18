@@ -40,7 +40,7 @@ export async function POST(request: Request) {
         preview: previewInventoryCsv(requiredCsv(payload.csv)),
       });
     }
-    if (store.status === "suspended")
+    if (store.status === "suspended" && action !== "ship_order")
       throw new ValidationError(
         "This store is suspended. Contact Model Car Center support.",
       );

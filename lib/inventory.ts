@@ -19,7 +19,7 @@ import {
 
 export type RequestedCartItem = { productId: string; quantity: number };
 
-export async function loadAuthoritativeCartItems(items: RequestedCartItem[]) {
+export async function loadAuthoritativeCartItems(items: RequestedCartItem[], allocatedPreorder = false) {
   if (!Array.isArray(items) || items.length < 1 || items.length > 25) throw new Error("Cart must contain between 1 and 25 products.");
   const consolidated = new Map<string, number>();
   for (const item of items) {
@@ -86,10 +86,10 @@ export async function loadAuthoritativeCartItems(items: RequestedCartItem[]) {
   if (rows.length !== consolidated.size) throw new Error("One or more products no longer exist.");
   for (const row of rows) {
     const quantity = consolidated.get(row.id)!;
-    if (row.status !== "active" || row.sellerStatus !== "active") throw new Error(`${row.title} is no longer available.`);
-    if (row.availabilityType === "preorder" && !row.releaseDate)
-      throw new Error(`${row.title} has an incomplete preorder release date.`);
-    if (row.inventoryQuantity - row.reservedQuantity < quantity) throw new Error(`Only ${Math.max(0, row.inventoryQuantity - row.reservedQuantity)} of ${row.title} are currently available.`);
+    if ((!allocatedPreorder && (row.status !== "active" || row.sellerStatus !== "active")) || (allocatedPreorder && !["active", "suspended"].includes(row.sellerStatus))) throw new Error(`${row.title} is no longer available.`);
+    if (row.availabilityType === "preorder" && !allocatedPreorder)
+      throw new Error(`${row.title} requires an unpaid reservation. Pay through My Preorders after inspected stock is allocated.`);
+    if (!allocatedPreorder && row.inventoryQuantity - row.reservedQuantity < quantity) throw new Error(`Only ${Math.max(0, row.inventoryQuantity - row.reservedQuantity)} of ${row.title} are currently available.`);
     if (!row.sellerStripeAccountId || !row.stripeChargesEnabled || !row.stripePayoutsEnabled) {
       throw new Error(`${row.sellerName} is not ready to accept marketplace payments.`);
     }
@@ -112,7 +112,7 @@ export async function loadAuthoritativeCheckout(items: RequestedCartItem[]) {
   return sellerIds.map((sellerId) => sellerCartFromRows(rows.filter((row) => row.sellerId === sellerId)));
 }
 
-function sellerCartFromRows(rows: Awaited<ReturnType<typeof loadAuthoritativeCartItems>>) {
+export function sellerCartFromRows(rows: Awaited<ReturnType<typeof loadAuthoritativeCartItems>>) {
   if (new Set(rows.map((row) => row.sellerId)).size !== 1) {
     throw new Error("Choose items from one seller for this shipping request. Each seller has separate shipping.");
   }
@@ -177,6 +177,7 @@ export function buildCartReservation(
   shipping?: ResolvedCheckoutShipping,
   checkoutGroupId: string | null = null,
   expiresAt = new Date(Date.now() + config.checkoutExpirationMinutes * 60_000),
+  allocatedPreorder = false,
 ) {
   const d1 = getD1();
   const reservationId = crypto.randomUUID();
@@ -212,8 +213,8 @@ export function buildCartReservation(
         shipping?.combinedShippingRequestId ?? null,
       ),
     d1.prepare(`UPDATE sellers SET
-      default_shipping_cents = CASE WHEN status = 'active' THEN default_shipping_cents ELSE -1 END
-      WHERE id = ?`).bind(input.seller.sellerId),
+      default_shipping_cents = CASE WHEN status = 'active' OR (? = 1 AND status = 'suspended') THEN default_shipping_cents ELSE -1 END
+      WHERE id = ?`).bind(allocatedPreorder ? 1 : 0, input.seller.sellerId),
   ];
   if (shipping?.combinedShippingRequestId) {
     statements.push(d1.prepare(`UPDATE combined_shipping_requests SET status = CASE
@@ -228,11 +229,11 @@ export function buildCartReservation(
     );
   }
   for (const item of input.items) {
-    statements.push(
-      d1.prepare(`UPDATE products SET
+    if (!allocatedPreorder) statements.push(d1.prepare(`UPDATE products SET
         reserved_quantity = CASE WHEN status = 'active' THEN reserved_quantity + ? ELSE -1 END,
         updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?`).bind(item.quantity, item.id),
+        WHERE id = ?`).bind(item.quantity, item.id));
+    statements.push(
       d1.prepare(`INSERT INTO checkout_reservation_items
         (id, reservation_id, product_id, product_title_snapshot, seller_sku_snapshot, scale_snapshot,
          manufacturer_snapshot, unit_price_cents, quantity, image_url_snapshot,
@@ -281,13 +282,16 @@ export async function releaseReservation(reservationId: string) {
     .from(checkoutReservationItems)
     .where(eq(checkoutReservationItems.reservationId, reservationId));
   const d1 = getD1();
-  const pendingGuard = `EXISTS (SELECT 1 FROM checkout_reservations WHERE id = ? AND status = 'pending')`;
+  const pendingGuard = `EXISTS (SELECT 1 FROM checkout_reservations WHERE id = ? AND status = 'pending')
+    AND NOT EXISTS (SELECT 1 FROM preorder_checkouts WHERE checkout_id = ?)`;
   const statements = items.map((item) =>
     d1.prepare(`UPDATE products SET reserved_quantity = reserved_quantity - ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ? AND reserved_quantity >= ? AND ${pendingGuard}`)
-      .bind(item.quantity, item.productId, item.quantity, reservationId),
+      .bind(item.quantity, item.productId, item.quantity, reservationId, reservationId),
   );
   statements.push(
+    d1.prepare(`UPDATE preorder_reservations SET checkout_reservation_id = NULL, updated_at = CURRENT_TIMESTAMP
+      WHERE checkout_reservation_id = ? AND status != 'converted'`).bind(reservationId),
     d1.prepare(`UPDATE combined_shipping_requests SET status = 'quoted', updated_at = CURRENT_TIMESTAMP
       WHERE id = (SELECT combined_shipping_request_id FROM checkout_reservations WHERE id = ? AND status = 'pending') AND status = 'used'`).bind(reservationId),
     d1.prepare("UPDATE checkout_reservations SET combined_shipping_request_id = NULL WHERE id = ? AND status = 'pending'").bind(reservationId),
