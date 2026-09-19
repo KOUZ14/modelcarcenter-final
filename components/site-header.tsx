@@ -14,7 +14,7 @@ const primaryLinks = [
   { href: "/sell", label: "Sell", icon: "arrow" },
 ] as const;
 
-export function SiteHeader({ overlay = false, desktopHome = false }: { overlay?: boolean; desktopHome?: boolean }) {
+export function SiteHeader({ overlay = false }: { overlay?: boolean }) {
   const { cart, collector, authReady, signOut } = useMarketplace();
   const path = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -42,14 +42,13 @@ export function SiteHeader({ overlay = false, desktopHome = false }: { overlay?:
   ];
 
   return <>
-    <header className={`site-header collector-header ${overlay ? "overlay" : "inner"} ${desktopHome ? "home-header" : ""}`} onKeyDown={event => {
+    <header className={`site-header collector-header ${overlay ? "overlay" : "inner"}`} onKeyDown={event => {
       if (event.key === "Escape") {
         const menu = event.currentTarget.querySelector<HTMLDetailsElement>("details[open]");
         if (menu) { menu.open = false; menu.querySelector("summary")?.focus(); }
       }
     }}>
       <Link className="brand" href="/" aria-label="Model Car Center home"><BrandLogo priority dark={!overlay} /></Link>
-      {desktopHome && <nav className="home-desktop-nav home-desktop-only" aria-label="Desktop main navigation">{[["/marketplace","Shop"],["/community","Community"],["/collection","My Collection"],["/messages","Inbox"],["/profile","Profile"]].map(([href,label]) => <Link key={href} href={href} aria-current={isCurrent(href) ? "page" : undefined}>{label}</Link>)}</nav>}
       <nav className="collector-main-nav" aria-label="Main navigation">
         {primaryLinks.map(({ href, label, icon }) => <Link className={href === "/sell" ? "header-sell" : undefined} key={href} href={href} aria-current={isCurrent(href) ? "page" : undefined}>
           <Icon name={icon} /><span>{label}</span>
@@ -61,7 +60,6 @@ export function SiteHeader({ overlay = false, desktopHome = false }: { overlay?:
       </nav>
       <form className="header-search" action="/marketplace" role="search"><label className="sr-only" htmlFor="header-model-search">Search model cars</label><input id="header-model-search" type="search" name="q" placeholder="Search model cars"/><button type="submit" aria-label="Search models"><Icon name="search"/></button></form>
       <div className="header-actions">
-        {desktopHome && <><Link className="icon-button home-desktop-only" href="/search" aria-label="Search models, collectors and posts"><Icon name="search" /></Link><Link className="icon-button home-desktop-only" href="/notifications" aria-label="Notifications"><span aria-hidden="true">◉</span></Link></>}
         <Link className="icon-button" href="/cart" aria-label={`Shopping cart, ${count} items`}><Icon name="bag" />{count > 0 && <span className="count">{count > 99 ? "99+" : count}</span>}</Link>
         {authReady && (collector ? <details className="account-menu"><summary aria-label="Account controls"><span className="account-avatar">{collector.displayName.slice(0, 1).toUpperCase()}</span></summary><div>
           <Link href="/profile">Profile</Link><Link href="/collection">My Collection</Link>

@@ -120,7 +120,7 @@ export function HomeMarketplace({ emailAlertsEnabled = false }: { emailAlertsEna
   ] as const;
 
   return <main className="home-marketplace">
-    <SiteHeader overlay desktopHome />
+    <SiteHeader overlay />
     <section className="hero" id="top">
       <Image src="/images/model-car-hero.png" alt="Detailed collectible sports car model in a dark studio" fill sizes="100vw" priority unoptimized />
       <div className="hero-shade" />

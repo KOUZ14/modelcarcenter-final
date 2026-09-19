@@ -4,7 +4,7 @@ September 18, 2026. This change extends the current site and preserves its exist
 
 ## Desktop homepage follow-up
 
-At the owner's request, the homepage above 820px restores the previous large "Buy and sell model cars" hero, desktop navigation, full inventory filters and pagination, scale and brand panels, and expanded Model Hunt, seller and newsletter sections. The compact phone homepage and the other marketplace improvements remain in place. Homepage filtering retains URL persistence and empty-selection handling.
+At the owner's request, the homepage above 820px restores the previous large "Buy and sell model cars" hero, full inventory filters and pagination, scale and brand panels, and expanded Model Hunt, seller and newsletter sections. The shared header is used throughout the site, including the desktop homepage. The compact phone homepage and the other marketplace improvements remain in place. Homepage filtering retains URL persistence and empty-selection handling.
 
 Follow-up validation: TypeScript, focused ESLint, production build/artifact validation, and all 262 existing automated tests passed. Browser screenshot and interaction checks remain outstanding.
 
