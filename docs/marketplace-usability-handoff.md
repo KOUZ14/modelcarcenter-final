@@ -59,4 +59,8 @@ Use screenshots of the actual approved-seller dashboard on `/sell` once reviewed
 
 ## Release notes
 
-The existing hosted site is public. The prepared changes and migration have not yet been published in this handoff. Keep the current audience and legal policy duration when publishing the approved version. Apply the included generated migration before serving the new application; do not roll back by dropping the new order-policy columns or rewriting sold-under terms. Existing listings missing photo evidence are flagged for seller completion; they are not given invented evidence or silently removed.
+Published with the owner's explicit approval on September 18, 2026 (September 19 UTC), as saved Sites version 57. Deployment status is **succeeded**. The published URL is https://model-car-center.kman14.chatgpt.site and the existing custom domain remains https://modelcarcenter.com. The public audience and three-day protection policy were preserved.
+
+Post-publication HTTP checks returned 200 for the custom-domain homepage, Help, Sell and the catalog API. The empty 1:64 API query returned valid catalog data with zero matching listings. These are service checks, not browser, screenshot or payment-UI acceptance. Those outstanding checks and the five-owner study remain listed above.
+
+The saved release includes the generated migration. Do not roll back by dropping the new order-policy columns or rewriting sold-under terms. Existing listings missing photo evidence are flagged for seller completion; they are not given invented evidence or silently removed.
