@@ -1,3 +1,5 @@
+import { getSelectedPhotoViews } from "./listing-evidence";
+
 export type UploadedProductImage = {
   id: string;
   url: string;
@@ -40,6 +42,7 @@ export async function uploadProductPhotoFiles(input: {
     form.set("productId", input.productId);
     if (input.makePrimary && index === 0) form.set("makePrimary", "true");
     form.append("images", input.files[index]);
+    form.set("photoViews", JSON.stringify([getSelectedPhotoViews(input.files[index])]));
     const response = await fetch(input.endpoint, { method: "POST", body: form });
     const body = await readApiResponse<{
       images?: UploadedProductImage[];

@@ -1,16 +1,18 @@
 # Collector community
 
+For a populated, unpublished local review environment, see [Beta seed and review accounts](beta-seed.md).
+
 ## Design handoff
 
 The existing catalog, account, seller onboarding, listing, order, shipping and payment services remain authoritative. A collection item represents one physical piece; catalog models and wishlist entries do not represent ownership. No existing account or purchase is published by migration.
 
-The five main destinations are Shop, Community, My Collection, Inbox and Profile. Search, notifications and cart stay in the header. Shop URLs continue to open Shop directly.
+Desktop navigation links to Shop, Community, Collection, Inbox and Profile. On mobile, the bottom bar links to Shop, Community, Collection, Inbox and Explore. Explore groups discovery, account, selling and support destinations, including Profile, Wishlist, Notifications, upcoming releases and Seller Hub for store owners. Search and cart stay in the mobile header. Shop URLs continue to open Shop directly.
 
 Community opens on For You or the previously selected Following feed. A narrow desktop navigation and one photo feed sit beside the current editorial theme and collector suggestions. Mobile uses one column. Create post accepts photos or a text-only question, with optional catalog/item tags. Save post and Wishlist are separate actions. Following contains only followed authors, with a clear empty/caught-up state. Detail links preserve the feed URL, topic and loaded page count.
 
 Profiles open on Collection, with Posts, For Sale and About tabs. Only explicitly published profiles and public pieces are discoverable. Public counts exclude previously owned pieces. Shelves are memberships of existing physical pieces. Owners can preview the public projection with View as visitor.
 
-My Collection opens on an image grid. Add model searches exact catalog releases, showing scale, maker, color and code. An unmatched personal piece is permitted without creating a catalog entry. Visibility is shown before saving; all additions default to Not for sale. Purchase records remain in an owner-only expandable area. Publishing a previously private piece requires confirmation.
+My Collection opens on an image grid. Add model searches exact catalog releases, showing scale, maker, color and code. An unmatched personal piece is permitted without creating a catalog entry. The add/edit form starts with Not for sale, Open to offers and For sale; Not for sale remains the default. Selecting a selling option shows the exact catalog, public profile/piece, seller eligibility and single-piece listing requirements inline. A ready collector can activate availability while saving. Otherwise, Save model and continue setup retains the piece and carries the selected availability and minimum offer through profile/listing setup. Collector listing setup starts with the exact catalog identity and provides a return link; professional sellers use Seller Hub in another tab and refresh eligibility on return. Until setup is complete, new pieces remain Not for sale. Failed availability updates retain the saved piece identity and show the remaining error instead of duplicating the piece on retry. Reserved and sold pieces keep their committed state. Visibility is shown before saving. Purchase records remain in an owner-only expandable area. Publishing a previously private piece requires confirmation.
 
 Item pages show owner photography and story, identity, shelves and availability. Not for sale has Wishlist and a secondary catalog link; Open to offers has Make an offer; For sale links to the marketplace listing; Reserved shows a deadline; Previously owned is historical. Privacy and comments remain independent.
 

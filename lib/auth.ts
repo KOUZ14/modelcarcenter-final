@@ -5,7 +5,7 @@ import { getD1, getDb } from "@/db";
 import * as schema from "@/db/schema";
 import { config } from "./config";
 import { sendAuthMagicLinkEmail } from "./email";
-import { collectorAuthPolicy, secureAuthCookiesFor } from "./auth-policy";
+import { collectorAuthPolicy, secureAuthCookiesFor, trustedAuthOriginsFor } from "./auth-policy";
 import { consumeRateLimit } from "./security-rate-limit";
 import { logSecurityEvent } from "./security-events";
 
@@ -29,7 +29,7 @@ function createCollectorAuth() {
         verification: schema.verification,
       },
     }),
-    trustedOrigins: [config.siteUrl],
+    trustedOrigins: trustedAuthOriginsFor(config.siteUrl, process.env.NODE_ENV),
     emailAndPassword: { enabled: false },
     // Worker ingress adds atomic D1 limits across instances. Keep Better Auth's
     // own endpoint limits as an additional layer, including during development.

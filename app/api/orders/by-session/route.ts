@@ -1,4 +1,5 @@
 import { getPublicOrderBySession } from "@/lib/orders";
+import { measureConfirmedPurchase } from "@/lib/measurement";
 
 export const dynamic = "force-dynamic";
 
@@ -8,6 +9,7 @@ export async function GET(request: Request) {
   try {
     const order = await getPublicOrderBySession(sessionId);
     if (!order) return Response.json({ pending: true }, { status: 202, headers: { "Cache-Control": "private, no-store" } });
+    await measureConfirmedPurchase(request, sessionId, order.items.reduce((sum, item) => sum + item.quantity, 0), order.createdAt);
     return Response.json({ order }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     console.error(error);

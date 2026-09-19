@@ -7,6 +7,21 @@ import { loadAuthoritativeCartItems,sellerCartFromRows } from "./inventory";
 import { expireCollectionOffersIn } from "./collection-offer-maintenance";
 export type CollectionOffer={id:string;root_id:string;item_id:string;buyer_id:string;owner_id:string;proposer_id:string;thread_id:string;status:string;price_cents:number;currency:string;terms:string;item_version:number;destination:string;expires_at:number;payment_deadline:number|null;checkout_id:string|null;created_at:number};
 export const OFFER_MS=48*3600000,RESERVATION_MS=24*3600000;
+export type CollectionSellingOptions = {
+  published: boolean;
+  sellerReady: boolean;
+  sellerType: string | null;
+  listings: Array<{id:string;title:string;catalogId:string;priceCents:number;currency:string}>;
+};
+export async function collectionSellingOptions(userId:string, itemId=""):Promise<CollectionSellingOptions> {
+  const profile=await one<{published:number}>("SELECT published FROM community_settings WHERE user_id=?",userId);
+  const seller=await one<{id:string;sellerType:string;ready:number}>("SELECT id,seller_type sellerType,(status='active' AND stripe_charges_enabled=1 AND stripe_payouts_enabled=1 AND seller_terms_version=? AND seller_terms_accepted_at IS NOT NULL) ready FROM sellers WHERE owner_user_id=?",POLICY_VERSION,userId);
+  const listings=seller?.ready?await rows<CollectionSellingOptions['listings'][number]>(`SELECT p.id,p.title,p.catalog_product_id catalogId,p.price_cents priceCents,p.currency FROM products p
+    WHERE p.seller_id=? AND p.status='active' AND p.inventory_quantity=1 AND p.reserved_quantity=0 AND p.availability_type!='preorder'
+    AND p.package_length>0 AND p.package_width>0 AND p.package_height>0 AND p.package_weight>0
+    AND NOT EXISTS(SELECT 1 FROM collection_items i WHERE i.listing_id=p.id AND i.id!=?) ORDER BY p.created_at DESC`,seller.id,itemId):[];
+  return {published:Boolean(profile?.published),sellerReady:Boolean(seller?.ready),sellerType:seller?.sellerType??null,listings};
+}
 export async function expireCollectionOffers(now=Date.now()){
   await expireCollectionOffersIn(getD1(),now);
 }
@@ -19,6 +34,8 @@ export async function configureCollectionCommerce(user:string,p:Record<string,un
   if(state==='not_for_sale'){await getD1().batch([getD1().prepare("UPDATE collection_offers SET status='withdrawn' WHERE item_id=? AND status='proposed'").bind(item.id),getD1().prepare("UPDATE collection_items SET availability='not_for_sale',version=version+1 WHERE id=? AND owner_id=?").bind(item.id,user),...(!committed&&item.listingId?[getD1().prepare("UPDATE products SET status='inactive' WHERE id=? AND reserved_quantity=0").bind(item.listingId)]:[])]);return {};}
   if(committed)throw new ValidationError('An accepted reservation remains committed until payment, cancellation or expiry.');
   if(!item.catalogId||item.visibility!=='public')throw new ValidationError('Confirm the exact catalog identity and publish this piece before enabling sales.');
+  if(!await one("SELECT user_id FROM community_settings WHERE user_id=? AND published=1",user))throw new ValidationError('Publish your collector profile before enabling sales.');
+  if(await one("SELECT id FROM collection_items WHERE listing_id=? AND id!=?",required(p.listingId,'Single-piece listing'),item.id))throw new ValidationError('That listing is already linked to another collection piece. Choose the listing for this physical piece.');
   const listing=await one<{id:string}>(`SELECT p.id FROM products p JOIN sellers s ON s.id=p.seller_id WHERE p.id=? AND p.catalog_product_id=? AND s.owner_user_id=? AND p.inventory_quantity=1 AND p.reserved_quantity=0 AND p.status='active' AND p.availability_type!='preorder' AND p.package_length>0 AND p.package_width>0 AND p.package_height>0 AND p.package_weight>0 AND s.status='active' AND s.stripe_charges_enabled=1 AND s.stripe_payouts_enabled=1 AND s.seller_terms_version=? AND s.seller_terms_accepted_at IS NOT NULL`,required(p.listingId,'Single-piece listing'),item.catalogId,user,POLICY_VERSION);
   if(!listing)throw new ValidationError('Complete seller onboarding and an eligible single-piece listing with matching catalog and shipping details first.');
   const minimum=Number(p.minimumCents)||0;if(!Number.isSafeInteger(minimum)||minimum<0)throw new ValidationError('Enter a valid minimum offer.');

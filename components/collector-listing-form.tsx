@@ -42,6 +42,8 @@ export function CollectorListingForm({
   displayName,
   prefill,
   marketplaceFeeBps,
+  collectionCatalog,
+  collectionReturnTo,
 }: {
   initial: Initial;
   seller: Seller;
@@ -49,8 +51,10 @@ export function CollectorListingForm({
   displayName: string;
   prefill: Record<string, string>;
   marketplaceFeeBps: number;
+  collectionCatalog?: Record<string, unknown>;
+  collectionReturnTo?: string;
 }) {
-  const product = initial?.product ?? {};
+  const product = initial?.product ?? collectionCatalog ?? {};
   const [catalogReady, setCatalogReady] = useState(Boolean(product.catalogProductId));
   const formRef = useRef<HTMLFormElement>(null);
   const addressRef = useRef<AddressFieldsHandle>(null);
@@ -147,7 +151,7 @@ export function CollectorListingForm({
       history.replaceState(
         null,
         "",
-        `/sell/model?id=${encodeURIComponent(body.productId)}`,
+        (() => { const query = new URLSearchParams(location.search); query.set("id", body.productId!); return `/sell/model?${query}`; })(),
       );
       if (shouldSubmit) {
         const review = await fetch("/api/listings", {
@@ -310,6 +314,7 @@ export function CollectorListingForm({
 
   return (
     <div className="listing-shell">
+      {collectionReturnTo && <div className="collection-selling-setup"><p>This listing is for the model saved in your collection. Complete the condition, photos and shipping details, then submit it for review. Once it is active, return to enable your chosen availability.</p><Link href={collectionReturnTo + (productId ? `&listing=${encodeURIComponent(productId)}` : "")}>Return to collection setup</Link></div>}
       <div className="page-title">
         <p className="eyebrow">Sell from your collection</p>
         <h1>{productId ? "Edit your listing" : "Sell a Model"}</h1>
@@ -450,6 +455,9 @@ export function CollectorListingForm({
             <div>
               <label>Seller display name<input name="sellerDisplayName" required maxLength={120} defaultValue={String(seller?.storeName ?? displayName)} /></label>
               <label>Short seller description<textarea name="sellerDescription" maxLength={1000} rows={3} defaultValue={String(seller?.description ?? "")} /></label>
+              <label>Specialty<input name="sellerSpecialty" maxLength={300} defaultValue={String(seller?.specialty ?? "")} placeholder="The scales, makers or themes you collect"/></label>
+              <label>How you pack models<textarea name="sellerPackingApproach" maxLength={1000} rows={3} defaultValue={String(seller?.packingApproach ?? "")} placeholder="How you protect the model, its box and accessories"/></label>
+              <p>A useful introduction (at least 30 characters), specialty, and packing approach (at least 20 characters) are required before review. Your state or region is public; street addresses stay private. You can save a draft first.</p>
             </div>
           </details>
           </div>
@@ -464,7 +472,7 @@ export function CollectorListingForm({
           </summary>
           <div className="listing-section-content">
           <p>Upload 4–8 original photos. Do not reuse another seller&apos;s photos.</p>
-          <ProductImageFields images={images} primaryImageUrl={primaryImageUrl} files={files} disabled={busy} onFilesChange={setFiles} onRemove={productId ? removeImage : undefined} onRemoveLegacy={productId ? removeLegacyImage : undefined} onReorder={productId ? reorderImages : undefined} />
+          <ProductImageFields productId={productId || undefined} images={images} primaryImageUrl={primaryImageUrl} files={files} disabled={busy} onFilesChange={setFiles} onRemove={productId ? removeImage : undefined} onRemoveLegacy={productId ? removeLegacyImage : undefined} onReorder={productId ? reorderImages : undefined} />
           <RequiredPhotoChecklist product={product} />
           </div>
         </details>

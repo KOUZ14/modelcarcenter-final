@@ -62,9 +62,10 @@ export function modelHuntMatches(
   product: { vehicleMake: string; vehicleModel: string; scale: string; modelManufacturer: string },
 ) {
   const required =
-    normalizeMatchValue(hunt.vehicleMake) === normalizeMatchValue(product.vehicleMake) &&
-    normalizeMatchValue(hunt.vehicleModel) === normalizeMatchValue(product.vehicleModel) &&
-    normalizeMatchValue(hunt.preferredScale) === normalizeMatchValue(product.scale);
+    (!hunt.vehicleMake || normalizeMatchValue(hunt.vehicleMake) === normalizeMatchValue(product.vehicleMake)) &&
+    (normalizeMatchValue(hunt.vehicleModel) === normalizeMatchValue(product.vehicleModel) ||
+      (!hunt.vehicleMake && normalizeMatchValue(hunt.vehicleModel) === normalizeMatchValue(`${product.vehicleMake} ${product.vehicleModel}`))) &&
+    (!hunt.preferredScale || normalizeMatchValue(hunt.preferredScale) === normalizeMatchValue(product.scale));
   const manufacturer = normalizeMatchValue(hunt.modelManufacturer);
   return required && (!manufacturer || manufacturer === normalizeMatchValue(product.modelManufacturer));
 }

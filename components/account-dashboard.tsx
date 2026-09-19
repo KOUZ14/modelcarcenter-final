@@ -1,6 +1,7 @@
 "use client";
 
 import { SellerOrderAmounts } from "./seller-order-amounts";
+import { OrderProtectionSummary } from "./order-protection-summary";
 import { PreorderDashboard, PreorderOrderHistory } from "./preorder-dashboard";
 
 import Image from "next/image";
@@ -383,6 +384,7 @@ function Orders({
               </p>
             )}
             {order.shipment && <ShipmentTimeline shipment={order.shipment} />}
+            <OrderProtectionSummary order={{ createdAt: String(order.createdAt), paidAt: order.paidAt ? String(order.paidAt) : null, shippedAt: order.shippedAt ? String(order.shippedAt) : null, deliveredAt: order.deliveredAt ? String(order.deliveredAt) : null, refundRequestDeadline: order.refundRequestDeadline ? String(order.refundRequestDeadline) : null, protectionPolicyVersion: order.protectionPolicyVersion ? String(order.protectionPolicyVersion) : null }}/>
             <PreorderOrderHistory reservation={preorders.find(r=>r.orderId===String(order.id))}/>
             <Link className="button outline small" href={`/resolution?order=${String(order.id)}`}>
               Get help with this order
@@ -874,7 +876,7 @@ function collectorPayoutLabel(sale: GarageData["sales"][number]) {
   if (sale.processingFeePayer === "seller" && sale.paymentProcessingFeeCents == null) return "Held — awaiting actual Stripe processing fee";
   return sale.payoutEligibleAt
     ? `Held through ${date(String(sale.payoutEligibleAt))}`
-    : "Held until three days after delivery";
+    : "Held until the protection deadline after delivery";
 }
 
 function date(value: string) {

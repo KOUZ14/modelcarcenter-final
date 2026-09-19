@@ -1,4 +1,5 @@
 import { normalizeSearch } from "./business.ts";
+import { listingPhotoEvidence, type EvidenceImage } from "./listing-evidence.ts";
 import { isCurrentPolicyVersion } from "./legal.ts";
 import { addressErrors, normalizeState, SHIP_FROM_FIELD_NAMES, shipFromAddressValues, type AddressField } from "./address.ts";
 
@@ -79,9 +80,9 @@ export function parseModelHunt(payload: Record<string, unknown>) {
   if (!isEmail(email)) throw new ValidationError("Enter a valid email address.");
   const budget = cleanText(payload.maxBudget, 30);
   return {
-    vehicleMake: requiredString(payload.vehicleMake, "vehicleMake", 80),
-    vehicleModel: requiredString(payload.vehicleModel, "vehicleModel", 100),
-    preferredScale: requiredString(payload.preferredScale, "preferredScale", 30),
+    vehicleMake: cleanText(payload.vehicleMake, 80),
+    vehicleModel: requiredString(payload.vehicleModel, "Model or search description", 200),
+    preferredScale: cleanText(payload.preferredScale, 30),
     modelManufacturer: cleanText(payload.modelManufacturer, 100) || null,
     color: cleanText(payload.color, 80) || null,
     conditionPreference: cleanText(payload.conditionPreference, 40) || null,
@@ -275,7 +276,7 @@ type ListingReadiness = {
 
 export function assertCollectibleListingReady(
   listing: ListingReadiness,
-  imageCount: number,
+  images: EvidenceImage[] | number,
 ) {
   if (
     listing.modelCondition === "not_specified" ||
@@ -291,12 +292,21 @@ export function assertCollectibleListingReady(
       "Complete every required collectible condition and disclosure field before publishing.",
     );
   }
-  if (imageCount < 4) {
+  const imageCount = typeof images === "number" ? images : images.length;
+  const minimumPhotos = listing.packagingCondition === "sealed" ? 2 : 4;
+  if (imageCount < minimumPhotos) {
     throw new ValidationError(
-      "Add at least four photos covering the required inspection views before publishing.",
+      `Add at least ${minimumPhotos === 4 ? "four" : "two"} photos of the actual item covering the required views before publishing.`,
     );
   }
-  const incomplete = listingPhotoChecklist.filter(({ key }) => !listing[key]);
+  if (typeof images !== "number") {
+    const evidence = listingPhotoEvidence(listing, images);
+    if (!evidence.complete) throw new ValidationError(`Label the photos showing: ${evidence.missing.join(", ")}. Factory-sealed models can stay sealed.`);
+    return;
+  }
+  const incomplete = listingPhotoChecklist.filter(({ key }) => !listing[key] &&
+    !(listing.packagingCondition === "sealed" && ["photoRearChecked", "photoSidesChecked", "photoBaseChecked"].includes(key)) &&
+    !(listing.originalBoxStatus === "not_included" && key === "photoPackagingChecked"));
   if (incomplete.length) {
     throw new ValidationError(
       `Complete the required photo checklist before publishing: ${incomplete.map((item) => item.label).join(", ")}.`,
@@ -335,6 +345,8 @@ export function parseCollectorListing(payload: Record<string, unknown>) {
     rememberPackageDefaults: checked(payload.rememberPackageDefaults),
     sellerDisplayName: requiredString(payload.sellerDisplayName, "sellerDisplayName", 120),
     sellerDescription: cleanText(payload.sellerDescription, 1_000),
+    sellerSpecialty: cleanText(payload.sellerSpecialty, 300),
+    sellerPackingApproach: cleanText(payload.sellerPackingApproach, 1000),
     shipFromAddressId:
       cleanText(payload.shipFromAddressId, 100) === "new"
         ? null
@@ -550,6 +562,7 @@ export function planImportUpserts(
     const id = previous?.id ?? createId();
     return {
       ...row,
+      sellerSku: previous?.sellerSku ?? row.sellerSku,
       id,
       slug: previous?.slug ?? `${makeSlug(row.title)}-${makeSlug(row.sellerSku)}-${id.slice(0, 6)}`,
       operation: previous ? "update" as const : "insert" as const,

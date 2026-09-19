@@ -1,8 +1,12 @@
 # Seller Hub
 
-The professional seller workspace remains at `/store`. Its main navigation is Overview, Inventory, Demand, Opportunities, Orders, Marketing, and Analytics, with Settings and buyer messages retained. `view`, `filter`, and `edit` query parameters preserve navigation and support direct links. Existing inventory editing, imports, shipping labels, tracking, and seller settings remain available.
+The professional seller workspace remains at `/store`. Orders, Inventory and Payments are the primary tasks. Overview, Sales and performance, Store settings and Help remain available, alongside Demand, Opportunities, Marketing and buyer messages. Existing `view`, `filter`, and `edit` query parameters remain valid, including `view=analytics`. Existing inventory editing, shipping labels, tracking, promotions and preorder tools are retained.
 
-Page and section headings use straightforward names for the feature or content, such as Overview, Opportunities, Analytics, and Payout summary. Avoid slogans, metaphors, motivational copy, and rhetorical questions in headings. Supporting descriptions should explain what the page shows or lets the user do.
+The four setup tasks derive their status from saved store details, the payment connection, shipping configuration and inventory. Drafts can be added before all setup is complete. Application approval, listing review and publication readiness are separate. Public store profiles require an introduction, specialty, general country/region and packing approach; street addresses remain private. Payment setup cannot approve an applicant store.
+
+Spreadsheet uploads provide a template, editable CSV preview, row-level errors and create/update labels. Repeated uploads reuse stable seller SKUs case-insensitively while retaining their saved spelling. Existing reservations cannot be removed by lowering stock. New items stay drafts; existing items retain their status. Batch price and stock updates are available for in-stock listings. External stock synchronization is not implemented; sellers must update stock after selling elsewhere.
+
+Page and section headings use straightforward task names, such as Orders to ship, Inventory, Payments and Sales and performance. Supporting descriptions explain what the page shows or lets the user do. See [the usability handoff](marketplace-usability-handoff.md), [task measurement](task-measurement.md), and [owner study protocol](store-owner-study.md).
 
 ## Data and definitions
 
@@ -20,7 +24,7 @@ Page and section headings use straightforward names for the feature or content, 
 
 ## Capability boundaries
 
-Buyer-search events, targeted offers, coupon/scheduled discount campaigns, and followers are not yet implemented. Their sections state that explicitly and link to available work. Pricing opportunities are not offer eligibility or buyer consent.
+Optional aggregate buyer-search and task counts are now available to administrators under the site's privacy choices; they contain no search terms or collector identities and do not provide seller-level demand attribution. Targeted offers and coupon/scheduled discount campaigns remain separate work. Pricing opportunities are not offer eligibility or buyer consent. Community followers remain distinct from verified purchase history.
 
 Promoted listings are managed under Marketing > Promoted listings. The panel shows searchable seller inventory with photos, prices, available quantities and a **Promote** action on each eligible listing. Pay $2.99 in Stripe for seven days, then pause, resume or end the promotion from the same row. Sponsored cards appear above marketplace results without duplicating the listing below. New installations enable purchases using Stripe automatic tax and its Website Advertising classification; explicit administrator settings remain authoritative. `/admin/promotions` controls pricing, availability and refunds. See [Promoted listings operations](promoted-listings.md).
 

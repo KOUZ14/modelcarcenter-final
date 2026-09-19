@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 };
 
 export default function CookiesPage() {
-  return <PolicyPage effectiveDate="September 16, 2026" title="Cookie & Local Storage Policy" intro="Model Car Center uses a small amount of browser storage to keep accounts secure and remember guest shopping choices. We do not currently use advertising or analytics cookies.">
+  return <PolicyPage effectiveDate="September 18, 2026" title="Cookie & Local Storage Policy" intro="Model Car Center uses a small amount of browser storage to keep accounts secure and remember guest shopping choices. Optional usage measurement is off unless you allow it. We do not use advertising tracking.">
     <h2>1. What browser storage is</h2>
     <p>Cookies are small text records a website asks a browser to store and return with later requests. Local storage is information kept by the browser on a device and available to the website that stored it. Similar technologies can perform related functions.</p>
 
@@ -25,12 +25,13 @@ export default function CookiesPage() {
       <tr><td>Notice preference (<code>mcc-storage-notice-v1</code>)</td><td>Remember that you dismissed the necessary-storage notice. This does not enable optional tracking.</td><td>Until browser storage is cleared or the notice version changes.</td></tr>
     </tbody></table></div>
 
-    <h2>3. No advertising or analytics cookies</h2>
+    <h2>3. Optional usage measurement</h2>
+    <p>Usage measurement is off unless you choose “Allow usage measurement.” The <code>mcc_analytics</code> cookie remembers this choice for up to a year. The <code>mcc-analytics-consent-v1</code> local preference remains until you change it or clear browser storage; an expired cookie stops server-side collection. Completion markers prevent repeat counts within a tab, and device-local setup markers remember setup progress and elapsed time for measurement. These markers stay until browser storage is cleared. We count task steps, results, quantities and elapsed time without recording search text, private form contents, messages, addresses or payment information. Individual event records expire after 90 days. Test activity and identified staff accounts are excluded. Global Privacy Control and Do Not Track disable this optional measurement.</p>
     <p>We measure sponsored listing impressions and clicks with temporary page-view identifiers held in page memory. This measurement does not add advertising cookies, local-storage identifiers, or cross-site tracking. See the <Link href="/privacy">Privacy Policy</Link> for measurement and retention details.</p>
-    <p>We do not currently use cookies for behavioral advertising, cross-site tracking, or audience analytics. Stripe may use cookies and similar technology on its hosted checkout and onboarding pages under Stripe’s own policy.</p>
+    <p>We do not use behavioral advertising or cross-site tracking. Stripe may use cookies and similar technology on its hosted checkout and onboarding pages under Stripe’s own policy.</p>
 
     <h2>4. Your controls</h2>
-    <p>The notice offers &ldquo;Continue with necessary only&rdquo;. You can reopen it with Cookie settings in the footer. There are currently no optional advertising or analytics categories to enable or reject.</p>
+    <p>Choose &ldquo;Continue with necessary only&rdquo; to keep optional measurement off. Reopen Cookie settings in the footer to allow measurement or withdraw your choice. Dismissed help tips are stored on this device and can always be reopened beside the task or in Help.</p>
     <p>You can delete cookies and local storage through browser settings. Blocking strictly necessary cookies may prevent sign-in or other secure account features. Clearing local storage removes the guest cart and wishlist from that device. Signed-in account carts and wishlists are stored with the account and can be changed through the Service.</p>
 
     <h2>5. Changes and contact</h2>

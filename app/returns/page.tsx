@@ -1,3 +1,4 @@
+import { REFUND_REQUEST_DAYS_AFTER_DELIVERY } from "@/lib/protection";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { PolicyPage } from "@/components/policy-page";
@@ -10,10 +11,10 @@ export const metadata: Metadata = {
 export default function ReturnsPage() {
   return <PolicyPage title="Returns & Refunds" intro="Independent sellers fulfill marketplace orders. This policy provides the platform-wide process, while the seller policy shown on the listing controls discretionary returns.">
     <h2>1. Start with the listing policy</h2>
-    <p>Each seller’s return-policy summary appears on its storefront and product pages. A delivered-order return or refund request must be opened through Model Car Center within three calendar days after carrier-confirmed delivery. Within that platform-wide window, a seller may allow change-of-mind returns, apply clearly disclosed conditions, or mark an item final sale when lawful. A final-sale label does not remove rights for an item damaged in transit, materially different from its listing, counterfeit, or otherwise protected by non-waivable law.</p>
+    <p>Each seller’s return-policy summary appears on its storefront and product pages. A delivered-order return or refund request must be opened through Model Car Center within {REFUND_REQUEST_DAYS_AFTER_DELIVERY} calendar days after carrier-confirmed delivery. Within that platform-wide window, a seller may allow change-of-mind returns, apply clearly disclosed conditions, or mark an item final sale when lawful. A final-sale label does not remove rights for an item damaged in transit, materially different from its listing, counterfeit, or otherwise protected by non-waivable law.</p>
 
     <h2>2. Report an order problem</h2>
-    <p>Open <Link href="/resolution">Customer Support</Link> no later than three calendar days after carrier-confirmed delivery, choose the order, describe the issue, and add clear photographs or PDFs of the item, packaging, shipping label, and damage when relevant. Non-delivery uses the separate shipment/payment fallback in the <Link href="/protection">Buyer &amp; Seller Protection Rules</Link>. The case displays its status, seller response deadline, evidence deadline, and any return deadline.</p>
+    <p>Open <Link href="/resolution">Customer Support</Link> no later than {REFUND_REQUEST_DAYS_AFTER_DELIVERY} calendar days after carrier-confirmed delivery, choose the order, describe the issue, and add clear photographs or PDFs of the item, packaging, shipping label, and damage when relevant. Non-delivery uses the separate shipment/payment fallback in the <Link href="/protection">Buyer &amp; Seller Protection Rules</Link>. The case displays its status, seller response deadline, evidence deadline, and any return deadline.</p>
 
     <h2>3. Do not send an unauthorized return</h2>
     <p>Wait until the case displays a return authorization number, instructions, and downloadable label. Do not return an item to Model Car Center, a payment address, or an address printed on a package unless the case instructs you to do so. Preserve the item, original model packaging, certificates, accessories, inserts, and shipping materials in the condition received while the request is reviewed.</p>

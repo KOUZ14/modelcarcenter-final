@@ -6,6 +6,7 @@ import type { CartItem, ProductSummary } from "@/lib/types";
 import { removePurchasedItems } from "@/lib/cart-groups";
 import { authClient } from "@/lib/auth-client";
 import { CHECKOUT_ADDRESS_KEY, CHECKOUT_SESSION_KEY } from "@/lib/checkout-address";
+import { trackEvent } from "@/lib/analytics-client";
 
 type Collector = {
   id: string;
@@ -160,7 +161,7 @@ export function MarketplaceProvider({ children }: { children: React.ReactNode })
         setCartError("Your cart can hold up to 25 products. Check out a seller before adding more; your existing items are kept.");
         return false;
       }
-      addDirect(product, quantity); return true;
+      addDirect(product, quantity); trackEvent("add_to_cart", { count: quantity }); return true;
     },
     removeFromCart(productId) { const next = cart.filter((item) => item.productId !== productId); setCart(next); persistCart(next); },
     setQuantity(productId, quantity) { const next = cart.map((item) => item.productId === productId ? { ...item, quantity: Math.min(10, item.availableQuantity, Math.max(1, Math.trunc(quantity))) } : item); setCart(next); persistCart(next); },

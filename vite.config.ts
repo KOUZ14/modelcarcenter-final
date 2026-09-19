@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { release } from "node:os";
+import { fileURLToPath } from "node:url";
 import vinext from "vinext";
 import { defineConfig } from "vite";
 import hostingConfig from "./.openai/hosting.json" with { type: "json" };
@@ -10,6 +13,19 @@ const { d1, r2 } = hostingConfig;
 
 // macOS Seatbelt blocks FSEvents, so Codex previews need polling for HMR.
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
+
+const projectRoot = fileURLToPath(new URL(".", import.meta.url));
+const isWslWindowsCheckout =
+  process.platform === "linux" &&
+  /microsoft/i.test(release()) &&
+  /^\/mnt\/[a-z]\//i.test(projectRoot);
+
+// WSL uses Linux rename semantics, but Windows can lock directories on /mnt/c.
+// Keep optimizer commits on Linux storage, isolated by user and checkout.
+// Use /tmp explicitly: the Sites build wrapper sets TMPDIR inside the project.
+const cacheDir = isWslWindowsCheckout
+  ? `/tmp/model-car-center-vite-${process.getuid!()}-${createHash("sha256").update(projectRoot).digest("hex").slice(0, 16)}`
+  : undefined;
 
 const localBindingConfig = {
   main: "./worker/index.ts",
@@ -48,6 +64,7 @@ export default defineConfig(async () => {
   const { cloudflare } = await import("@cloudflare/vite-plugin");
 
   return {
+    cacheDir,
     server: {
       host: "0.0.0.0",
       allowedHosts: ["terminal.local"],

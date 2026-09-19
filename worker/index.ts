@@ -6,6 +6,7 @@ import { processEligibleSellerTransfers } from "../lib/seller-transfers";
 import { config } from "../lib/config";
 import { protectRequest, requestSecurityFailure, securityPath } from "../lib/request-security";
 import { pruneSecurityRateLimits } from "../lib/security-rate-limit";
+import { pruneMeasurementRecords } from "../lib/measurement-retention";
 import { logSecurityEvent } from "../lib/security-events";
 import { processPreorders } from "../lib/preorder-maintenance";
 import { processPromotions } from "../lib/promotion-payments";
@@ -100,6 +101,7 @@ async function runScheduledMaintenance(database: D1Database, now: Date) {
       processPreorders(),
       processPromotions(now.getTime()),
       expireCollectionOffersIn(database,now.getTime()),
+      pruneMeasurementRecords(database, now),
     ]);
     console.info(
       "Scheduled marketplace maintenance completed.",

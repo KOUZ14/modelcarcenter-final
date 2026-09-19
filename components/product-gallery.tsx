@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import { photoViews, photoViewsFromAlt } from "@/lib/listing-evidence";
 import {
   useCallback,
   useEffect,
@@ -275,7 +276,7 @@ export function ProductGallery({
           </div>
 
           <div className="gallery-caption">
-            <span>Full model view</span>
+            <span>{photoViewsFromAlt(activeImage?.alt).map(key => photoViews.find(view => view.key === key)?.label).join(" · ") || `Photo ${activeIndex + 1} · View not labeled by seller`}</span>
             <button type="button" onClick={openViewer}>
               Open inspection viewer
             </button>

@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { MarketplaceProvider } from "@/components/marketplace-provider";
 import { CookieNotice } from "@/components/cookie-notice";
 import "./globals.css";
+import "@/components/task-flows.css";
 
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.SITE_URL || "http://localhost:5173"),
@@ -37,10 +38,14 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
   colorScheme: "light",
   themeColor: "#0b0b0c",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="en"><body className="antialiased"><a className="skip-link" href="#main-content">Skip to main content</a><MarketplaceProvider>{children}</MarketplaceProvider><CookieNotice/></body></html>;
+  const beta = process.env.NODE_ENV !== 'production' && process.env.MCC_BETA_DEMO === 'true';
+  return <html lang="en"><body className="antialiased"><a className="skip-link" href="#main-content">Skip to main content</a>{beta && <div className="beta-preview-notice">Local beta · Fictional collectors and inventory · Payments and email disabled <a href="/beta-review">Review accounts</a></div>}<MarketplaceProvider>{children}</MarketplaceProvider><CookieNotice/></body></html>;
 }

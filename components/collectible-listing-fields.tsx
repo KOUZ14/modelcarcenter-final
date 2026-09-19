@@ -1,6 +1,9 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { photoViews, requiredPhotoViews } from "@/lib/listing-evidence";
 import {
   coaStatuses,
-  listingPhotoChecklist,
   modelConditions,
   originalBoxStatuses,
   packagingConditions,
@@ -233,28 +236,22 @@ export function RequiredPhotoChecklist({
 }: {
   product?: CollectibleProduct | null;
 }) {
-  return (
-    <div
-      className="photo-checklist"
-      role="group"
-      aria-labelledby="required-photo-checklist-title"
-    >
-      <h3 id="required-photo-checklist-title">Required photo checklist</h3>
-      <p className="field-note">
-        A listing needs at least four original photos. Confirm every view before
-        submitting or publishing; check the packaging and issue items when the
-        listing accurately states that none are present.
-      </p>
-      {listingPhotoChecklist.map(({ key, label }) => (
-        <label className="consent-check" key={key}>
-          <input
-            type="checkbox"
-            name={key}
-            defaultChecked={Boolean(product?.[key])}
-          />
-          <span>{label}</span>
-        </label>
-      ))}
-    </div>
-  );
+  const container = useRef<HTMLDivElement>(null);
+  const [details, setDetails] = useState(product ?? {});
+  useEffect(() => {
+    const form = container.current?.closest("form");
+    if (!form) return;
+    const update = () => { const data = new FormData(form); setDetails(Object.fromEntries(data)); };
+    update();
+    form.addEventListener("change", update);
+    return () => form.removeEventListener("change", update);
+  }, []);
+  const required = requiredPhotoViews(details);
+  return <div className="photo-checklist" ref={container}>
+    <h3>Photos buyers need to inspect</h3>
+    <p className="field-note">Upload photos of this actual item and label the views on each photo. A photo may show several views. Stock photos do not establish condition.</p>
+    <p>{details.packagingCondition === "sealed" ? "Keep factory-sealed models sealed. Add at least two exterior photos showing the box and its seal; do not open it to photograph hidden contents." : "Add at least four photos. Only photograph packaging and accessories that are included."}</p>
+    <ul>{required.map(key => <li key={key}>{photoViews.find(view => view.key === key)?.label}</li>)}</ul>
+    <p className="field-note">Show each disclosed defect, missing-part location and repair clearly. Existing listings without these labeled views need seller completion.</p>
+  </div>;
 }

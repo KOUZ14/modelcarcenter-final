@@ -101,10 +101,10 @@ test("consolidated payments, quotes, inventory, refunds, and payouts use distinc
   const mocks = {
     db: "export const getDb=()=>globalThis.__consolidatedTest.db; export const getD1=()=>globalThis.__consolidatedTest.binding;",
     config: "export const config=globalThis.__consolidatedTest.config; export const requireConfig=key=>config[key];",
-    email: "const emails=globalThis.__consolidatedTest.emails; export const sendPaidOrderEmails=async input=>emails.push(input); export const sendEmail=async input=>emails.push(input); export const escapeHtml=s=>String(s);",
+    email: "const emails=globalThis.__consolidatedTest.emails; export const sendPaidOrderEmails=async input=>emails.push(input); export const sendEmail=async input=>emails.push(input); export const sendLabelCreatedEmail=async input=>emails.push(input); export const sendShipmentEmail=async input=>emails.push(input); export const escapeHtml=s=>String(s);",
   };
   const output = await build({
-    stdin: { contents: `export * from './lib/consolidated-checkout.ts'; export * from './lib/inventory.ts'; export * from './lib/combined-shipping.ts'; export * from './lib/orders.ts'; export { createOrderRefund } from './lib/stripe.ts'; export { processEligibleSellerTransfers } from './lib/seller-transfers.ts';`, resolveDir: root },
+    stdin: { contents: `export * from './lib/consolidated-checkout.ts'; export * from './lib/inventory.ts'; export * from './lib/combined-shipping.ts'; export * from './lib/orders.ts'; export { createOrderRefund } from './lib/stripe.ts'; export { processEligibleSellerTransfers } from './lib/seller-transfers.ts'; export { recordOrderTrackingUpdate } from './lib/shipping.ts';`, resolveDir: root },
     bundle: true, platform: "node", format: "esm", packages: "external", write: false,
     plugins: [{ name: "consolidated-fixture", setup(builder) {
       builder.onResolve({ filter: /.*/ }, ({ path }) => {
@@ -182,6 +182,8 @@ test("consolidated payments, quotes, inventory, refunds, and payouts use distinc
     assert.equal(sellerOrders.reduce((sum, order) => sum + order.seller_proceeds_cents + order.platform_fee_cents + order.payment_processing_fee_cents + order.tax_cents, 0), session.amount_total);
     assert.equal(sellerOrders[0].selected_shipping_service, "Ground");
     assert.ok(sellerOrders.every((order) => JSON.parse(order.shipping_address).address.line2 === "Unit 4"));
+    assert.ok(sellerOrders.every((order) => order.protection_policy_version === 'delivery-3-v1'));
+    assert.ok(rows("SELECT protection_policy_version FROM checkout_reservations WHERE checkout_group_id = ?", checkout.reservationId).every(reservation => reservation.protection_policy_version === 'delivery-3-v1'));
     assert.deepEqual(rows("SELECT inventory_quantity, reserved_quantity FROM products ORDER BY id").map((row) => [row.inventory_quantity, row.reserved_quantity]), [[48, 0], [49, 0]]);
     assert.equal((await paid(checkout)).duplicate, true);
     assert.equal((await paid(checkout, "evt_paid_replay")).duplicateOrder, true);
@@ -192,6 +194,20 @@ test("consolidated payments, quotes, inventory, refunds, and payouts use distinc
     assert.equal(confirmation.totalCents, session.amount_total);
     assert.equal(emails.filter((email) => email.orderNumber).length, 2);
     await assert.rejects(() => api.respondToCombinedShipping("buyer", combinedId, { action: "cancel" }), /cannot be cancelled/);
+  });
+  await t.test('delivery retries preserve each order deadline and late transit does not revert delivery', async () => {
+    const ids = sellerOrders.map(order => order.id);
+    const delivery = '2026-09-18T12:00:00.000Z';
+    const storedDeadline = '2026-09-20T12:00:00.000Z';
+    sqlite.prepare('UPDATE orders SET refund_request_deadline=?, payout_eligible_at=? WHERE id=?').run(storedDeadline, storedDeadline, ids[0]);
+    await api.recordOrderTrackingUpdate(ids, {tracking_status:{status:'DELIVERED',status_date:delivery}});
+    const deadlines = () => rows('SELECT delivered_at, refund_request_deadline, payout_eligible_at, fulfillment_status FROM orders WHERE checkout_group_id=? ORDER BY seller_id', checkout.reservationId);
+    assert.deepEqual(deadlines().map(row=>row.refund_request_deadline), [storedDeadline, '2026-09-21T12:00:00.000Z']);
+    assert.deepEqual(deadlines().map(row=>row.payout_eligible_at), [storedDeadline, '2026-09-21T12:00:00.000Z']);
+    const first = deadlines();
+    await api.recordOrderTrackingUpdate(ids, {tracking_status:{status:'DELIVERED',status_date:'2026-09-19T12:00:00.000Z'}});
+    await api.recordOrderTrackingUpdate(ids, {tracking_status:{status:'TRANSIT',status_date:'2026-09-17T12:00:00.000Z'}});
+    assert.deepEqual(deadlines(), first);
   });
   await t.test("seller refunds are limited to that order and webhook replays preserve siblings", async () => {
     const [a, b] = sellerOrders;

@@ -86,6 +86,7 @@ export async function getResolutionCenterData(userId: string) {
       shippedAt: orders.shippedAt,
       deliveredAt: orders.deliveredAt,
       refundRequestDeadline: orders.refundRequestDeadline,
+      protectionPolicyVersion: orders.protectionPolicyVersion,
     })
     .from(orders)
     .innerJoin(sellers, eq(orders.sellerId, sellers.id))

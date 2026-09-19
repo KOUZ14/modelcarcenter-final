@@ -1,8 +1,9 @@
 import { requireCollectorApi } from "@/lib/collector-auth";
-import { commitInventoryCsv, previewInventoryCsv } from "@/lib/csv-import";
+import { commitInventoryCsv, previewStoreInventoryCsv, updateStoreStock } from "@/lib/csv-import";
 import { readJsonObject, routeError } from "@/lib/http";
 import {
   acceptCurrentSellerTerms,
+  connectStorePayments,
   archiveStoreProduct,
   saveStoreProduct,
   saveStoreProfile,
@@ -35,9 +36,10 @@ export async function POST(request: Request) {
       });
     }
     if (action === "preview_import") {
+      const preview = await previewStoreInventoryCsv(store.id, requiredCsv(payload.csv));
       return Response.json({
         ok: true,
-        preview: previewInventoryCsv(requiredCsv(payload.csv)),
+        preview: { ...preview, validCount: preview.valid.length },
       });
     }
     if (store.status === "suspended" && action !== "ship_order")
@@ -50,6 +52,8 @@ export async function POST(request: Request) {
         ...(await commitInventoryCsv(store.id, requiredCsv(payload.csv))),
       });
     }
+    if (action === "connect_payments" || action === "refresh_payments") return Response.json({ ok: true, ...(await connectStorePayments(store, action === "refresh_payments")) });
+    if (action === "update_stock") return Response.json({ ok: true, ...(await updateStoreStock(store.id, payload.rows)) });
     if (action === "save_product")
       return Response.json({
         ok: true,

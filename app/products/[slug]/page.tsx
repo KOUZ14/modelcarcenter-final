@@ -5,6 +5,9 @@ import { notFound } from "next/navigation";
 import { getProductBySlug, getRelatedProducts } from "@/lib/catalog";
 import { ProductGallery } from "@/components/product-gallery";
 import { ProductPurchase } from "@/components/product-purchase";
+import { ProductPurchaseInfo } from "@/components/product-purchase-info";
+import { TrackEvent } from "@/components/track-event";
+import { listingPhotoEvidence } from "@/lib/listing-evidence";
 import { ProductShippingEstimate } from "@/components/product-shipping-estimate";
 import { ProductCard } from "@/components/product-card";
 import { formatCondition, formatMoney } from "@/lib/format";
@@ -57,14 +60,7 @@ export default async function ProductPage({
     getRelatedProducts(product),
     getSellerReputation(product.sellerId),
   ]);
-  const photoChecklistComplete = [
-    product.photoFrontChecked,
-    product.photoRearChecked,
-    product.photoSidesChecked,
-    product.photoBaseChecked,
-    product.photoPackagingChecked,
-    product.photoIssuesChecked,
-  ].every(Boolean);
+  const photoEvidence = listingPhotoEvidence(product, product.images);
   const productJsonLd = {
     "@context": "https://schema.org",
     "@type": "Product",
@@ -83,12 +79,13 @@ export default async function ProductPage({
   };
   return (
     <main>
+      <TrackEvent name="listing_viewed" />
       <SiteHeader />
       <div id="main-content" tabIndex={-1} className="inner-page product-page shell">
         <nav className="breadcrumbs" aria-label="Breadcrumb">
           <Link href="/marketplace">Marketplace</Link>
-          <span>/</span>
-          <span>{product.title}</span>
+          <span aria-hidden="true">/</span>
+          <span aria-current="page" title={product.title}>{product.title}</span>
         </nav>
         <div className="product-detail">
           <ProductGallery
@@ -120,6 +117,7 @@ export default async function ProductPage({
                     : `${product.availableQuantity} available`}{" "}
               · Model: {formatCondition(product.modelCondition)}
             </p>
+            <ProductPurchaseInfo product={product} />
             <ProductPurchase product={product} />
           </aside>
         </div>
@@ -184,9 +182,9 @@ export default async function ProductPage({
               <div>
                 <dt>Photos</dt>
                 <dd>
-                  {photoChecklistComplete
-                    ? "Required collector inspection views confirmed"
-                    : "Legacy listing; ask for any additional inspection view you need"}
+                  {product.availabilityType === "preorder" ? "Preorder photos may show a prototype or manufacturer preview. Read the seller’s description." : photoEvidence.complete
+                    ? "Seller-labeled inspection views are available in the photo gallery. Inspect them before buying; labels are supplied by the seller."
+                    : <>Additional photo evidence needed: {photoEvidence.missing.join(", ")}. <Link href={`/messages?product=${encodeURIComponent(product.id)}`}>Ask the seller for these views</Link>.</>}
                 </dd>
               </div>
               <div>

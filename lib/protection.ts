@@ -1,6 +1,18 @@
-export const PROTECTION_REPORT_DAYS_AFTER_SHIPMENT = 30;
-export const PROTECTION_REPORT_DAYS_AFTER_PAYMENT = 45;
-export const REFUND_REQUEST_DAYS_AFTER_DELIVERY = 3;
+// Immutable order terms. A longer window requires a separate approved version.
+export const LEGACY_PROTECTION_POLICY_VERSION = "delivery-3-v1";
+export const ACTIVE_PROTECTION_POLICY_VERSION = LEGACY_PROTECTION_POLICY_VERSION;
+export const protectionPolicies = {
+  "delivery-3-v1": { deliveredDays: 3, shipmentDays: 30, paymentDays: 45 },
+} as const;
+export function protectionPolicyForOrder(order: { protectionPolicyVersion?: string | null }) {
+  const version = order.protectionPolicyVersion || LEGACY_PROTECTION_POLICY_VERSION;
+  if (!Object.hasOwn(protectionPolicies, version)) throw new Error("The order protection policy needs review. Contact support.");
+  return protectionPolicies[version as keyof typeof protectionPolicies];
+}
+export const activeProtectionPolicy = protectionPolicyForOrder({ protectionPolicyVersion: ACTIVE_PROTECTION_POLICY_VERSION });
+export const PROTECTION_REPORT_DAYS_AFTER_SHIPMENT = activeProtectionPolicy.shipmentDays;
+export const PROTECTION_REPORT_DAYS_AFTER_PAYMENT = activeProtectionPolicy.paymentDays;
+export const REFUND_REQUEST_DAYS_AFTER_DELIVERY = activeProtectionPolicy.deliveredDays;
 export const SELLER_RESPONSE_DAYS = 3;
 export const BUYER_EVIDENCE_DAYS = 5;
 export const BUYER_ESCALATION_DAYS = 3;
@@ -33,6 +45,7 @@ export function addCalendarDays(value: string | Date, days: number) {
 }
 
 export function reportDeadlineForOrder(order: {
+  protectionPolicyVersion?: string | null;
   paidAt?: string | null;
   createdAt: string;
   shippedAt?: string | null;
@@ -40,23 +53,25 @@ export function reportDeadlineForOrder(order: {
   refundRequestDeadline?: string | null;
 }) {
   if (order.refundRequestDeadline) return order.refundRequestDeadline;
+  const policy = protectionPolicyForOrder(order);
   if (order.deliveredAt) {
     return addCalendarDays(
       order.deliveredAt,
-      REFUND_REQUEST_DAYS_AFTER_DELIVERY,
+      policy.deliveredDays,
     );
   }
   const startsAt = order.shippedAt ?? order.paidAt ?? order.createdAt;
   return addCalendarDays(
     startsAt,
     order.shippedAt
-      ? PROTECTION_REPORT_DAYS_AFTER_SHIPMENT
-      : PROTECTION_REPORT_DAYS_AFTER_PAYMENT,
+      ? policy.shipmentDays
+      : policy.paymentDays,
   );
 }
 
 export function canReportOrderProblem(
   order: {
+    protectionPolicyVersion?: string | null;
     paymentStatus: string;
     totalCents: number;
     refundedAmountCents?: number | null;

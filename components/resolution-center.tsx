@@ -9,6 +9,7 @@ import {
   type RequestedResolution,
 } from "@/lib/protection";
 import type { ResolutionCenterData } from "@/lib/resolution";
+import { OrderProtectionSummary } from "./order-protection-summary";
 
 type ResolutionCase = ResolutionCenterData["cases"][number];
 type BuyerOrder = ResolutionCenterData["buyerOrders"][number];
@@ -172,6 +173,8 @@ function ReportProblem({
   const defaultOrder = eligibleOrders.some((order) => order.id === initialOrderId)
     ? initialOrderId
     : eligibleOrders[0]?.id;
+  const [selectedOrderId, setSelectedOrderId] = useState(defaultOrder);
+  const selectedOrder = eligibleOrders.find(order => order.id === selectedOrderId);
   if (!orders.length)
     return (
       <div className="resolution-empty">
@@ -201,7 +204,7 @@ function ReportProblem({
         </div>
         <label>
           Order
-          <select name="orderId" defaultValue={defaultOrder} required>
+          <select name="orderId" value={selectedOrderId} onChange={event => setSelectedOrderId(event.target.value)} required>
             {eligibleOrders.map((order) => (
               <option key={order.id} value={order.id}>
                 {order.orderNumber} · {order.sellerName} · {formatMoney(order.totalCents, order.currency)} · report by {shortDate(order.reportDeadline)}
@@ -209,6 +212,7 @@ function ReportProblem({
             ))}
           </select>
         </label>
+        {selectedOrder && <OrderProtectionSummary order={selectedOrder}/>}
         <label>
           Problem
           <select name="reason" required defaultValue="damaged">

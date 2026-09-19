@@ -102,6 +102,44 @@ test('collector privacy, social permissions and shared inventory authority',asyn
   assert.equal(db.prepare("SELECT reserved_quantity n FROM products WHERE id='late-listing'").get().n,0);
   assert.equal(db.prepare("SELECT status FROM products WHERE id='late-listing'").get().status,'inactive');
  });
+ await t.test('add-piece selling setup respects publication, ownership and eligible single-piece listings',async()=>{
+  for(const id of ['form-owner','form-new']){
+   db.prepare('INSERT INTO user (id,name,email,created_at,updated_at) VALUES (?,?,?,0,0)').run(id,id,id+'@example.test');
+   db.prepare('INSERT INTO collector_profiles (id,user_id,display_name,handle) VALUES (?,?,?,?)').run(id,id,id,id);
+   await api.settings(id);
+  }
+  assert.deepEqual(await api.collectionSellingOptions('form-new'),{published:false,sellerReady:false,sellerType:null,listings:[]});
+  await api.communityAction('form-owner',{action:'settings',handle:'form-owner',displayName:'Form Owner',published:true,publishConfirmed:true});
+  db.prepare("INSERT INTO sellers (id,owner_user_id,slug,store_name,contact_name,contact_email,status,seller_type,stripe_account_id,stripe_charges_enabled,stripe_payouts_enabled,seller_terms_version,seller_terms_accepted_at) VALUES ('form-seller','form-owner','form-seller','Form Seller','Owner','form-owner@example.test','active','collector','acct_form_test',1,1,?,CURRENT_TIMESTAMP)").run(POLICY_VERSION);
+  for(const [id,qty,status] of [['form-sale',1,'active'],['form-offers',1,'active'],['form-multi',2,'active'],['form-draft',1,'draft']])
+   db.prepare("INSERT INTO products (id,seller_id,catalog_product_id,slug,seller_sku,title,scale,model_manufacturer,vehicle_make,vehicle_model,price_cents,inventory_quantity,status,package_length,package_width,package_height,package_weight) VALUES (?,'form-seller','model',?,?,'Porsche 911','1:64','MINI GT','Porsche','911',2000,?,?,'5','4','3','1')").run(id,id,id,qty,status);
+  const options=await api.collectionSellingOptions('form-owner');assert.equal(options.sellerReady,true);
+  assert.deepEqual(options.listings.map(l=>l.id).sort(),['form-offers','form-sale']);
+  assert.deepEqual((await api.collectionSellingOptions('form-new')).listings,[]);
+  const saved=await api.savePiece('form-owner',{catalogId:'model',visibility:'private',availability:'for_sale',photos:[]});
+  assert.equal(saved.version,1);assert.equal((await api.getPiece(saved.id,'form-owner')).availability,'not_for_sale');
+  await assert.rejects(()=>api.configureCollectionCommerce('form-owner',{itemId:saved.id,listingId:'form-sale',availability:'for_sale'}),/publish this piece/);
+  const published=await api.savePiece('form-owner',{id:saved.id,version:saved.version,catalogId:'model',visibility:'public',publishConfirmed:true,photos:[]});assert.equal(published.version,2);
+  db.prepare("UPDATE community_settings SET published=0 WHERE user_id='form-owner'").run();
+  await assert.rejects(()=>api.configureCollectionCommerce('form-owner',{itemId:saved.id,listingId:'form-sale',availability:'for_sale'}),/Publish your collector profile/);
+  db.prepare("UPDATE community_settings SET published=1 WHERE user_id='form-owner'").run();
+  await api.configureCollectionCommerce('form-owner',{itemId:saved.id,listingId:'form-sale',availability:'for_sale'});
+  assert.equal((await api.getPiece(saved.id,null)).availability,'for_sale');
+  assert.deepEqual((await api.collectionSellingOptions('form-owner')).listings.map(l=>l.id),['form-offers']);
+  assert.equal((await api.collectionSellingOptions('form-owner',saved.id)).listings.length,2);
+  const other=await api.savePiece('form-owner',{catalogId:'model',visibility:'public',publishConfirmed:true,photos:[]});
+  await assert.rejects(()=>api.configureCollectionCommerce('form-owner',{itemId:other.id,listingId:'form-sale',availability:'open_to_offers'}),/already linked/);
+  await api.configureCollectionCommerce('form-owner',{itemId:other.id,listingId:'form-offers',availability:'open_to_offers',minimumCents:1200});
+  assert.equal((await api.getPiece(other.id,null)).availability,'open_to_offers');
+  assert.equal((await api.getPiece(other.id,null)).minimumCents,1200);
+  await assert.rejects(()=>api.configureCollectionCommerce('form-new',{itemId:other.id,listingId:'form-offers',availability:'for_sale'}),/unavailable/);
+  const current=await api.getPiece(other.id,'form-owner');
+  await api.savePiece('form-owner',{...current,photos:[],privateNotes:'Updated without another physical piece'});
+  await api.configureCollectionCommerce('form-owner',{itemId:other.id,availability:'not_for_sale'});
+  assert.equal((await api.getPiece(other.id,'form-owner')).availability,'not_for_sale');
+  assert.equal(db.prepare("SELECT count(*) n FROM collection_items WHERE owner_id='form-owner'").get().n,2);
+  assert.equal(db.prepare("SELECT count(*) n FROM community_posts WHERE owner_id='form-owner'").get().n,0);
+ });
  await t.test('deleting an account preserves paid commercial snapshots while removing private collection records',async()=>{
   const source=await readFile(join(root,'lib/collector-store.ts'),'utf8'),body=source.slice(source.indexOf('export async function deleteCollectorAccount('));
   const {transform}=await import('esbuild'),js=await transform(body.replace('export async function','async function'),{loader:'ts'}),remove=new Function('getD1',js.code+';return deleteCollectorAccount;')(()=>binding);

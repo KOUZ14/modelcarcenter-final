@@ -1,6 +1,15 @@
 "use client";
 
 import { SellerFeeDisclosure } from "./seller-fee-disclosure";
+import { SellerSetup, SellerNextActions, SellerPayments, SellerHelp } from "./seller-setup";
+import { SellerInventoryUpload, SellerBulkStock } from "./seller-inventory-upload";
+import { ContextualHelp } from "./contextual-help";
+import { trackEvent, sellerSetupElapsed } from "@/lib/analytics-client";
+import { useTaskMeasurement } from "./use-task-measurement";
+import { listingPhotoEvidence } from "@/lib/listing-evidence";
+import { activeProtectionPolicy } from "@/lib/protection";
+import type { buildSellerSetup } from "@/lib/seller-setup";
+import "./seller-workflows.css";
 import { SellerOrderAmounts } from "./seller-order-amounts";
 import { PreorderSeller, SellerPreorderOrders } from "./preorder-seller";
 
@@ -40,6 +49,10 @@ type Store = {
   websiteUrl: string | null;
   logoUrl: string | null;
   description: string;
+  specialty: string;
+  packingApproach: string;
+  foundingRateStartsAt: string | null;
+  foundingRateEndsAt: string | null;
   status: string;
   stripeChargesEnabled: boolean;
   stripePayoutsEnabled: boolean;
@@ -193,6 +206,7 @@ type Analytics = {
 
 export type StoreData = {
   store: Store;
+  setup: ReturnType<typeof buildSellerSetup>;
   fee: {
     marketplaceFeeBps: number;
     standardMarketplaceFeeBps: number;
@@ -261,6 +275,9 @@ export function StoreDashboard({
       throw Object.assign(new Error(nextError), { fields: body.fields });
     }
     setMessage(options.message ?? "Saved.");
+    if (payload.action === "save_store") trackEvent("seller_setup_step_completed", { step: payload.section === "introduction" ? "store" : "shipping" });
+    if (payload.action === "product_status" && payload.status === "active" && !data.inventory.some(product => ["active", "sold_out"].includes(product.status)) && data.orders.length === 0) trackEvent("first_listing_published", { durationMs: sellerSetupElapsed(data.store.id) }, { onceKey: `first-listing-${data.store.id}` });
+    trackEvent("seller_tool_used", { step: String(payload.action), result: "success" });
     if (options.reload) window.location.reload();
     return body;
   }
@@ -277,7 +294,7 @@ export function StoreDashboard({
       <aside className="store-sidebar">
         <Link className="store-brand" href="/">
           <BrandLogo priority/>
-          <b>Seller Hub</b>
+          <b>Seller Dashboard</b>
         </Link>
         <div className="store-identity">
           <p className="eyebrow">Professional seller</p>
@@ -291,11 +308,11 @@ export function StoreDashboard({
           {tabs.map((tab) => (
             <button
               key={tab}
-              className={view === tab ? "active" : ""}
+              className={`${view === tab ? "active" : ""} ${["orders", "inventory", "payments"].includes(tab) ? "seller-primary-nav" : ""}`}
               aria-current={view === tab ? "page" : undefined}
               onClick={() => selectView(tab)}
             >
-              {tab[0].toUpperCase() + tab.slice(1)}
+              {({ overview: "Overview & setup", orders: "Orders", inventory: "Inventory", payments: "Payments", analytics: "Sales and performance", settings: "Store settings", help: "Help", demand: "Buyer demand", opportunities: "Opportunities", marketing: "Marketing" })[tab]}
               {tab === "orders" && data.analytics.unfulfilledOrders > 0 && (
                 <span>{data.analytics.unfulfilledOrders}</span>
               )}
@@ -332,8 +349,10 @@ export function StoreDashboard({
           </p>
         )}
         {view === "overview" && (
-          <HubOverview data={data} navigate={selectView} />
+          <><SellerSetup data={data} /><SellerNextActions data={data} /><HubOverview data={data} navigate={selectView} /></>
         )}
+        {view === "payments" && <SellerPayments data={data} action={action} />}
+        {view === "help" && <SellerHelp />}
         {view === "demand" && <HubDemand data={data} navigate={selectView} filter={initialFilter} />}
         {view === "opportunities" && <HubOpportunities data={data} navigate={selectView} />}
         {view === "marketing" && <HubMarketing data={data} navigate={selectView} filter={initialFilter} />}
@@ -443,9 +462,10 @@ function Inventory({
           disabled={disabled}
           onClick={() => setEditing("new")}
         >
-          Add product
+          Add model
         </button>
       </header>
+      <ContextualHelp id="seller-inventory" title="Have a spreadsheet? Add multiple models at once"><p><a href="#inventory-upload">Upload inventory from a spreadsheet</a>. Keep the same seller SKUs to update existing models. New models start as drafts.</p><Link href="/store?view=help">Read the short inventory guide</Link></ContextualHelp>
       <nav className="hub-filters" aria-label="Inventory views">
         {inventoryViews.map(([value, label]) => <button key={value} aria-pressed={queue === value} onClick={() => navigate("inventory", value)}>{label}<span>{rows.filter((row) => matchesInventoryView(row, value, slowIds)).length}</span></button>)}
       </nav>
@@ -505,6 +525,7 @@ function Inventory({
                     {product.availabilityType === "preorder" && product.releaseDate && (
                       <small>Preorder · expected to ship {formatUtcDate(product.releaseDate)}</small>
                     )}
+                    {product.availabilityType !== "preorder" && !listingPhotoEvidence(product, product.images).complete && <small className="form-error">Photos need attention: {listingPhotoEvidence(product, product.images).missing.join(", ")}. Open Edit to label or add actual photos.</small>}
                   </td>
                   <td>{product.sellerSku}</td>
                   <td>{formatMoney(product.priceCents, product.currency)}</td>
@@ -548,7 +569,8 @@ function Inventory({
         {!visible.length && <p className="store-empty">No inventory matches those filters.</p>}
       </section>
       <SellerFeeDisclosure marketplaceFeeBps={marketplaceFeeBps} />
-      <InventoryImporter disabled={disabled} action={action} />
+      <SellerBulkStock products={rows} disabled={disabled} action={action} />
+      <SellerInventoryUpload disabled={disabled} action={action} />
       {preorder && <PreorderInventoryDialog listing={preorder} onClose={()=>setPreorder(null)}/>}
       {editing && (
         <ProductEditor
@@ -586,6 +608,7 @@ function ProductEditor({
   onClose(): void;
 }) {
   const dialog = useDialogFocus(onClose);
+  const task = useTaskMeasurement("listing");
   const [catalogReady, setCatalogReady] = useState(Boolean(product?.catalogProductId));
   const [busy, setBusy] = useState(false);
   const [productId, setProductId] = useState(product?.id ?? "");
@@ -636,6 +659,7 @@ function ProductEditor({
           },
         });
       }
+      task.complete();
       window.location.reload();
     } catch (reason) {
       setImageError(
@@ -718,7 +742,7 @@ function ProductEditor({
           </div>
           <button type="button" className="dialog-close" aria-label="Close" onClick={onClose}>×</button>
         </div>
-        <form className="admin-form" onSubmit={submit}>
+        <form className="admin-form" onSubmit={submit} onChange={task.start}>
           <CatalogModelPicker initial={product} listingSaved={Boolean(productId)} disabled={busy} onReady={setCatalogReady} />
           <fieldset className="catalog-listing-fields" hidden={!catalogReady} disabled={!catalogReady}>
           <div className="form-row">
@@ -769,6 +793,7 @@ function ProductEditor({
           <fieldset><legend>Package override (optional)</legend><p className="form-note">Leave all four blank to use the store default package for calculated checkout rates.</p><div className="parcel-grid"><label>Length (in)<input name="packageLength" inputMode="decimal" defaultValue={product?.packageLength ?? ""} /></label><label>Width (in)<input name="packageWidth" inputMode="decimal" defaultValue={product?.packageWidth ?? ""} /></label><label>Height (in)<input name="packageHeight" inputMode="decimal" defaultValue={product?.packageHeight ?? ""} /></label><label>Weight (lb)<input name="packageWeight" inputMode="decimal" defaultValue={product?.packageWeight ?? ""} /></label></div></fieldset>
           <CollectibleListingFields product={product} includeIdentity={false}/>
           <ProductImageFields
+            productId={productId || undefined}
             images={images}
             primaryImageUrl={primaryImageUrl}
             files={files}
@@ -790,59 +815,6 @@ function ProductEditor({
       </form>
       </section>
     </div>
-  );
-}
-
-function InventoryImporter({
-  disabled,
-  action,
-}: {
-  disabled: boolean;
-  action(
-    payload: Record<string, unknown>,
-    options?: { reload?: boolean; message?: string },
-  ): Promise<Record<string, unknown>>;
-}) {
-  const [csv, setCsv] = useState("");
-  const [preview, setPreview] = useState<{
-    validCount: number;
-    errors: Array<{ row: number; errors: string[] }>;
-  } | null>(null);
-  async function read(file?: File) {
-    setCsv(file ? await file.text() : "");
-    setPreview(null);
-  }
-  async function validate() {
-    const response = await action({ action: "preview_import", csv });
-    setPreview(response.preview as typeof preview);
-  }
-  async function commit() {
-    await action(
-      { action: "commit_import", csv },
-      { reload: true, message: "Inventory import completed." },
-    );
-  }
-  return (
-    <details className="store-panel store-importer">
-      <summary>Bulk import inventory from CSV</summary>
-      <p>
-        Imports create drafts and update matching SKUs. Validate every row before
-        committing changes.
-      </p>
-      <div className="store-import-controls">
-        <a className="button outline small" href="/api/store/inventory-template">Download template</a>
-        <label className="button outline small">Choose CSV<input type="file" accept=".csv,text/csv" disabled={disabled} onChange={(event) => void read(event.target.files?.[0])} /></label>
-        <button className="button dark small" disabled={disabled || !csv} onClick={() => void validate()}>Validate file</button>
-      </div>
-      {csv && <p>{Math.max(0, csv.split(/\r?\n/).filter(Boolean).length - 1)} rows loaded.</p>}
-      {preview && (
-        <div className="import-preview">
-          <p><b>{preview.validCount} valid rows</b> · {preview.errors.length} rows with errors</p>
-          {preview.errors.slice(0, 20).map((error) => <p className="form-error" key={error.row}>Row {error.row}: {error.errors.join("; ")}</p>)}
-          <button className="button dark small" disabled={disabled || preview.errors.length > 0 || preview.validCount < 1} onClick={() => void commit()}>Commit import</button>
-        </div>
-      )}
-    </details>
   );
 }
 
@@ -888,12 +860,13 @@ function Orders({
       <div className="store-orders">
         {["preorders","all"].includes(filter)&&<SellerPreorderOrders showEmpty={filter==="preorders"}/>}
         {visible.map((order) => (
-          <article className="store-order" key={order.id}>
+          <article className="store-order" key={order.id} id={`order-${order.id}`}>
             <div className="store-order-header">
               <div><p className="eyebrow">{date(order.createdAt)}</p><h3>{order.orderNumber}</h3></div>
               <div><HandlingBadge order={order} /> <span className={`status ${order.paymentStatus}`}>{order.paymentStatus}</span> <span className={`status ${order.fulfillmentStatus}`}>{order.fulfillmentStatus}</span></div>
             </div>
             <div className="store-order-body">
+              {rows.length === 1 && ["unfulfilled", "processing"].includes(order.fulfillmentStatus) && <ContextualHelp id="seller-first-order" title="Your first order: what to do next"><p>{order.shipByAt ? `Ship by ${formatUtcDateTime(order.shipByAt)}.` : "Check the dispatch details before packing."} Protect the model, accessories, and included box inside a sturdy outer shipping box. {shipping.configured ? "Create a shipping label below, or buy postage separately and add tracking." : "Buy postage with your carrier, then add the carrier and tracking number below."} <Link href="/store?view=help">Packing and shipping help</Link></p></ContextualHelp>}
               <div>
                 <h4>Items</h4>
                 {order.items.map((item) => <p key={item.id}><b>{item.productTitleSnapshot}</b><br /><span>{item.sellerSkuSnapshot} · {item.quantity} × {formatMoney(item.unitPriceCents, order.currency)}</span>{item.availabilityTypeSnapshot === "preorder" && item.releaseDateSnapshot && <><br /><span className="order-preorder-date">Preorder · Expected release {date(item.releaseDateSnapshot)}</span></>}</p>)}
@@ -1190,12 +1163,21 @@ function StoreSettings({
     <div className="store-stack">
       <header className="store-page-heading"><div><p className="eyebrow">Storefront</p><h2>Store settings</h2><p>Update the public details and policies customers see.</p></div></header>
       <section className="store-panel store-settings">
-        <form className="admin-form" onSubmit={submit}>
+        <form className="admin-form" id="store-introduction" onSubmit={submit}>
+          <input type="hidden" name="section" value="introduction" />
           {saveError && <p className="form-error" role="alert">{saveError}</p>}
           <div className="form-row"><label>Store name<input name="storeName" required maxLength={120} disabled={disabled} defaultValue={store.storeName} /></label><label>Primary contact<input name="contactName" required maxLength={120} disabled={disabled} defaultValue={store.contactName} /></label></div>
           <label>Account email<input value={store.contactEmail} disabled /><span>Contact support to change the email that owns this store.</span></label>
-          <label>Store description<textarea name="description" rows={5} maxLength={2000} disabled={disabled} defaultValue={store.description} /></label>
+          <label>Store introduction<textarea name="description" rows={4} minLength={30} maxLength={2000} required disabled={disabled} defaultValue={store.description} /><span>Tell buyers what you sell and why you collect or specialize in these models.</span></label>
+          <label>Specialty<input name="specialty" required maxLength={300} disabled={disabled} defaultValue={store.specialty} placeholder="For example, Japanese 1:64 models and vintage racing cars" /></label>
+          <label>How you pack models<textarea name="packingApproach" required minLength={20} maxLength={1000} rows={3} disabled={disabled} defaultValue={store.packingApproach} placeholder="Explain how you protect the model, included box, and accessories in transit." /></label>
+          <div className="form-row"><label>Public shipping state or region<input name="shippingOriginRegion" required maxLength={80} disabled={disabled} defaultValue={store.shippingOriginRegion ?? ""} /></label><label>Shipping country (two-letter code)<input name="shippingOriginCountry" required minLength={2} maxLength={2} disabled={disabled} defaultValue={store.shippingOriginCountry} /></label></div><p className="form-note">Only this general region and country are public. Do not put your street address in your introduction or packing description.</p>
           <div className="form-row"><label>Website URL<input name="websiteUrl" type="url" disabled={disabled} defaultValue={store.websiteUrl ?? ""} /></label><label>Logo URL<input name="logoUrl" type="url" disabled={disabled} defaultValue={store.logoUrl ?? ""} /></label></div>
+          <button className="button dark small" disabled={disabled}>Save store introduction</button>
+        </form>
+        <form className="admin-form" id="shipping-options" onSubmit={submit}>
+          <input type="hidden" name="section" value="shipping" />
+          <h3>Set shipping options</h3>
           <div className="form-row"><label>Shipping model<select name="shippingMode" required disabled={disabled} defaultValue={store.shippingMode}><option value="calculated">Calculated carrier rates</option><option value="flat">Flat-rate shipping</option><option value="free">Free shipping</option></select></label><label>Handling time (business days)<input name="handlingTimeBusinessDays" type="number" min={1} max={10} required disabled={disabled} defaultValue={store.handlingTimeBusinessDays} /></label></div>
           <label>Flat-rate amount (USD)<input name="defaultShipping" inputMode="decimal" required disabled={disabled} defaultValue={(store.defaultShippingCents / 100).toFixed(2)} /><span>Used only when the shipping model is flat rate.</span></label>
           <h3>Ship-from address</h3>
@@ -1203,13 +1185,13 @@ function StoreSettings({
           <AddressFields ref={addressRef} fieldNames={SHIP_FROM_FIELD_NAMES} initialValues={shipFromAddressValues(store)} includePhone disabled={disabled} />
           <h3>Default package</h3>
           <div className="parcel-grid"><label>Length (in)<input name="defaultPackageLength" inputMode="decimal" required disabled={disabled} defaultValue={store.defaultPackageLength} /></label><label>Width (in)<input name="defaultPackageWidth" inputMode="decimal" required disabled={disabled} defaultValue={store.defaultPackageWidth} /></label><label>Height (in)<input name="defaultPackageHeight" inputMode="decimal" required disabled={disabled} defaultValue={store.defaultPackageHeight} /></label><label>Weight (lb)<input name="defaultPackageWeight" inputMode="decimal" required disabled={disabled} defaultValue={store.defaultPackageWeight} /></label></div>
-          <label>Shipping policy<textarea name="shippingPolicySummary" rows={4} maxLength={1000} disabled={disabled} defaultValue={store.shippingPolicySummary} /></label>
+          <label>Shipping policy<textarea name="shippingPolicySummary" required rows={4} maxLength={1000} disabled={disabled} defaultValue={store.shippingPolicySummary} /></label>
           <label>Return policy<textarea name="returnPolicySummary" rows={4} maxLength={1000} disabled={disabled} defaultValue={store.returnPolicySummary} /></label>
-          <button className="button dark small" disabled={disabled}>Save store settings</button>
+          <button className="button dark small" disabled={disabled}>Save shipping options</button>
         </form>
       </section>
-      <section className="store-panel payout-status"><p className="eyebrow">Payout account</p><h3>Stripe Connect</h3><p><span className={`status ${store.stripeChargesEnabled ? "active" : "onboarding"}`}>Charges {store.stripeChargesEnabled ? "enabled" : "pending"}</span> <span className={`status ${store.stripePayoutsEnabled ? "active" : "onboarding"}`}>Payouts {store.stripePayoutsEnabled ? "enabled" : "pending"}</span></p><p>Bank and identity details remain securely hosted by Stripe. Contact Model Car Center if you need a fresh onboarding link.</p></section>
-      <section className="store-panel payout-status">
+      <section className="store-panel payout-status"><p className="eyebrow">Payments</p><h3>Connect your bank account to receive payments</h3><p>Bank and identity details stay securely with Stripe. <Link href="/store?view=payments">Open Payments to connect or check your account</Link>.</p></section>
+      <section className="store-panel payout-status" id="seller-terms">
         <p className="eyebrow">Seller agreement</p>
         <h3>{currentSellerTerms ? "Current Seller Terms accepted" : "Action required before selling"}</h3>
         {currentSellerTerms ? (
@@ -1238,7 +1220,7 @@ function StoreSettings({
           </>
         )}
       </section>
-      <section className="store-panel payout-status"><p className="eyebrow">Selling fees</p><h3>{fee.rateKind === "founding_professional" ? "Founding Seller Rate" : "Professional Store Rate"} — {feePercent(fee.marketplaceFeeBps)} marketplace fee</h3>{fee.foundingPromotionActive && <p>Your promotional rate is active. It automatically becomes the {feePercent(fee.standardMarketplaceFeeBps)} standard professional rate when the six-month period ends.</p>}<SellerFeeDisclosure marketplaceFeeBps={fee.marketplaceFeeBps} /><p>Seller proceeds become eligible for release three days after carrier-confirmed delivery if no case is open and the actual processing fee is available. Stripe controls bank-payout timing after release.</p></section>
+      <section className="store-panel payout-status"><p className="eyebrow">Selling fees</p><h3>{fee.rateKind === "founding_professional" ? "Founding Seller Rate" : "Professional Store Rate"} — {feePercent(fee.marketplaceFeeBps)} marketplace fee</h3>{fee.foundingPromotionActive && <p>Your promotional rate is active. It automatically becomes the {feePercent(fee.standardMarketplaceFeeBps)} standard professional rate when the six-month period ends.</p>}<SellerFeeDisclosure marketplaceFeeBps={fee.marketplaceFeeBps} /><p>Seller proceeds become eligible for release {activeProtectionPolicy.deliveredDays} calendar days after carrier-confirmed delivery if no case is open and the actual processing fee is available. Stripe controls bank-payout timing after release.</p></section>
     </div>
   );
 }
@@ -1322,7 +1304,7 @@ function sellerPayoutLabel(order: StoreOrder) {
   if (order.processingFeePayer === "seller" && order.paymentProcessingFeeCents == null) return "Held — awaiting actual Stripe processing fee";
   return order.payoutEligibleAt
     ? `Held through ${date(order.payoutEligibleAt)}`
-    : "Held until three days after delivery";
+    : "Held until the protection deadline after delivery";
 }
 
 function date(value: string) {

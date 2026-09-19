@@ -21,6 +21,14 @@ export type CatalogQuery = {
 export const productSelection = {
   id: products.id,
   catalogProductId: products.catalogProductId,
+  // Exact catalog membership only: visually similar releases remain separate.
+  availableOfferCount: sql<number>`CASE WHEN ${products.catalogProductId} IS NULL THEN 1 ELSE (
+    SELECT count(*) FROM products offer JOIN sellers store ON store.id = offer.seller_id
+    WHERE offer.catalog_product_id = ${products.catalogProductId}
+      AND offer.status = 'active' AND store.status = 'active'
+      AND store.seller_terms_version = ${POLICY_VERSION} AND store.seller_terms_accepted_at IS NOT NULL
+      AND (offer.availability_type = 'preorder' OR offer.inventory_quantity - offer.reserved_quantity > 0)
+  ) END`.mapWith(Number),
   conditionNotes: products.conditionNotes,
   sellerId: products.sellerId,
   sellerSlug: sellers.slug,
@@ -155,16 +163,18 @@ export async function searchCatalog(
         .innerJoin(sellers, eq(products.sellerId, sellers.id))
         .where(and(...conditions)),
       db
-        .selectDistinct({ value: products.scale })
+        .select({ value: products.scale, inStock: sql<number>`sum(CASE WHEN ${products.availabilityType} = 'in_stock' AND ${products.inventoryQuantity} - ${products.reservedQuantity} > 0 THEN 1 ELSE 0 END)`.mapWith(Number) })
         .from(products)
         .innerJoin(sellers, eq(products.sellerId, sellers.id))
-        .where(and(eq(products.status, "active"), eq(sellers.status, "active"), eq(sellers.sellerTermsVersion, POLICY_VERSION), isNotNull(sellers.sellerTermsAcceptedAt)))
+        .where(and(...activeConditions({})))
+        .groupBy(products.scale)
         .orderBy(asc(products.scale)),
       db
-        .selectDistinct({ value: products.modelManufacturer })
+        .select({ value: products.modelManufacturer, inStock: sql<number>`sum(CASE WHEN ${products.availabilityType} = 'in_stock' AND ${products.inventoryQuantity} - ${products.reservedQuantity} > 0 THEN 1 ELSE 0 END)`.mapWith(Number) })
         .from(products)
         .innerJoin(sellers, eq(products.sellerId, sellers.id))
-        .where(and(eq(products.status, "active"), eq(sellers.status, "active"), eq(sellers.sellerTermsVersion, POLICY_VERSION), isNotNull(sellers.sellerTermsAcceptedAt)))
+        .where(and(...activeConditions({})))
+        .groupBy(products.modelManufacturer)
         .orderBy(asc(products.modelManufacturer)),
       db
         .selectDistinct({ id: sellers.id, name: sellers.storeName })
@@ -194,6 +204,10 @@ export async function searchCatalog(
       manufacturers: manufacturers.map((item) => item.value),
       sellers: sellerRows,
       conditions: conditionsRows.map((item) => item.value),
+    },
+    stockCounts: {
+      scales: Object.fromEntries(scales.map(item => [item.value, item.inStock])),
+      manufacturers: Object.fromEntries(manufacturers.map(item => [item.value, item.inStock])),
     },
   };
 }
@@ -266,6 +280,10 @@ export async function getSellerStorefront(slug: string) {
       websiteUrl: sellers.websiteUrl,
       logoUrl: sellers.logoUrl,
       description: sellers.description,
+      specialty: sellers.specialty,
+      packingApproach: sellers.packingApproach,
+      shippingOriginRegion: sellers.shippingOriginRegion,
+      shippingOriginCountry: sellers.shippingOriginCountry,
       defaultShippingCents: sellers.defaultShippingCents,
       shippingMode: sellers.shippingMode,
       handlingTimeBusinessDays: sellers.handlingTimeBusinessDays,
@@ -287,7 +305,7 @@ export async function getSellerStorefront(slug: string) {
 export function catalogErrorMessage(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   if (message.includes("D1 binding") || message.includes("no such table")) {
-    return "The catalog database is not ready. Apply the generated D1 migration, then try again.";
+    return "Inventory is temporarily unavailable. Please try again shortly.";
   }
   return "The catalog is temporarily unavailable. Please try again.";
 }

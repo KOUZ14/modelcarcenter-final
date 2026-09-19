@@ -9,6 +9,8 @@ import {
   sql,
 } from "drizzle-orm";
 import { getDb } from "@/db";
+import { buildSellerSetup } from "./seller-setup";
+import { createConnectedAccount, createAccountOnboardingLink, retrieveStripeAccount } from "./stripe";
 import { listingPreorderWrites } from "./listing-preorders";
 import { listingPayloadWithCatalog, persistCatalogListing, prepareListingCatalog } from "./catalog-products";
 import { catalogListingSnapshot } from "./catalog-product-rules";
@@ -223,6 +225,7 @@ export async function getStoreDashboardData(userId: string) {
   return {
     store,
     fee: determineMarketplaceFee(store),
+    setup: buildSellerSetup(store, inventory, Boolean(config.shippoApiKey)),
     inventory: inventory.map((item) => ({
       ...item,
       preorder: (() => { const batch = preorderBatches.find(b => b.batch.listingId === item.id)?.batch; return batch ? { batchId:batch.id,capacity:batch.capacity,cutoff:batch.cutoffAt.slice(0,10),buyerLimit:JSON.parse(batch.terms).buyerLimit } : null; })(),
@@ -395,6 +398,8 @@ export async function setStoreProductStatus(
   if (!product) throw new ValidationError("Inventory item not found.");
   if (!['active', 'inactive'].includes(requestedStatus))
     throw new ValidationError("Choose a valid inventory status.");
+  if (requestedStatus === "active" && !buildSellerSetup(store, [product], Boolean(config.shippoApiKey)).readyToPublish)
+    throw new ValidationError("Finish your store introduction, bank connection, shipping options, store approval, and Seller Terms before publishing. Your draft is saved.");
   if (
     requestedStatus === "active" &&
     (store.status !== "active" ||
@@ -416,11 +421,11 @@ export async function setStoreProductStatus(
     if (!product.primaryImageUrl) throw new ValidationError("Add a product photo or clearly identified preview before publishing.");
   }
   if (requestedStatus === "active" && product.availabilityType !== "preorder") {
-    const imageCount = await getDb()
-      .select({ count: sql<number>`count(*)` })
+    const evidenceImages = await getDb()
+      .select({ alt: productImages.alt, url: productImages.url })
       .from(productImages)
       .where(eq(productImages.productId, productId));
-    assertCollectibleListingReady(product, Number(imageCount[0]?.count ?? 0));
+    assertCollectibleListingReady(product, evidenceImages);
   }
   await getDb()
     .update(products)
@@ -461,6 +466,20 @@ export async function saveStoreProfile(
   payload: Record<string, unknown>,
 ) {
   assertStoreCanManage(store);
+  if (payload.section === "introduction") {
+    const description = requiredString(payload.description, "store introduction", 2000);
+    const specialty = requiredString(payload.specialty, "specialty", 300);
+    const packingApproach = requiredString(payload.packingApproach, "packing approach", 1000);
+    if (description.length < 30) throw new ValidationError("Use at least 30 characters to introduce your store.");
+    if (packingApproach.length < 20) throw new ValidationError("Use at least 20 characters to explain how you protect models and boxes in transit.");
+    const rawWebsite = cleanText(payload.websiteUrl, 1500);
+    const rawLogo = cleanText(payload.logoUrl, 1500);
+    const websiteUrl = optionalHttpUrl(rawWebsite); const logoUrl = optionalHttpUrl(rawLogo);
+    if ((rawWebsite && !websiteUrl) || (rawLogo && !logoUrl)) throw new ValidationError("Website and logo links must start with http or https.");
+    await getDb().update(sellers).set({ storeName: requiredString(payload.storeName, "store name", 120), contactName: requiredString(payload.contactName, "contact name", 120), description, specialty, packingApproach, websiteUrl, logoUrl, shippingOriginRegion: requiredString(payload.shippingOriginRegion, "public shipping state or region", 80), shippingOriginCountry: requiredString(payload.shippingOriginCountry, "shipping country", 2).toUpperCase(), updatedAt: new Date().toISOString() }).where(eq(sellers.id, store.id));
+    return { saved: true };
+  }
+  if (payload.section === "shipping") payload = { ...store, ...payload };
   validateShipFromFields(payload);
   const rawWebsite = cleanText(payload.websiteUrl, 1_500);
   const websiteUrl = rawWebsite ? optionalHttpUrl(rawWebsite) : null;
@@ -538,6 +557,27 @@ export async function saveStoreProfile(
   };
   await getDb().update(sellers).set(values).where(eq(sellers.id, store.id));
   return { store: { ...store, ...values } };
+}
+
+export async function connectStorePayments(store: typeof sellers.$inferSelect, refresh = false) {
+  assertStoreCanManage(store);
+  if (store.status === "applicant") throw new ValidationError("Your store application is awaiting review. Connect your bank account after approval.");
+  if (!sellerAcceptedCurrentTerms(store)) throw new ValidationError("Accept the current Seller Terms in Store settings before connecting your bank account.");
+  if (refresh) {
+    if (!store.stripeAccountId) throw new ValidationError("Connect your bank account first.");
+    const account = await retrieveStripeAccount(store.stripeAccountId);
+    const ready = account.charges_enabled && account.payouts_enabled;
+    await getDb().update(sellers).set({ stripeChargesEnabled: account.charges_enabled, stripePayoutsEnabled: account.payouts_enabled, status: ready ? "active" : "onboarding", updatedAt: new Date().toISOString() }).where(eq(sellers.id, store.id));
+    return { ready };
+  }
+  let accountId = store.stripeAccountId;
+  if (!accountId) {
+    const account = await createConnectedAccount({ sellerId: store.id, email: store.contactEmail, storeName: store.storeName });
+    accountId = account.id;
+    await getDb().update(sellers).set({ stripeAccountId: accountId, status: "onboarding", updatedAt: new Date().toISOString() }).where(eq(sellers.id, store.id));
+  }
+  const link = await createAccountOnboardingLink(accountId, "/store?view=payments", "/store?view=payments");
+  return { onboardingUrl: link.url };
 }
 
 export async function acceptCurrentSellerTerms(

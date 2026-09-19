@@ -2,6 +2,8 @@
 
 import Image from "next/image";
 import { useEffect, useState } from "react";
+import { getSelectedPhotoViews, photoViews, photoViewsFromAlt, setSelectedPhotoViews, type PhotoView } from "@/lib/listing-evidence";
+import styles from "./purchase-info.module.css";
 
 export type EditableProductImage = {
   id: string;
@@ -19,6 +21,7 @@ export function ProductImageFields({
   onRemove,
   onRemoveLegacy,
   onReorder,
+  productId,
 }: {
   images: EditableProductImage[];
   primaryImageUrl?: string | null;
@@ -28,6 +31,7 @@ export function ProductImageFields({
   onRemove?(imageId: string): Promise<void>;
   onRemoveLegacy?(): Promise<void>;
   onReorder?(imageIds: string[]): Promise<void>;
+  productId?: string;
 }) {
   const [removingId, setRemovingId] = useState("");
   const [reordering, setReordering] = useState(false);
@@ -118,6 +122,11 @@ export function ProductImageFields({
               <span className="listing-image-badge">
                 {index === 0 ? "Primary" : `Photo ${index + 1}`}
               </span>
+              {productId && <PhotoViewLabels initial={photoViewsFromAlt(image.alt)} disabled={disabled} save={async (views) => {
+                const response = await fetch("/api/listings/images", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ productId, imageId: image.id, views }) });
+                const body = await response.json() as { error?: string };
+                if (!response.ok) throw new Error(body.error || "Photo labels could not be saved.");
+              }}/>}
               {(onRemove || onReorder) && (
                 <div className="listing-image-actions">
                   {onReorder && (
@@ -252,6 +261,7 @@ function SelectedImagePreview({
       <span className="listing-image-badge">
         {isPrimary ? "New primary" : `New photo ${index + 1}`}
       </span>
+      <PhotoViewLabels initial={getSelectedPhotoViews(file)} disabled={disabled} save={async (views) => setSelectedPhotoViews(file, views)}/>
       <div className="listing-image-actions">
         <button
           type="button"
@@ -285,4 +295,19 @@ function moveItem<T>(items: T[], from: number, to: number) {
   const [item] = next.splice(from, 1);
   next.splice(to, 0, item);
   return next;
+}
+
+function PhotoViewLabels({ initial, disabled, save }: { initial: PhotoView[]; disabled: boolean; save(views: PhotoView[]): Promise<void> }) {
+  const [selected, setSelected] = useState(initial);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  return <fieldset className={styles.photoLabels} disabled={disabled || busy}>
+    <legend>What does this actual-item photo show?</legend>
+    {photoViews.map(view => <label key={view.key}><input type="checkbox" checked={selected.includes(view.key)} onChange={async (event) => {
+      const next = event.target.checked ? [...selected, view.key] : selected.filter(key => key !== view.key);
+      setBusy(true); setError("");
+      try { await save(next); setSelected(next); } catch (reason) { setError(reason instanceof Error ? reason.message : "Could not save photo labels."); } finally { setBusy(false); }
+    }}/>{view.label}</label>)}
+    {busy && <small role="status">Saving labels…</small>}{error && <small role="alert">{error}</small>}
+  </fieldset>;
 }

@@ -194,4 +194,25 @@ test("cart preserves the full address, rejects late quotes, and refreshes after 
   render();
   assert.equal(pay().props.disabled, false, "Buyer can explicitly choose standard shipping");
   assert.equal(fixture.marketplace.cart.length, 2, "Requests and payment failures preserve the cart");
+  // A complete address triggers carrier rates without an extra submit, while
+  // partial addresses stay quiet and a one-seller cart has no selection control.
+  fixture.marketplace.collector = null;
+  fixture.marketplace.cart = [{ ...fixture.marketplace.cart[0], shippingMode: "calculated" }];
+  render();
+  delivery().props.onChange({ ...updated, zip: "" });
+  render();
+  const beforeAutomatic = pending.length;
+  await new Promise(resolve => setTimeout(resolve, 700));
+  assert.equal(pending.length, beforeAutomatic, "Incomplete addresses never request rates");
+  assert.equal(pay().props.disabled, true);
+  assert.equal(find(node => node.type === "input" && node.props.type === "checkbox", find(node => node.props?.className === "seller-cart-selection")), null, "Single seller does not need selection controls");
+  delivery().props.onChange(updated);
+  render();
+  await new Promise(resolve => setTimeout(resolve, 700));
+  assert.equal(pending.length, beforeAutomatic + 1, "A valid address automatically calculates shipping");
+  assert.equal(pending.at(-1).url, "/api/shipping/options");
+  pending.at(-1).resolve(quoteResponse("automatic"));
+  await new Promise(resolve => setImmediate(resolve));
+  render();
+  assert.equal(pay().props.disabled, false);
 });

@@ -1,24 +1,21 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { formatCondition } from "@/lib/format";
+import { marketplaceHref, modelHuntHref, readMarketplaceFilters, selectedFilterOptions, type MarketplaceFilters } from "@/lib/discovery";
+import { trackEvent } from "@/lib/analytics-client";
 import type { CatalogResponse } from "@/lib/types";
 import { Icon } from "./icons";
 import { MarketplaceListings } from "./sponsored-listings";
 import { SiteFooter } from "./site-footer";
 import { SiteHeader } from "./site-header";
+import { MobileSheet } from "./mobile-sheet";
+import { SearchTabs } from "./search-tabs";
+import "./discovery.css";
 
-export type MarketplaceInitialState = {
-  q: string;
-  scale: string;
-  manufacturer: string;
-  seller: string;
-  condition: string;
-  availability: string;
-  sort: "newest" | "price_asc" | "price_desc";
-  page: number;
-};
+export type MarketplaceInitialState = MarketplaceFilters;
 
 const emptyCatalog: CatalogResponse = {
   products: [],
@@ -28,21 +25,30 @@ const emptyCatalog: CatalogResponse = {
 
 export function MarketplacePage({
   initial,
+  huntEmailEnabled = false,
 }: {
   initial: MarketplaceInitialState;
+  huntEmailEnabled?: boolean;
 }) {
-  const [query, setQuery] = useState(initial.q);
-  const [activeQuery, setActiveQuery] = useState(initial.q);
-  const [scale, setScale] = useState(initial.scale);
-  const [manufacturer, setManufacturer] = useState(initial.manufacturer);
-  const [seller, setSeller] = useState(initial.seller);
-  const [condition, setCondition] = useState(initial.condition);
-  const [availability, setAvailability] = useState(initial.availability);
-  const [sort, setSort] = useState(initial.sort);
-  const [page, setPage] = useState(initial.page);
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  // The URL is the source of truth, including navigation to this page from the
+  // header, refresh, and browser Back/Forward. Filter changes create history entries.
+  const current = searchParams ? readMarketplaceFilters(searchParams) : initial;
+  const { q: activeQuery, scale, manufacturer, seller, condition, availability, sort, page } = current;
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [query, setQuery] = useState(activeQuery);
   const [catalog, setCatalog] = useState(emptyCatalog);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [resultKey, setResultKey] = useState("");
+  const requestKey = JSON.stringify([activeQuery, scale, manufacturer, seller, condition, availability, sort, page]);
+  const lastMeasured = useRef("");
+  function changeFilters(patch: Partial<MarketplaceFilters>) {
+    router.push(marketplaceHref({ ...current, page: 1, ...patch }), { scroll: false });
+  }
+
+  useEffect(() => { queueMicrotask(() => setQuery(activeQuery)); }, [activeQuery]);
 
   const load = useCallback(
     async (signal: AbortSignal) => {
@@ -65,10 +71,19 @@ export function MarketplacePage({
           error?: string;
         };
         if (!response.ok) throw new Error(data.error || "Catalog unavailable.");
+        if (signal.aborted) return;
         setCatalog(data);
+        setResultKey(requestKey);
+        const measurementKey = params.toString();
+        if (lastMeasured.current !== measurementKey) {
+          lastMeasured.current = measurementKey;
+          trackEvent("buyer_search", { count: data.pagination.total });
+          if (data.pagination.total === 0) trackEvent("buyer_empty_results", { count: 0 });
+        }
       } catch (reason) {
         if (signal.aborted) return;
         setCatalog(emptyCatalog);
+        setResultKey(requestKey);
         setError(
           reason instanceof Error ? reason.message : "Catalog unavailable.",
         );
@@ -76,53 +91,27 @@ export function MarketplacePage({
         if (!signal.aborted) setLoading(false);
       }
     },
-    [activeQuery, condition, availability, manufacturer, page, scale, seller, sort],
+    [activeQuery, condition, availability, manufacturer, page, scale, seller, sort, requestKey],
   );
 
   useEffect(() => {
     const controller = new AbortController();
-    queueMicrotask(() => void load(controller.signal));
+    queueMicrotask(() => { if (!controller.signal.aborted) void load(controller.signal); });
     return () => controller.abort();
   }, [load]);
 
-  useEffect(() => {
-    const params = new URLSearchParams();
-    if (activeQuery) params.set("q", activeQuery);
-    if (scale) params.set("scale", scale);
-    if (manufacturer) params.set("manufacturer", manufacturer);
-    if (seller) params.set("seller", seller);
-    if (condition) params.set("condition", condition);
-    if (availability) params.set("availability", availability);
-    if (sort !== "newest") params.set("sort", sort);
-    if (page > 1) params.set("page", String(page));
-    const search = params.toString();
-    window.history.replaceState(
-      null,
-      "",
-      `/marketplace${search ? `?${search}` : ""}`,
-    );
-  }, [activeQuery, condition, availability, manufacturer, page, scale, seller, sort]);
-
   function runSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setPage(1);
-    setActiveQuery(query.trim());
+    changeFilters({ q: query.trim() });
   }
 
   function clearFilters() {
     setQuery("");
-    setActiveQuery("");
-    setScale("");
-    setManufacturer("");
-    setSeller("");
-    setCondition("");
-    setAvailability("");
-    setSort("newest");
-    setPage(1);
+    router.push("/marketplace", { scroll: false });
   }
 
   function changePage(nextPage: number) {
-    setPage(nextPage);
+    changeFilters({ page: nextPage });
     document
       .getElementById("marketplace-results")
       ?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -131,7 +120,22 @@ export function MarketplacePage({
   const filtered = Boolean(
     activeQuery || scale || manufacturer || seller || condition || availability,
   );
+  const filterControls = [
+    { key: "availability", label: "Availability", value: availability, placeholder: "All offers", options: [{ value: "in_stock", label: "In stock only" }, { value: "preorder", label: "Upcoming releases" }] },
+    { key: "scale", label: "Scale", value: scale, placeholder: "All scales", options: catalog.filters.scales.map(value => ({ value, label: value })) },
+    { key: "manufacturer", label: "Manufacturer", value: manufacturer, placeholder: "All makers", options: catalog.filters.manufacturers.map(value => ({ value, label: value })) },
+    { key: "seller", label: "Seller", value: seller, placeholder: "All sellers", options: catalog.filters.sellers.map(item => ({ value: item.id, label: item.name })) },
+    { key: "condition", label: "Model condition", value: condition, placeholder: "Any model condition", options: catalog.filters.conditions.map(value => ({ value, label: formatCondition(value) })) },
+  ];
+  const activeFilters = filterControls.filter(control => control.value);
+  const filterFields = <div className="marketplace-filter-fields">{filterControls.map(control => <label key={control.label}>
+    {control.label}<select value={control.value} onChange={event => changeFilters({ [control.key]: event.target.value })}>
+      <option value="">{control.placeholder}</option>
+      {selectedFilterOptions(control.options, control.value, formatCondition(control.value)).map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+    </select>
+  </label>)}</div>;
   const promotionQuery = new URLSearchParams({ q: activeQuery, scale, manufacturer, seller, condition, availability, sort, page: String(page) }).toString();
+  const pending = loading || resultKey !== requestKey;
 
   return (
     <main className="marketplace-page">
@@ -159,6 +163,7 @@ export function MarketplacePage({
                   id="marketplace-query"
                   name="q"
                   type="search"
+                  enterKeyHint="search"
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                   placeholder="e.g. Porsche 911"
@@ -171,117 +176,49 @@ export function MarketplacePage({
       </section>
 
       <section className="marketplace-browser" id="marketplace-results">
+        <div className="shell"><SearchTabs query={activeQuery} active="models" /></div>
         <div className="shell marketplace-layout">
-          <aside className="marketplace-filters" id="filters">
-            <label>Availability<select value={availability} onChange={event => { setAvailability(event.target.value); setPage(1); }}><option value="">All offers</option><option value="in_stock">In stock only</option><option value="preorder">Upcoming releases</option></select></label>
-            <div className="marketplace-filter-heading">
-              <h2>Filters</h2>
-              {filtered && (
-                <button type="button" onClick={clearFilters}>
-                  Clear all
-                </button>
-              )}
-            </div>
-            <label>
-              Scale
-              <select
-                value={scale}
-                onChange={(event) => {
-                  setScale(event.target.value);
-                  setPage(1);
-                }}
-              >
-                <option value="">All scales</option>
-                {catalog.filters.scales.map((item) => (
-                  <option key={item} value={item}>
-                    {item}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Manufacturer
-              <select
-                value={manufacturer}
-                onChange={(event) => {
-                  setManufacturer(event.target.value);
-                  setPage(1);
-                }}
-              >
-                <option value="">All makers</option>
-                {catalog.filters.manufacturers.map((item) => (
-                  <option key={item} value={item}>
-                    {item}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Seller
-              <select
-                value={seller}
-                onChange={(event) => {
-                  setSeller(event.target.value);
-                  setPage(1);
-                }}
-              >
-                <option value="">All sellers</option>
-                {catalog.filters.sellers.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Model condition
-              <select
-                value={condition}
-                onChange={(event) => {
-                  setCondition(event.target.value);
-                  setPage(1);
-                }}
-              >
-                <option value="">Any model condition</option>
-                {catalog.filters.conditions.map((item) => (
-                  <option key={item} value={item}>
-                    {formatCondition(item)}
-                  </option>
-                ))}
-              </select>
-            </label>
+          <aside className="marketplace-filters" id="filters" aria-label="Filter listings">
+            <div className="marketplace-filter-heading"><h2>Filters</h2>{filtered && <button type="button" onClick={clearFilters}>Clear all</button>}</div>
+            {filterFields}
           </aside>
 
           <div className="marketplace-results">
             <div className="marketplace-results-heading">
               <div>
                 <h2>{filtered ? "Search results" : "All listings"}</h2>
-                {!loading && !error && (
+                {!pending && !error && (
                   <p className="marketplace-result-count" aria-live="polite">
                     {catalog.pagination.total} live listing
                     {catalog.pagination.total === 1 ? "" : "s"}
                   </p>
                 )}
               </div>
+              <div className="marketplace-result-tools">
+              <button className="mobile-filter-button" type="button" onClick={() => setFiltersOpen(true)} aria-haspopup="dialog" aria-expanded={filtersOpen} aria-controls="mobile-filters">
+                <Icon name="filters" /> Filters{activeFilters.length > 0 && <span className="filter-count">{activeFilters.length}</span>}
+              </button>
               <label className="marketplace-sort">
                 Sort by
                 <select
                   value={sort}
-                  onChange={(event) => {
-                    setSort(
-                      event.target.value as MarketplaceInitialState["sort"],
-                    );
-                    setPage(1);
-                  }}
+                  onChange={(event) => changeFilters({ sort: event.target.value as MarketplaceInitialState["sort"] })}
                 >
                   <option value="newest">Newest</option>
                   <option value="price_asc">Price low to high</option>
                   <option value="price_desc">Price high to low</option>
                 </select>
               </label>
+              </div>
             </div>
 
-            {loading ? (
+            {filtered && <div className="active-filter-chips" aria-label="Active filters">
+              {activeQuery && <button type="button" onClick={() => { setQuery(""); changeFilters({ q: "" }); }} aria-label={`Remove search: ${activeQuery}`}><span>Search: {activeQuery}</span><Icon name="close" /></button>}
+              {activeFilters.map(control => <button key={control.label} type="button" onClick={() => changeFilters({ [control.key]: "" })} aria-label={`Remove ${control.label} filter`}><span>{control.label}: {control.options.find(option => option.value === control.value)?.label || formatCondition(control.value)}</span><Icon name="close" /></button>)}
+              <button className="clear-filters" type="button" onClick={clearFilters}>Clear all</button>
+            </div>}
+
+            {pending ? (
               <div className="catalog-status" role="status">
                 Searching current inventory…
               </div>
@@ -323,14 +260,15 @@ export function MarketplacePage({
                   </button>
                 </div>
               </>
-            ) : (
+            ) : catalog.pagination.total > 0 ? <div className="no-results"><h3>This results page is no longer available.</h3><p>The number of matching listings has changed. Your filters are kept.</p><button className="button dark" type="button" onClick={() => changePage(1)}>Go to first results page</button></div> : (
               <div className="no-results marketplace-no-results">
                 <p className="eyebrow">Nothing on the shelf yet</p>
-                <h3>Try a broader search or start a Model Hunt.</h3>
+                <h3>{activeQuery ? `No listings for “${activeQuery}”` : "No listings match these filters."}</h3>
                 <p>
-                  Clear a filter to see more listings, or tell us exactly what
-                  you want and we&apos;ll watch for a match.
+                  {activeFilters.length ? `Active filters: ${activeFilters.map(control => `${control.label}: ${control.options.find(option => option.value === control.value)?.label || formatCondition(control.value)}`).join(" · ")}. ` : ""}
+                  Remove a filter or browse all models to broaden your search.
                 </p>
+                <p>{huntEmailEnabled ? "Tell us what you want, and we will contact you if we find a matching listing." : "Save a Model Hunt for our team to review. Email alerts are not currently available."}</p>
                 <div className="marketplace-empty-actions">
                   {filtered && (
                     <button
@@ -341,8 +279,8 @@ export function MarketplacePage({
                       Clear all filters
                     </button>
                   )}
-                  <Link className="button dark" href="/#model-hunt">
-                    Start a Model Hunt <Icon name="arrow" />
+                  <Link className="button dark" href={modelHuntHref(current)}>
+                    Can&apos;t find it? Start a Model Hunt <Icon name="arrow" />
                   </Link>
                 </div>
               </div>
@@ -350,6 +288,13 @@ export function MarketplacePage({
           </div>
         </div>
       </section>
+      <MobileSheet id="mobile-filters" title="Filter listings" open={filtersOpen} onClose={() => setFiltersOpen(false)} actions={<>
+        <button className="button outline" type="button" onClick={clearFilters} disabled={!filtered}>Clear all</button>
+        <button className="button dark" type="button" onClick={() => setFiltersOpen(false)}>{pending || error ? "View listings" : `Show ${catalog.pagination.total} listing${catalog.pagination.total === 1 ? "" : "s"}`}</button>
+      </>}>
+        {filterFields}
+        <p className="mobile-filter-status" role="status">{pending ? "Updating results…" : error ? "Unable to load results. Close filters to try again." : `${catalog.pagination.total} matching listing${catalog.pagination.total === 1 ? "" : "s"}`}</p>
+      </MobileSheet>
       <SiteFooter />
     </main>
   );

@@ -34,8 +34,7 @@ import {
   shipFromAddressKey,
 } from "./ship-from-address";
 import {
-  addCalendarDays,
-  REFUND_REQUEST_DAYS_AFTER_DELIVERY,
+  reportDeadlineForOrder,
 } from "./protection";
 
 const MAX_COMBINED_ORDERS = 10;
@@ -417,10 +416,6 @@ async function recordTrackingUpdate(
   const nextStatus = mapShippoTrackingStatus(latest.status);
   const now = new Date().toISOString();
   const eventAt = validDate(latest.status_date) ?? now;
-  const deliveryDeadline =
-    nextStatus === "delivered"
-      ? addCalendarDays(eventAt, REFUND_REQUEST_DAYS_AFTER_DELIVERY)
-      : null;
   const startedTransit =
     nextStatus === "in_transit" &&
     !["in_transit", "delivered"].includes(shipment.status);
@@ -454,7 +449,6 @@ async function recordTrackingUpdate(
     nextStatus,
     eventAt,
     now,
-    deliveryDeadline,
   });
   if (startedTransit) {
     const relatedOrders = await db
@@ -486,16 +480,11 @@ export async function recordOrderTrackingUpdate(
   const nextStatus = mapShippoTrackingStatus(latest.status);
   const now = new Date().toISOString();
   const eventAt = validDate(latest.status_date) ?? now;
-  const deliveryDeadline =
-    nextStatus === "delivered"
-      ? addCalendarDays(eventAt, REFUND_REQUEST_DAYS_AFTER_DELIVERY)
-      : null;
   await applyOrderTrackingStatus({
     orderIds,
     nextStatus,
     eventAt,
     now,
-    deliveryDeadline,
   });
 }
 
@@ -504,40 +493,37 @@ async function applyOrderTrackingStatus(input: {
   nextStatus: ReturnType<typeof mapShippoTrackingStatus>;
   eventAt: string;
   now: string;
-  deliveryDeadline: string | null;
 }) {
   if (!["in_transit", "delivered"].includes(input.nextStatus)) return;
-  await getDb()
-    .update(orders)
-    .set({
-      fulfillmentStatus:
-        input.nextStatus === "delivered" ? "delivered" : "shipped",
+  const rows = await getDb().select().from(orders).where(inArray(orders.id, input.orderIds));
+  for (const order of rows) {
+    // A combined shipment can contain orders with different sold-under terms.
+    const deliveryDeadline = input.nextStatus === "delivered"
+      ? reportDeadlineForOrder({ ...order, deliveredAt: order.deliveredAt ?? input.eventAt }) : null;
+    await getDb().update(orders).set({
+      fulfillmentStatus: input.nextStatus === "delivered" ? "delivered" : sql`CASE WHEN ${orders.deliveredAt} IS NOT NULL THEN ${orders.fulfillmentStatus} ELSE 'shipped' END`,
       shippedAt: sql`COALESCE(${orders.shippedAt}, ${input.eventAt})`,
-      deliveredAt:
-        input.nextStatus === "delivered"
-          ? sql`COALESCE(${orders.deliveredAt}, ${input.eventAt})`
-          : orders.deliveredAt,
-      refundRequestDeadline:
-        input.nextStatus === "delivered"
-          ? sql`COALESCE(${orders.refundRequestDeadline}, ${input.deliveryDeadline})`
-          : orders.refundRequestDeadline,
-      payoutEligibleAt:
-        input.nextStatus === "delivered"
-          ? sql`COALESCE(${orders.payoutEligibleAt}, ${input.deliveryDeadline})`
-          : orders.payoutEligibleAt,
+      deliveredAt: input.nextStatus === "delivered" ? sql`COALESCE(${orders.deliveredAt}, ${input.eventAt})` : orders.deliveredAt,
+      refundRequestDeadline: input.nextStatus === "delivered" ? sql`COALESCE(${orders.refundRequestDeadline}, ${deliveryDeadline})` : orders.refundRequestDeadline,
+      payoutEligibleAt: input.nextStatus === "delivered" ? sql`COALESCE(${orders.payoutEligibleAt}, ${deliveryDeadline})` : orders.payoutEligibleAt,
       updatedAt: input.now,
-    })
-    .where(inArray(orders.id, input.orderIds));
+    }).where(eq(orders.id, order.id));
+  }
 }
 
 async function loadOwnedOrders(userId: string, orderIds: string[]) {
-  return getDb()
-    .select({ order: orders, store: sellers })
+  const db = getDb();
+  const owned = await db
+    .select({ order: orders })
     .from(orders)
     .innerJoin(sellers, eq(orders.sellerId, sellers.id))
     .where(
       and(inArray(orders.id, orderIds), eq(sellers.ownerUserId, userId)),
     );
+  if (!owned.length) return [];
+  // Separate projections keep D1's 100-column result limit as records grow.
+  const stores = await db.select().from(sellers).where(and(eq(sellers.ownerUserId, userId), inArray(sellers.id, [...new Set(owned.map(row => row.order.sellerId))])));
+  return owned.flatMap(({ order }) => { const store = stores.find(row => row.id === order.sellerId); return store ? [{ order, store }] : []; });
 }
 
 function validateOrdersForShipment(

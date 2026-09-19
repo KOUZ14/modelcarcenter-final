@@ -1,3 +1,4 @@
+import { ACTIVE_PROTECTION_POLICY_VERSION } from "./protection";
 import { and, eq, inArray, lt, or, sql } from "drizzle-orm";
 import { getD1, getDb } from "@/db";
 import {
@@ -187,8 +188,8 @@ export function buildCartReservation(
        checkout_shipping_quote_id, selected_shipping_rate_id, selected_shipping_carrier,
        selected_shipping_service, selected_shipping_service_token, selected_shipping_estimated_days,
        quoted_shipping_address, ship_from_address, marketplace_fee_bps, platform_fee_cents, currency,
-       policy_version, policy_accepted_at, expires_at, checkout_group_id, combined_shipping_request_id)
-      VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?)`)
+       policy_version, policy_accepted_at, expires_at, checkout_group_id, combined_shipping_request_id, protection_policy_version)
+      VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?)`)
       .bind(
         reservationId,
         input.seller.sellerId,
@@ -211,6 +212,7 @@ export function buildCartReservation(
         expiresAt.toISOString(),
         checkoutGroupId,
         shipping?.combinedShippingRequestId ?? null,
+        ACTIVE_PROTECTION_POLICY_VERSION,
       ),
     d1.prepare(`UPDATE sellers SET
       default_shipping_cents = CASE WHEN status = 'active' OR (? = 1 AND status = 'suspended') THEN default_shipping_cents ELSE -1 END

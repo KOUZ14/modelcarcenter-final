@@ -63,7 +63,7 @@ test("catalog migrations, seller writes, matching and active offers use separate
   globalThis.__catalogTest = { binding, db: drizzle(binding) };
   t.after(async () => { delete globalThis.__catalogTest; sqlite.close(); await unlink(bundle).catch(() => {}); await rmdir(scratch); });
   const output = await build({
-    stdin: { contents: `export * from './lib/catalog-products.ts'; export { saveStoreProduct } from './lib/store.ts'; export { saveCollectorListing } from './lib/listings.ts'; export { getCatalogListings } from './lib/catalog.ts'; export { commitInventoryCsv, inventoryCsvTemplate } from './lib/csv-import.ts'; export { GET, POST } from './app/api/catalog-products/route.ts'; export { GET as getOffers } from './app/api/catalog-products/[id]/listings/route.ts';`, resolveDir: root },
+    stdin: { contents: `export * from './lib/catalog-products.ts'; export { saveStoreProduct, connectStorePayments } from './lib/store.ts'; export { saveCollectorListing } from './lib/listings.ts'; export { getCatalogListings } from './lib/catalog.ts'; export { commitInventoryCsv, inventoryCsvTemplate, previewStoreInventoryCsv, updateStoreStock } from './lib/csv-import.ts'; export { GET, POST } from './app/api/catalog-products/route.ts'; export { GET as getOffers } from './app/api/catalog-products/[id]/listings/route.ts';`, resolveDir: root },
     bundle: true, platform: "node", format: "esm", packages: "external", write: false,
     plugins: [{ name: "catalog-boundaries", setup(builder) {
       builder.onResolve({ filter: /^@\/db$/ }, ({ path }) => ({ path, namespace: "catalog-test" }));
@@ -212,6 +212,33 @@ test("catalog migrations, seller writes, matching and active offers use separate
     assert.equal(row(rows[0].id).price_cents, 19995);
     assert.equal(row(rows[1].id).price_cents, 24995);
     assert.equal(count(), before + 1);
+    const repeat = `${header}\n${first.replace('SKU-001', 'sku-001').replace('249.95', '189.95')}\n`;
+    const preview = await api.previewStoreInventoryCsv('a', repeat);
+    assert.equal(preview.valid[0].operation, 'update');
+    assert.equal(preview.valid[0].id, rows[0].id);
+    assert.equal(preview.valid[0].sellerSku, 'SKU-001');
+    const repeated = await api.commitInventoryCsv('a', repeat);
+    assert.equal(repeated.created, 0); assert.equal(repeated.updated, 1);
+    assert.equal(row(rows[0].id).price_cents, 18995);
+    assert.equal(sqlite.prepare("SELECT count(*) AS n FROM products WHERE seller_id='a' AND lower(seller_sku)='sku-001'").get().n, 1);
+    sqlite.prepare('UPDATE products SET reserved_quantity=2 WHERE id=?').run(rows[0].id);
+    const belowReserved = repeat.replace(',2,in_stock,', ',1,in_stock,');
+    const invalid = await api.previewStoreInventoryCsv('a', belowReserved);
+    assert.equal(invalid.validCount, 0);
+    assert.equal(invalid.errors[0].row, 2);
+    assert.match(invalid.errors[0].errors.join(' '), /reserved/);
+    await assert.rejects(api.commitInventoryCsv('a', belowReserved), /reserved/);
+    await assert.rejects(api.updateStoreStock('b', [{id: rows[0].id, price: '120', inventoryQuantity: 3}]), /does not belong/);
+    await assert.rejects(api.updateStoreStock('a', [{id: rows[0].id, price: '120', inventoryQuantity: 1}]), /reserved/);
+    await api.updateStoreStock('a', [{id: rows[0].id, price: '120', inventoryQuantity: 3}]);
+    assert.equal(row(rows[0].id).price_cents, 12000);
+    assert.equal(row(rows[0].id).inventory_quantity, 3);
+    assert.equal(row(rows[0].id).status, 'draft', 'A stock update cannot publish an unreviewed draft');
+  });
+
+  await t.test('bank setup cannot approve an applicant store', async () => {
+    await assert.rejects(api.connectStorePayments({ ...store('a'), status: 'applicant' }), /awaiting review/);
+    await assert.rejects(api.connectStorePayments({ ...store('a'), status: 'applicant' }, true), /awaiting review/);
   });
 
   await t.test("collectors can reuse catalog models and edit only their own independent listing", async () => {

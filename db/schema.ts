@@ -10,6 +10,7 @@ import {
 } from "drizzle-orm/sqlite-core";
 import { user as authUser } from "./auth-schema.generated";
 export * from "./community-schema";
+export * from "./measurement-schema";
 
 export {
   account,
@@ -273,6 +274,8 @@ export const sellers = sqliteTable(
     websiteUrl: text("website_url"),
     logoUrl: text("logo_url"),
     description: text("description").notNull().default(""),
+    specialty: text("specialty").notNull().default(""),
+    packingApproach: text("packing_approach").notNull().default(""),
     sellerType: text("seller_type", { enum: ["professional", "collector"] })
       .notNull()
       .default("professional"),
@@ -1123,6 +1126,7 @@ export const orders = sqliteTable(
     shippedAt: text("shipped_at"),
     deliveredAt: text("delivered_at"),
     refundRequestDeadline: text("refund_request_deadline"),
+    protectionPolicyVersion: text("protection_policy_version").notNull().default("delivery-3-v1"),
     payoutEligibleAt: text("payout_eligible_at"),
     updatedAt: text("updated_at")
       .notNull()
@@ -1785,6 +1789,7 @@ export const checkoutReservations = sqliteTable(
     platformFeeCents: integer("platform_fee_cents").notNull(),
     currency: text("currency").notNull(),
     policyVersion: text("policy_version"),
+    protectionPolicyVersion: text("protection_policy_version").notNull().default("delivery-3-v1"),
     policyAcceptedAt: text("policy_accepted_at"),
     expiresAt: text("expires_at").notNull(),
     createdAt: text("created_at")

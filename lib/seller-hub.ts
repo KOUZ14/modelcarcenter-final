@@ -1,15 +1,16 @@
 import { sellerProceedsAfterRefund } from "./seller-proceeds.ts";
+import { modelHuntMatches } from "./business.ts";
 
 // Shared definitions keep the overview, queues, and drill-downs consistent.
-export const hubViews = ["overview", "inventory", "demand", "opportunities", "orders", "marketing", "analytics", "settings"] as const;
+export const hubViews = ["overview", "orders", "inventory", "payments", "analytics", "settings", "help", "demand", "opportunities", "marketing"] as const;
 export type HubView = (typeof hubViews)[number];
 export type HubNavigate = (view: HubView, filter?: string, edit?: string) => void;
 export const inventoryViews = [
   ["all", "All inventory"], ["slow", "Slow inventory"], ["low", "Low stock"],
-  ["out", "Out of stock"], ["preorders", "Preorders"],
+  ["out", "Out of stock"], ["attention", "Needs attention"], ["preorders", "Preorders"],
 ] as const;
 export const orderViews = [
-  ["open", "Awaiting shipment"], ["shipped", "Shipped"], ["returns", "Returns"], ["all", "All orders"],
+  ["open", "Orders to ship"], ["shipped", "Shipped"], ["returns", "Returns"], ["all", "All orders"],
 ] as const;
 
 export type HubProduct = {
@@ -40,6 +41,7 @@ export function matchesInventoryView(product: HubProduct, view: string, slowIds:
     case "low": return product.status === "active" && product.availabilityType !== "preorder" && available > 0 && available <= 2;
     case "out": return ["active", "sold_out"].includes(product.status) && product.availabilityType !== "preorder" && available === 0;
     case "preorders": return product.availabilityType === "preorder" && product.status !== "rejected";
+    case "attention": return ["draft", "pending_review", "rejected"].includes(product.status);
     default: return true;
   }
 }
@@ -110,10 +112,7 @@ const normalize = (value: string | null) => (value ?? "").trim().toLowerCase().r
 
 export function matchWantDemand(want: WantDemand, inventory: DemandProduct[]) {
   return inventory.filter((product) => product.status !== "rejected" &&
-    normalize(product.vehicleMake) === normalize(want.vehicleMake) &&
-    normalize(product.vehicleModel) === normalize(want.vehicleModel) &&
-    normalize(product.scale) === normalize(want.preferredScale) &&
-    (!want.modelManufacturer || normalize(product.modelManufacturer) === normalize(want.modelManufacturer)) &&
+    modelHuntMatches(want, product) &&
     (!want.color || normalize(product.color) === normalize(want.color)) &&
     (!want.conditionPreference || normalize(want.conditionPreference) === "any" || normalize(product.condition) === normalize(want.conditionPreference)) &&
     (want.maxBudgetCents === null || product.priceCents <= want.maxBudgetCents),

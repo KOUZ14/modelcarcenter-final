@@ -90,7 +90,7 @@ export async function savePiece(userId:string,p:Record<string,unknown>) {
   await attachMedia(userId,photoIds,"item_id",id);
   await run("DELETE FROM shelf_members WHERE item_id=?",id);
   for(const shelf of shelves)await run("INSERT INTO shelf_members (id,shelf_id,item_id) VALUES (?,?,?)",crypto.randomUUID(),shelf,id);
-  return {id};
+  return {id,version:(existing?Number(p.version):0)+1};
 }
 export async function feed(viewer:string|null, input:{tab?:string;topic?:string;limit?:number;before?:number;ownerId?:string;catalogId?:string;q?:string;postId?:string}={}) {
   const args:Value[]=[viewer,viewer,viewer,viewer];

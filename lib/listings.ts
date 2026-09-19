@@ -1,4 +1,5 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
+import { sellerPublicProfileComplete } from "./seller-setup";
 import { getDb } from "@/db";
 import {
   productImages,
@@ -149,6 +150,8 @@ async function updateCollectorSellerPreferences(
     .set({
       storeName: values.sellerDisplayName,
       description: values.sellerDescription,
+      specialty: values.sellerSpecialty,
+      packingApproach: values.sellerPackingApproach,
       shippingMode: "calculated",
       ...(values.rememberPackageDefaults
         ? {
@@ -310,16 +313,17 @@ export async function submitCollectorListing(
     seller.status !== "active"
   ) {
     throw new ValidationError(
-      "Complete Stripe payout onboarding before submitting this listing.",
+      "Connect your bank account to receive payments before submitting this listing.",
     );
   }
-  const imageCount = await getDb()
-    .select({ count: sql<number>`count(*)` })
+  if (!sellerPublicProfileComplete(seller)) throw new ValidationError("Before review, add a seller introduction (30 characters), specialty, general shipping location, and packing approach (20 characters). Your draft is saved.");
+  const evidenceImages = await getDb()
+    .select({ alt: productImages.alt, url: productImages.url })
     .from(productImages)
     .where(eq(productImages.productId, productId));
   assertCollectibleListingReady(
     owned.product,
-    Number(imageCount[0]?.count ?? 0),
+    evidenceImages,
   );
   await getDb()
     .update(sellers)

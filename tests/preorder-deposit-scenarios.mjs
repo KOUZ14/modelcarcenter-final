@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { POLICY_VERSION } from '../lib/legal.ts';
 
 export async function depositScenarios({t,api,sqlite,row,all,buyer,buyer2,sessions,refunds,reversals,transfers,disputes,future,pay,paid,setRefundOutcome}) {
-  const store=()=>Object.fromEntries(Object.entries(row("SELECT * FROM sellers WHERE id='seller'")).map(([key,value])=>[key.replace(/_([a-z])/g,(_,c)=>c.toUpperCase()),value]));
+  sqlite.exec("UPDATE sellers SET description='Independent specialist in collectible model cars.', specialty='Japanese diecast and racing models', packing_approach='Models and original boxes are protected inside a padded outer carton.', shipping_policy_summary='Ships within two business days with tracking.' WHERE id='seller'");
+  const store=()=>Object.fromEntries(Object.entries(row("SELECT * FROM sellers WHERE id='seller'")).map(([key,value])=>[key.replace(/_([a-z0-9])/g,(_,c)=>c.toUpperCase()),value]));
   let sequence=0;
   const make=async(extra={})=>{
     const sku=`deposit-${++sequence}`;

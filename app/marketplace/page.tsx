@@ -3,6 +3,8 @@ import {
   MarketplacePage,
   type MarketplaceInitialState,
 } from "@/components/marketplace-page";
+import { readMarketplaceFilters } from "@/lib/discovery";
+import { modelHuntEmailEnabled } from "@/lib/model-hunt-capabilities";
 
 export const metadata: Metadata = {
   title: "Marketplace",
@@ -21,17 +23,6 @@ export default async function Page({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = await searchParams;
-  const sort = valueOf(params.sort);
-  const initial: MarketplaceInitialState = {
-    q: valueOf(params.q),
-    scale: valueOf(params.scale),
-    manufacturer: valueOf(params.manufacturer),
-    seller: valueOf(params.seller),
-    condition: valueOf(params.condition),
-    availability: valueOf(params.availability),
-    sort:
-      sort === "price_asc" || sort === "price_desc" ? sort : "newest",
-    page: Math.max(1, Number.parseInt(valueOf(params.page), 10) || 1),
-  };
-  return <MarketplacePage initial={initial} />;
+  const initial: MarketplaceInitialState = readMarketplaceFilters({ get: key => valueOf(params[key]) });
+  return <MarketplacePage initial={initial} huntEmailEnabled={modelHuntEmailEnabled()} />;
 }

@@ -5,6 +5,7 @@ import {
   removeProductImage,
   reorderProductImages,
   uploadProductImages,
+  labelProductImage,
 } from "@/lib/product-images";
 import { requiredString, ValidationError } from "@/lib/validation";
 
@@ -29,11 +30,33 @@ export async function POST(request: Request) {
       files,
       uploadedByUserId: owner.collector.user.id,
       makePrimary: form.get("makePrimary") === "true",
+      views: parsePhotoViews(form.get("photoViews"), files.length),
     });
     return Response.json({ ok: true, images }, { status: 201 });
   } catch (error) {
     return routeError(error, "The photos could not be uploaded.");
   }
+}
+
+function parsePhotoViews(value: FormDataEntryValue | null, count: number): string[][] {
+  if (!value) return Array.from({ length: count }, () => []);
+  let parsed: unknown;
+  try { parsed = JSON.parse(String(value)); } catch { throw new ValidationError("Photo labels could not be read."); }
+  if (!Array.isArray(parsed) || parsed.length !== count || parsed.some(item => !Array.isArray(item) || item.some(key => typeof key !== "string"))) throw new ValidationError("Choose the views shown in each photo.");
+  return parsed;
+}
+
+export async function PATCH(request: Request) {
+  try {
+    const body = await request.json() as Record<string, unknown>;
+    const productId = requiredString(body.productId, "productId", 100);
+    const owner = await requireProductOwner(productId, request);
+    if (owner instanceof Response) return owner;
+    if (owner.product.sellerStatus === "suspended") throw new ValidationError("This seller is suspended and cannot change photos.");
+    if (!Array.isArray(body.views) || body.views.some(view => typeof view !== "string")) throw new ValidationError("Choose photo views.");
+    const image = await labelProductImage({ product: owner.product.product, imageId: requiredString(body.imageId, "imageId", 100), views: body.views });
+    return Response.json({ ok: true, image });
+  } catch (error) { return routeError(error, "The photo labels could not be saved."); }
 }
 
 export async function DELETE(request: Request) {

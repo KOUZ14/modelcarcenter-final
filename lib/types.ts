@@ -1,6 +1,7 @@
 export type ProductSummary = {
   id: string;
   catalogProductId?: string | null;
+  availableOfferCount?: number;
   conditionNotes?: string;
   sellerId: string;
   sellerSlug: string;
@@ -70,6 +71,7 @@ export type CatalogResponse = {
     sellers: Array<{ id: string; name: string }>;
     conditions: string[];
   };
+  stockCounts?: { scales: Record<string, number>; manufacturers: Record<string, number> };
 };
 
 export type CartItem = {

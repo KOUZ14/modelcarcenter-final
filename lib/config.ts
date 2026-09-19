@@ -1,4 +1,15 @@
+// The local beta launcher defines this marker at compile time. Cloudflare's
+// development bindings can independently load .env.local, so clearing the
+// parent process alone is not enough to suppress external integrations.
+const localBeta = process.env.NODE_ENV !== "production" && process.env.MCC_BETA_DEMO === "true";
+const betaOverrides: Record<string, string> = {
+  SITE_URL: "http://127.0.0.1:5173", MARKETPLACE_MODE: "test", ADMIN_DEV_BYPASS: "false",
+  STRIPE_SECRET_KEY: "", STRIPE_WEBHOOK_SECRET: "", STRIPE_CONNECT_WEBHOOK_SECRET: "",
+  SHIPPO_API_KEY: "", SHIPPO_WEBHOOK_SECRET: "", RESEND_API_KEY: "", GOOGLE_PLACES_API_KEY: "",
+};
+
 function textEnv(name: string, fallback = "") {
+  if (localBeta && Object.hasOwn(betaOverrides, name)) return betaOverrides[name];
   return process.env[name]?.trim() || fallback;
 }
 

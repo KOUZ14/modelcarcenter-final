@@ -1,0 +1,36 @@
+.discovery-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin: 20px 0; }
+.discovery-tabs a { min-height: 44px; display: inline-flex; align-items: center; padding: 10px 18px; border: 1px solid var(--line); border-radius: 24px; background: white; }
+.discovery-tabs a[aria-current="page"] { background: var(--ink, #182326); color: white; border-color: var(--ink, #182326); }
+.home-marketplace .hero-content { padding-top: 114px; padding-bottom: 24px; }
+.home-marketplace .hero h1 { font-size: clamp(32px, 4vw, 52px); max-width: 23ch; }
+.home-marketplace .hero-copy { max-width: 54ch; margin-bottom: 16px; }
+.home-browse-links a { gap: 8px; }
+.home-browse-links .category-empty { color: var(--muted, #526267); border-style: dashed; }
+.category-count { font-size: 12px; }
+.stock-count-note { color: var(--muted, #526267); font-size: 14px; margin: 8px 0; }
+.product-offers-link { display: block; margin: 9px 0; font-size: 14px; text-decoration: underline; text-underline-offset: 3px; }
+.product-availability { margin: 7px 0 0; color: var(--muted, #526267); font-size: 13px; }
+.model-overview { display: grid; grid-template-columns: minmax(240px, 40%) 1fr; gap: 28px; margin: 22px 0 32px; align-items: start; }
+.model-overview-image { position: relative; aspect-ratio: 4 / 3; background: #f2f3f0; overflow: hidden; border-radius: 12px; }
+.model-overview-image img { object-fit: contain; }
+.model-photo-caption { font-size: 13px; color: var(--muted, #526267); margin: 8px 0; }
+.model-overview h1 { font-size: clamp(28px, 4vw, 44px); }
+.model-offer-list { list-style: none; padding: 0; display: grid; gap: 16px; }
+.model-offer { padding: 22px; border: 1px solid var(--line); border-radius: 12px; display: grid; grid-template-columns: 1fr minmax(220px, 32%); gap: 22px; }
+.model-offer p { margin: 8px 0; }
+.model-offer dl { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 16px 0; }
+.model-offer dt { font-size: 13px; color: var(--muted, #526267); }
+.model-offer dd { margin: 5px 0 0; }
+.model-offer-price { font-size: 21px; }
+.hunt-page { max-width: 850px; padding-block: 36px 60px; }
+.hunt-page .wanted-form { margin-top: 24px; }
+.hunt-page .wanted-form button[type="submit"] { background: var(--ink, #182326); color: white; }
+.hunt-submission-summary { border: 1px solid var(--line); padding: 16px; border-radius: 10px; }
+@media (max-width: 820px) {
+  .home-marketplace .hero-content { padding-top: 148px; padding-bottom: 20px; }
+  .home-marketplace .hero h1 { font-size: 32px; }
+  .model-overview, .model-offer { grid-template-columns: 1fr; gap: 16px; }
+  .model-offer dl { grid-template-columns: 1fr; gap: 10px; }
+  .model-offer { padding: 18px; }
+  .model-offer .button { width: 100%; }
+}

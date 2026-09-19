@@ -1,9 +1,9 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { getD1, getDb } from "@/db";
 import { catalogProducts, products, sellers } from "@/db/schema";
 import { catalogListingSnapshot } from "./catalog-product-rules";
 import { prepareListingCatalog } from "./catalog-products";
-import { parseCsv, planImportUpserts, validateImportRows, ValidationError } from "./validation";
+import { integer, moneyToCents, parseCsv, planImportUpserts, requiredString, validateImportRows, ValidationError } from "./validation";
 import {
   notifyRestockSubscribers,
   syncPreorderReleaseSchedule,
@@ -46,6 +46,46 @@ export function previewInventoryCsv(csv: string) {
   return validateImportRows(rows);
 }
 
+export async function previewStoreInventoryCsv(sellerId: string, csv: string) {
+  const preview = previewInventoryCsv(csv);
+  const existing = await getDb().select({ id: products.id, sellerSku: products.sellerSku, slug: products.slug, availabilityType: products.availabilityType, reservedQuantity: products.reservedQuantity }).from(products).where(eq(products.sellerId, sellerId));
+  const planned = planImportUpserts(existing, preview.valid);
+  const errors = [...preview.errors];
+  const valid = planned.filter(row => {
+    const previous = existing.find(product => product.id === row.id);
+    const rowErrors: string[] = [];
+    if (row.availabilityType === "preorder" || previous?.availabilityType === "preorder") rowErrors.push("Use the listing form and Preorders to manage preorder stock.");
+    if (previous && row.inventoryQuantity < previous.reservedQuantity) rowErrors.push(`Total stock cannot be lower than ${previous.reservedQuantity} units reserved for existing buyers.`);
+    if (rowErrors.length) { errors.push({ row: row.rowNumber, errors: rowErrors }); return false; }
+    return true;
+  });
+  return { valid, validCount: valid.length, errors: errors.sort((a, b) => a.row - b.row) };
+}
+
+export async function updateStoreStock(sellerId: string, rows: unknown) {
+  if (!Array.isArray(rows) || rows.length < 1 || rows.length > 5000) throw new ValidationError("Change between 1 and 5,000 inventory items.");
+  const updates = rows.map(row => {
+    if (!row || typeof row !== "object") throw new ValidationError("Choose valid inventory rows.");
+    return { id: requiredString(row.id, "listing ID", 100), priceCents: moneyToCents(row.price, "price"), inventoryQuantity: integer(row.inventoryQuantity, "total stock", 0, 1000000) };
+  });
+  if (new Set(updates.map(row => row.id)).size !== updates.length) throw new ValidationError("Each listing can appear only once in a stock update.");
+  const db = getDb();
+  const existing = await db.select().from(products).where(eq(products.sellerId, sellerId));
+  for (const row of updates) {
+    const product = existing.find(item => item.id === row.id);
+    if (!product) throw new ValidationError("A selected listing does not belong to this store. Refresh inventory and try again.");
+    if (product.availabilityType === "preorder") throw new ValidationError(`${product.sellerSku}: update preorder quantities in Preorders.`);
+    if (row.inventoryQuantity < product.reservedQuantity) throw new ValidationError(`${product.sellerSku}: total stock cannot be lower than ${product.reservedQuantity} reserved units.`);
+  }
+  const d1 = getD1();
+  await d1.batch(updates.map(row => {
+    const query = db.update(products).set({ priceCents: row.priceCents, inventoryQuantity: sql`max(${row.inventoryQuantity}, ${products.reservedQuantity})`, status: sql`CASE WHEN ${products.status} = 'sold_out' AND ${row.inventoryQuantity} > ${products.reservedQuantity} THEN 'active' WHEN ${products.status} = 'active' AND ${row.inventoryQuantity} <= ${products.reservedQuantity} THEN 'sold_out' ELSE ${products.status} END`, updatedAt: new Date().toISOString() }).where(and(eq(products.sellerId, sellerId), eq(products.id, row.id))).toSQL();
+    return d1.prepare(query.sql).bind(...query.params);
+  }));
+  await Promise.all(updates.filter(row => { const previous = existing.find(item => item.id === row.id)!; return previous.inventoryQuantity <= previous.reservedQuantity && row.inventoryQuantity > previous.reservedQuantity; }).map(row => notifyRestockSubscribers(row.id)));
+  return { updated: updates.length };
+}
+
 export async function commitInventoryCsv(sellerId: string, csv: string, retry = true) {
   const db = getDb();
   const seller = await db
@@ -82,6 +122,7 @@ export async function commitInventoryCsv(sellerId: string, csv: string, retry = 
   const statement = (query: { sql: string; params: unknown[] }) => d1.prepare(query.sql).bind(...query.params);
   for (const row of planned) {
     const previous = existing.find((item) => item.id === row.id);
+    if (previous && row.inventoryQuantity < previous.reservedQuantity) throw new ValidationError(`${row.sellerSku}: stock cannot be lower than ${previous.reservedQuantity} reserved units. Refresh the preview.`);
     if (row.availabilityType === "preorder" || previous?.availabilityType === "preorder") throw new ValidationError("Create preorders in the listing form and manage customer commitments in Preorders; CSV inventory cannot create or overwrite them.");
     const payload = { ...row, manufacturerSku: row.productNumber };
     const resolved = await prepareListingCatalog(payload, seller[0].ownerUserId, previous?.catalogProductId);
@@ -143,7 +184,8 @@ export async function commitInventoryCsv(sellerId: string, csv: string, retry = 
         : [];
     }),
   );
-  return { imported: planned.length, created: planned.filter((row) => row.operation === "insert").length };
+  const created = planned.filter((row) => row.operation === "insert").length;
+  return { imported: planned.length, created, updated: planned.length - created };
 }
 
 export function inventoryCsvTemplate() {

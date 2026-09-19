@@ -8,14 +8,25 @@ import {
   validateListingImageOrder,
 } from "@/lib/listing-images";
 import { ValidationError } from "@/lib/validation";
+import { photoAltForViews, photoViews } from "./listing-evidence";
 
 type Product = typeof products.$inferSelect;
+
+export async function labelProductImage(input: { product: Product; imageId: string; views: string[] }) {
+  if (input.views.some(key => !photoViews.some(view => view.key === key))) throw new ValidationError("Choose a supported photo view.");
+  const [image] = await getDb().select().from(productImages).where(and(eq(productImages.id, input.imageId), eq(productImages.productId, input.product.id))).limit(1);
+  if (!image) throw new ValidationError("Photo not found.");
+  const alt = photoAltForViews(input.views, `${input.product.modelManufacturer} ${input.product.title}, seller photo`);
+  await getDb().update(productImages).set({ alt }).where(and(eq(productImages.id, input.imageId), eq(productImages.productId, input.product.id)));
+  return { ...image, alt };
+}
 
 export async function uploadProductImages(input: {
   product: Product;
   files: File[];
   uploadedByUserId?: string | null;
   makePrimary?: boolean;
+  views?: string[][];
 }) {
   const countRows = await getDb()
     .select({
@@ -66,7 +77,7 @@ export async function uploadProductImages(input: {
         id,
         key,
         url: `/media/${key}`,
-        alt: `${input.product.modelManufacturer} ${input.product.title} model car photo ${currentCount + index + 1}`,
+        alt: photoAltForViews(input.views?.[index] ?? [], `${input.product.modelManufacturer} ${input.product.title}, actual-item photo ${currentCount + index + 1}`),
         sortOrder: input.makePrimary
           ? minimumSortOrder - input.files.length + index
           : currentCount + index,

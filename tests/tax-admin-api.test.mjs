@@ -280,6 +280,7 @@ test("admin tax API persists and reloads profiles, deadlines, ledger, seller sta
       absWorkingDir: root,
       jsx: "automatic",
       stdin: { contents: componentSource + "\nexport { TaxCenter };", resolveDir: root, sourcefile: "tax-view.tsx", loader: "tsx" },
+      loader: { ".css": "empty", ".module.css": "empty" },
       bundle: true, platform: "node", format: "esm", packages: "external", write: false,
       plugins: [{ name: "next-view-boundary", setup(builder) {
         builder.onResolve({ filter: /^next\/(link|image)$/ }, ({ path }) => ({ path, namespace: "next-view" }));

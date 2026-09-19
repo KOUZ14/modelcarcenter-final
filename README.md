@@ -61,6 +61,18 @@ The seed command is safe for development only. It inserts one seller and four pr
 
 On native Windows, use WSL2 for the scripted workflow. If running Vite directly from PowerShell, ensure Node 22+ is on `PATH`, then run `npx vite`.
 
+### WSL dependency-cache errors
+
+For WSL checkouts under `/mnt/c` (or another mounted Windows drive), the Vite configuration stores optimized dependencies in a user- and checkout-specific `/tmp/model-car-center-vite-*` directory on the Linux filesystem. This avoids Windows directory locks when Vite replaces its dependency cache. Other environments use Vite's default cache location.
+
+If a running server reports `EACCES` while renaming `deps_rsc`, followed by a missing optimized dependency such as `defu.js`, stop that project's dev server with `Ctrl+C` and restart it once with:
+
+```bash
+npm run dev -- --force
+```
+
+The new cache location bypasses the old `node_modules/.vite` cache; no dependency reinstall is needed. Keep one dev server running per checkout. For best WSL filesystem performance, keep the checkout itself under the Linux home directory, such as `~/projects/modelcarcenter-final`.
+
 ## Environment variables
 
 Copy `.env.example` to `.env.local`. Never commit real values.
@@ -101,6 +113,8 @@ Hosted runtime values are configured through OpenAI Sites rather than committed 
 Collector accounts use Better Auth's D1-compatible Drizzle adapter and magic-link plugin. The catch-all auth endpoint is `/api/auth/*`; `/sign-in` is the user-facing entry point. A new collector only enters an email, follows the single-use link, and then lands in the profile section of My Garage to confirm a display name. Existing collector sessions last 30 days and are refreshed daily.
 
 For local sign-in, configure `SITE_URL`, `BETTER_AUTH_SECRET`, `RESEND_API_KEY`, and `EMAIL_FROM`. When Resend is not configured in development, the email layer logs that delivery was skipped, so a real magic-link round trip requires a development Resend key and verified sender.
+
+During development, a loopback `SITE_URL` also trusts `localhost`, `127.0.0.1`, and `[::1]` with the same protocol and port, so either local browser address can submit the sign-in form. Magic links still use `SITE_URL` as their canonical address. Production trusts only the configured site origin.
 
 Authentication and authorization are separate. Collector listing, image, and fulfillment endpoints derive the user from the server session and then constrain database reads/writes to that user's seller or product. Browser-supplied user IDs, emails, seller IDs, prices, and payout destinations are never trusted as authorization.
 
