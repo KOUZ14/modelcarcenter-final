@@ -6,6 +6,16 @@
 .summary p { font-size: .9rem; line-height: 1.55; margin: .75rem 0 0; }
 .summary a { text-decoration: underline; text-underline-offset: 3px; }
 .summary small { display: block; margin-top: .25rem; }
+.sellerLine { display: flex; flex-wrap: wrap; align-items: center; gap: 0 1rem; font-size: .85rem; }
+.sellerLine p { flex: 1; min-width: 0; margin: 0; color: var(--muted); overflow-wrap: anywhere; }
+.sellerLine a, .essentials a { text-decoration: underline; text-underline-offset: 3px; }
+.messageSeller { display: inline-flex; align-items: center; min-height: 44px; white-space: nowrap; }
+.purchaseInfo { margin-top: 1rem; }
+.essentials { display: grid; gap: .5rem; font-size: .85rem; }
+.essentials p { margin: 0; line-height: 1.55; }
+.listingDetails { margin-top: .85rem; border-top: 1px solid var(--line); }
+.listingDetails > summary { padding: .75rem 0; font-size: .85rem; font-weight: 600; cursor: pointer; }
+.listingDetails > .summary { margin: 0 0 .5rem; }
 .evidence { padding: 1rem; border-left: 3px solid #9b7628; background: #fbf8f0; }
 .evidence ul { padding-left: 1.2rem; }
 .photoLabels { padding: .7rem; margin: .5rem; border: 1px solid #d9d3c9; min-width: 0; }

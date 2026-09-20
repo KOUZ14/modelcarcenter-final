@@ -353,10 +353,8 @@ footer { padding-top: 70px; color: white; background: var(--ink); }
 .shipping-estimate-results li { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; line-height: 1.5; }
 .shipping-estimate-results b { white-space: nowrap; }
 .stock-line { color: var(--muted); font-size: 13px; }
-.purchase-actions { display: flex; gap: 10px; margin: 26px 0 32px; }
-.purchase-actions { flex-wrap: wrap; }
+.purchase-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 26px 0 32px; }
 .buy-button { flex: 1; }
-.message-seller-button { flex: 1 0 100%; }
 .product-badge.preorder { background: #173d35; }
 .product-badge.sold-out { background: #696762; }
 .preorder-terms { margin: -20px 0 28px; color: var(--muted); font-size: 12px; line-height: 1.55; }
@@ -440,8 +438,7 @@ footer { padding-top: 70px; color: white; background: var(--ink); }
 .seller-cart-heading { padding: 18px 0; border-top: 2px solid var(--line); }
 .seller-cart-heading h2 { margin: 0 0 8px; font-size: 26px; overflow-wrap: anywhere; }
 .seller-cart-heading p, .seller-checkout-notice { color: var(--muted); font-size: 13px; line-height: 1.6; }
-.seller-checkout-notice { margin: 24px 0 0; padding: 14px 16px; background: #eceae5; }
-.seller-checkout-notice + .purchase-actions { margin-top: 14px; }
+.seller-checkout-notice { margin: 8px 0 0; }
 .cart-sync-notice { position: fixed; z-index: 100; bottom: 20px; left: 20px; width: min(460px, calc(100% - 40px)); padding: 20px; background: white; border: 1px solid var(--line); box-shadow: 0 4px 24px #0002; }
 .cart-header { display: flex; justify-content: space-between; align-items: center; gap: 16px 32px; margin-bottom: 24px; }
 .cart-header h1, .cart-empty h1 { margin: 0 0 8px; font-size: clamp(30px, 3vw, 40px); line-height: 1.1; letter-spacing: var(--heading-tracking); font-weight: 500; }
@@ -1872,7 +1869,7 @@ p { line-height: 1.55; }
 .product-facts dd { overflow-wrap: anywhere; }
 .product-summary > p { margin-bottom: 12px; }
 .product-price-row { margin-top: 18px; }
-.purchase-actions { margin-block: 16px 20px; }
+.purchase-actions { margin-block: 16px 8px; }
 .related-section, .seller-products { padding-top: 40px; }
 .reputation-compact { margin-top: 36px; padding-top: 28px; }
 .reputation-compact-heading { margin-bottom: 18px; gap: 16px; }
