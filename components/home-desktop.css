@@ -31,6 +31,8 @@
   main.home-marketplace .scale-grid button { min-height: 0; padding: var(--panel-padding); gap: var(--space-4); }
   main.home-marketplace .scale-grid b { font-size: 28px; letter-spacing: -.02em; }
   main.home-marketplace .value-layout { grid-template-columns: .9fr 1.1fr; gap: var(--layout-gap); }
+  main.home-marketplace .value-title h2 { position: static; }
+  main.home-marketplace .value-title > p:not(.eyebrow) { max-width: 42ch; margin: var(--space-4) 0 0; color: #aaa; font-size: 16px; line-height: 1.6; }
   main.home-marketplace .benefit-grid article { min-height: 0; padding: var(--panel-padding); }
   main.home-marketplace .benefit-grid span { margin-bottom: var(--space-5); }
   main.home-marketplace .benefit-grid h3 { margin-bottom: var(--space-3); font-size: 20px; }

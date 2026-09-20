@@ -18,6 +18,28 @@ import "./home-desktop.css";
 
 const scales = ["1:18", "1:24", "1:43", "1:64", "1:87"];
 const makers = ["AUTOart", "Minichamps", "Kyosho", "Spark", "Tarmac Works", "Bburago", "INNO64", "GT Spirit"];
+const marketplaceOverview = {
+  title: "Buy, sell and share model cars",
+  description: "Model Car Center brings collectors and independent model car stores together.",
+  features: [
+    {
+      title: "Buy model cars",
+      copy: "Browse listings from stores and collectors. Check prices, condition and seller details.",
+    },
+    {
+      title: "Find a model you’re looking for",
+      copy: "Can’t find it here? Start a Model Hunt and tell us which model you want.",
+    },
+    {
+      title: "Share your collection",
+      copy: "Add your models, share photos and talk with other collectors.",
+    },
+    {
+      title: "Sell model cars",
+      copy: "Sell models from your collection or list your store’s inventory.",
+    },
+  ],
+};
 
 export function HomeMarketplace({ emailAlertsEnabled = false }: { emailAlertsEnabled?: boolean }) {
   const router = useRouter();
@@ -173,7 +195,22 @@ export function HomeMarketplace({ emailAlertsEnabled = false }: { emailAlertsEna
     </section>
 
     <section ref={desktopScales} className="section shell home-desktop-only" id="desktop-scales"><div className="section-heading split-heading"><div><p className="eyebrow">Start with the shelf</p><h2>Browse by scale</h2></div><p>Jump straight to the size you collect most.</p></div><div className="scale-grid">{[...scales, "Other scales"].map((value, index) => <button key={value} type="button" onClick={() => router.push(marketplaceHref({scale:value === "Other scales" ? "" : value}))}><span>{String(index+1).padStart(2,"0")}</span><b>{value}</b><Icon name="arrow" /></button>)}</div></section>
-    <section className="section value-section home-desktop-only"><div className="shell value-layout"><div className="value-title"><p className="eyebrow light">Why Model Car Center</p><h2>Marketplace features</h2></div><div className="benefit-grid">{[["01","Find models faster","Search the details collectors actually use—from scale and vehicle to model manufacturer."],["02","Independent sellers, one place","See available inventory from approved specialist sellers without opening a dozen tabs."],["03","Collector-specific filters","Narrow results by scale, maker, seller, condition, and price."],["04","A real Model Hunt","Tell us what is missing so future inventory can be matched to real collector demand."]].map(([number,title,copy]) => <article key={number}><span>{number}</span><h3>{title}</h3><p>{copy}</p></article>)}</div></div></section>
+    <section className="section value-section home-desktop-only">
+      <div className="shell value-layout">
+        <div className="value-title">
+          <p className="eyebrow light">Why Model Car Center</p>
+          <h2>{marketplaceOverview.title}</h2>
+          <p>{marketplaceOverview.description}</p>
+        </div>
+        <div className="benefit-grid">
+          {marketplaceOverview.features.map(({ title, copy }, index) => <article key={title}>
+            <span>{String(index + 1).padStart(2, "0")}</span>
+            <h3>{title}</h3>
+            <p>{copy}</p>
+          </article>)}
+        </div>
+      </div>
+    </section>
     <section className="section shell brands-section home-desktop-only"><div className="section-heading split-heading"><div><p className="eyebrow">Browse the makers you know</p><h2>Popular model brands</h2></div><p>From detailed 1:18 pieces to the newest 1:64 releases.</p></div><div className="brand-grid">{makers.map(maker => <button key={maker} type="button" onClick={() => router.push(marketplaceHref({manufacturer:maker}))}>{maker}<Icon name="arrow" /></button>)}</div></section>
 
     <section className="home-help shell" aria-label="More from Model Car Center">
@@ -183,11 +220,12 @@ export function HomeMarketplace({ emailAlertsEnabled = false }: { emailAlertsEna
       </details>
       <div className="home-seller-link"><div className="seller-image home-desktop-only"><span>FOR SELLERS</span><b>Another shelf for your inventory.</b></div><div className="home-seller-copy"><p className="eyebrow home-desktop-only">Sell with Model Car Center</p><h2><span className="home-mobile-only">Make room for your next model</span><span className="home-desktop-only">Sell model cars</span></h2><p className="home-mobile-only">List a model or bring your store to MCC.</p><p className="home-desktop-only">Keep your existing store. Model Car Center gives you another sales channel.</p><ul className="home-desktop-only"><li><Icon name="check" />Keep your existing sales channels</li><li><Icon name="check" />Upload inventory from a spreadsheet</li><li><Icon name="check" />Connect your bank account to receive payments</li></ul></div><Link className="button dark" href="/sell"><span className="home-mobile-only">Start selling</span><span className="home-desktop-only">Become a launch seller</span><Icon name="arrow" /></Link></div>
       <details className="home-disclosure home-mobile-only">
-        <summary><span><strong>How Model Car Center works</strong><span>Shopping, sellers and Model Hunts</span></span><Icon name="arrow" /></summary>
-        <div className="home-disclosure-content home-features">
-          <article><h3>Find models faster</h3><p>Search by vehicle, scale and manufacturer, then filter by seller and condition.</p></article>
-          <article><h3>Independent sellers, one place</h3><p>Browse stores and collectors, with each seller’s shipping and condition details shown before purchase.</p></article>
-          <article><h3>A real Model Hunt</h3><p>Tell us what you want and we’ll check for matching inventory.</p></article>
+        <summary><span><strong>{marketplaceOverview.title}</strong></span><Icon name="arrow" /></summary>
+        <div className="home-disclosure-content">
+          <p>{marketplaceOverview.description}</p>
+          <div className="home-features">
+            {marketplaceOverview.features.map(({ title, copy }) => <article key={title}><h3>{title}</h3><p>{copy}</p></article>)}
+          </div>
         </div>
       </details>
       <details ref={newsletter} className="home-disclosure home-newsletter-section">
