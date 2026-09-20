@@ -5,7 +5,7 @@ import { notFound } from "next/navigation";
 import { getProductBySlug, getRelatedProducts } from "@/lib/catalog";
 import { ProductGallery } from "@/components/product-gallery";
 import { ProductPurchase } from "@/components/product-purchase";
-import { ProductPurchaseInfo } from "@/components/product-purchase-info";
+import { ProductPurchaseInfo, ProductSellerLine } from "@/components/product-purchase-info";
 import { TrackEvent } from "@/components/track-event";
 import { listingPhotoEvidence } from "@/lib/listing-evidence";
 import { ProductShippingEstimate } from "@/components/product-shipping-estimate";
@@ -117,8 +117,9 @@ export default async function ProductPage({
                     : `${product.availableQuantity} available`}{" "}
               · Model: {formatCondition(product.modelCondition)}
             </p>
-            <ProductPurchaseInfo product={product} />
+            <ProductSellerLine product={product} />
             <ProductPurchase product={product} />
+            <ProductPurchaseInfo product={product} />
           </aside>
         </div>
         <section
@@ -165,11 +166,11 @@ export default async function ProductPage({
               <div>
                 <dt>Disclosures</dt>
                 <dd>
-                  <b>Missing parts:</b> {product.missingParts || "Not specified"}
+                  Missing parts: {product.missingParts || "Not specified"}
                   <br />
-                  <b>Defects:</b> {product.defects || "Not specified"}
+                  Defects: {product.defects || "Not specified"}
                   <br />
-                  <b>Restoration / customization:</b>{" "}
+                  Restoration / customization:{" "}
                   {product.restorationCustomization || "Not specified"}
                 </dd>
               </div>
