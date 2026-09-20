@@ -465,7 +465,7 @@ function Inventory({
           Add model
         </button>
       </header>
-      <ContextualHelp id="seller-inventory" title="Have a spreadsheet? Add multiple models at once"><p><a href="#inventory-upload">Upload inventory from a spreadsheet</a>. Keep the same seller SKUs to update existing models. New models start as drafts.</p><Link href="/store?view=help">Read the short inventory guide</Link></ContextualHelp>
+      <ContextualHelp id="seller-inventory" title="Have a spreadsheet? Add multiple models at once" action={{href:"/store?view=help",label:"Read the short inventory guide"}}><p><a href="#inventory-upload">Upload inventory from a spreadsheet</a>. Keep the same seller SKUs to update existing models. New models start as drafts.</p></ContextualHelp>
       <nav className="hub-filters" aria-label="Inventory views">
         {inventoryViews.map(([value, label]) => <button key={value} aria-pressed={queue === value} onClick={() => navigate("inventory", value)}>{label}<span>{rows.filter((row) => matchesInventoryView(row, value, slowIds)).length}</span></button>)}
       </nav>
