@@ -66,7 +66,11 @@ test("account carts persist and merge sellers while shipping requests use one se
   });
   await writeFile(bundle, output.outputFiles[0].contents);
   const { saveAccountCart, getAccountCart, mergeGuestData, loadAuthoritativeCart } = await import(pathToFileURL(bundle).href);
+  sqlite.exec("UPDATE products SET model_condition = 'near_mint', packaging_condition = 'good', original_box_status = 'included' WHERE id = 'one'");
+  sqlite.exec("UPDATE sellers SET handling_time_business_days = 2 WHERE id = 'one'");
   await saveAccountCart("buyer", [{ productId: "one", quantity: 2 }]);
+  const reviewed = (await getAccountCart("buyer"))[0];
+  assert.deepEqual([reviewed.modelCondition, reviewed.packagingCondition, reviewed.originalBoxStatus, reviewed.handlingTimeBusinessDays], ["near_mint", "good", "included", 2], "Signed-in carts carry listing condition and dispatch details");
   const merged = await mergeGuestData("buyer", { wishlist: [], cart: [{ productId: "two", quantity: 1 }] });
   assert.deepEqual(merged.cart.map((item) => item.productId).sort(), ["one", "two"]);
   assert.deepEqual((await getAccountCart("buyer")).map((item) => item.shippingMode).sort(), ["flat", "free"]);
@@ -137,7 +141,7 @@ test("adding another seller and revisiting a paid checkout never clears unrelate
   await writeFile(bundle, output.outputFiles[0].contents);
   const { MarketplaceProvider } = await import(pathToFileURL(bundle).href);
   function render() { stateIndex = refIndex = effectIndex = 0; return MarketplaceProvider({ children: null }).props.value; }
-  const product = (id, sellerId) => ({ id, sellerId, sellerName: sellerId, availableQuantity: 5, shippingMode: "flat", defaultShippingCents: 800 });
+  const product = (id, sellerId) => ({ id, sellerId, sellerName: sellerId, availableQuantity: 5, shippingMode: "flat", defaultShippingCents: 800, modelCondition: "mint", packagingCondition: "good", originalBoxStatus: "included", handlingTimeBusinessDays: 1 });
   let context = render();
   assert.equal(context.addToCart(product("a", "one")), false, "Wait for existing cart hydration before adding");
   await new Promise((resolve) => setImmediate(resolve));
@@ -148,6 +152,7 @@ test("adding another seller and revisiting a paid checkout never clears unrelate
   context = render();
   assert.deepEqual(context.cart.map((item) => item.productId), ["a", "b"]);
   assert.equal(JSON.parse(storage.get("mcc-cart-v1")).length, 2, "Both seller groups survive navigation");
+  assert.deepEqual([context.cart[0].modelCondition, context.cart[0].packagingCondition, context.cart[0].originalBoxStatus, context.cart[0].handlingTimeBusinessDays], ["mint", "good", "included", 1], "Guest carts preserve the listing review details");
   context.completeCheckout("cs_paid", [{ productId: "a", quantity: 1 }]);
   context = render();
   assert.deepEqual(context.cart.map((item) => item.productId), ["b"]);

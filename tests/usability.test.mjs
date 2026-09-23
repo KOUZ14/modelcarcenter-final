@@ -27,6 +27,17 @@ test('unsuccessful shopping carries optional criteria into Model Hunt without re
   assert.equal(minimal.preferredScale, ''); assert.equal(minimal.vehicleMake, '');
   assert.deepEqual(stockCategories(['1:64', '1:18'], { '1:18': 2 }).map(row => [row.value, row.count]), [['1:18', 2], ['1:64', 0]]);
 });
+
+test('budgets survive links, sorting, pagination, filter removal and Model Hunt handoff', () => {
+  const budget = readMarketplaceFilters(new URLSearchParams('q=Porsche&minPrice=0&maxPrice=250.50&manufacturer=AUTOart'));
+  const sorted = { ...budget, sort: 'price_asc', page: 3 };
+  assert.deepEqual(readMarketplaceFilters(new URL(marketplaceHref(sorted), 'https://example.test').searchParams), sorted);
+  const removed = readMarketplaceFilters(new URL(marketplaceHref({ ...budget, minPrice: '', maxPrice: '', page: 1 }), 'https://example.test').searchParams);
+  assert.equal(removed.minPrice, ''); assert.equal(removed.maxPrice, '');
+  assert.equal(removed.manufacturer, 'AUTOart'); assert.equal(removed.q, 'Porsche');
+  const draft = modelHuntPrefill(new URL(modelHuntHref(budget), 'https://example.test').searchParams);
+  assert.equal(draft.maxBudget, '250.50'); assert.match(draft.notes, /Minimum listing price: \$0/);
+});
 test('photo evidence adapts to sealed models, absent boxes, accessories and defects', () => {
   const sealed = { packagingCondition: 'sealed', originalBoxStatus: 'included', accessories: 'Booklet' };
   assert.deepEqual(requiredPhotoViews(sealed), ['packaging', 'seal']);

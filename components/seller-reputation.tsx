@@ -32,21 +32,12 @@ export function SellerReputation({
       detail: `Selling here since ${monthYear(reputation.sellerSince)}`,
     },
     {
-      label: "Verified feedback",
+      label: "Seller reviews",
       value:
         reputation.averageRating == null
-          ? "No feedback yet"
+          ? "No reviews yet"
           : `${reputation.averageRating.toFixed(1)} / 5`,
-      detail: `${reputation.feedbackCount.toLocaleString("en-US")} verified purchase${reputation.feedbackCount === 1 ? "" : "s"}`,
-    },
-    {
-      label: "Resolved cases",
-      value: reputation.totalCases
-        ? `${reputation.resolvedCases} of ${reputation.totalCases}`
-        : "No cases",
-      detail: reputation.totalCases
-        ? "Closed, resolved, or denied through Customer Support"
-        : "No Customer Support case history",
+      detail: `${reputation.feedbackCount.toLocaleString("en-US")} verified purchase review${reputation.feedbackCount === 1 ? "" : "s"}`,
     },
   ];
 
@@ -75,6 +66,7 @@ export function SellerReputation({
             </div>
           ))}
         </dl>
+        <SellerReviews feedback={reputation.recentFeedback.slice(0, 2)} />
       </section>
     );
   }
@@ -88,7 +80,7 @@ export function SellerReputation({
         </div>
         <p>
           These signals come from Model Car Center orders, shipment deadlines,
-          buyer-linked feedback, and Customer Support outcomes. Sellers cannot
+          and verified purchase reviews. Sellers cannot
           edit them.
         </p>
       </header>
@@ -101,41 +93,45 @@ export function SellerReputation({
           </div>
         ))}
       </dl>
-      <div className="verified-feedback">
-        <div className="verified-feedback-heading">
-          <div>
-            <p className="eyebrow">Buyer feedback</p>
-            <h3>Verified purchase reviews</h3>
-          </div>
-          <span>Verified purchase only</span>
-        </div>
-        {reputation.recentFeedback.length ? (
-          <div className="feedback-list">
-            {reputation.recentFeedback.map((feedback) => (
-              <article key={feedback.id}>
-                <div>
-                  <b>{feedback.buyerName}</b>
-                  <span>
-                    <strong aria-label={`${feedback.rating} out of 5`}>
-                      {feedback.rating.toFixed(1)} / 5
-                    </strong>
-                    <em>Verified purchase</em>
-                  </span>
-                </div>
-                <p>{feedback.comment}</p>
-                <time dateTime={feedback.createdAt}>
-                  {monthYear(feedback.createdAt)}
-                </time>
-              </article>
-            ))}
-          </div>
-        ) : (
-          <p className="feedback-empty">
-            No verified-purchase feedback has been published for this seller yet.
-          </p>
-        )}
-      </div>
+      <SellerReviews feedback={reputation.recentFeedback} />
     </section>
+  );
+}
+
+function SellerReviews({ feedback }: { feedback: SellerReputationData["recentFeedback"] }) {
+  return (
+    <div className="verified-feedback">
+      <div className="verified-feedback-heading">
+        <div>
+          <p className="eyebrow">Verified purchases</p>
+          <h3>Seller reviews</h3>
+        </div>
+        <span>Verified purchase only</span>
+      </div>
+      {feedback.length ? (
+        <div className="feedback-list">
+          {feedback.map((review) => (
+            <article key={review.id}>
+              <div>
+                <b>{review.buyerName}</b>
+                <span>
+                  <strong aria-label={`${review.rating} out of 5`}>
+                    {review.rating.toFixed(1)} / 5
+                  </strong>
+                  <em>Verified purchase</em>
+                </span>
+              </div>
+              <p>{review.comment}</p>
+              <time dateTime={review.createdAt}>
+                {monthYear(review.createdAt)}
+              </time>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p className="feedback-empty">No verified purchase reviews yet.</p>
+      )}
+    </div>
   );
 }
 

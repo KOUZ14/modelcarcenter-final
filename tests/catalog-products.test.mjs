@@ -63,7 +63,7 @@ test("catalog migrations, seller writes, matching and active offers use separate
   globalThis.__catalogTest = { binding, db: drizzle(binding) };
   t.after(async () => { delete globalThis.__catalogTest; sqlite.close(); await unlink(bundle).catch(() => {}); await rmdir(scratch); });
   const output = await build({
-    stdin: { contents: `export * from './lib/catalog-products.ts'; export { saveStoreProduct, connectStorePayments } from './lib/store.ts'; export { saveCollectorListing } from './lib/listings.ts'; export { getCatalogListings } from './lib/catalog.ts'; export { commitInventoryCsv, inventoryCsvTemplate, previewStoreInventoryCsv, updateStoreStock } from './lib/csv-import.ts'; export { GET, POST } from './app/api/catalog-products/route.ts'; export { GET as getOffers } from './app/api/catalog-products/[id]/listings/route.ts';`, resolveDir: root },
+    stdin: { contents: `export * from './lib/catalog-products.ts'; export { saveStoreProduct, connectStorePayments } from './lib/store.ts'; export { saveCollectorListing } from './lib/listings.ts'; export { getCatalogListings, getRelatedProducts, searchCatalog, getSellerStorefront } from './lib/catalog.ts'; export { commitInventoryCsv, inventoryCsvTemplate, previewStoreInventoryCsv, updateStoreStock } from './lib/csv-import.ts'; export { GET, POST } from './app/api/catalog-products/route.ts'; export { GET as getOffers } from './app/api/catalog-products/[id]/listings/route.ts'; export { GET as getCatalog } from './app/api/catalog/route.ts';`, resolveDir: root },
     bundle: true, platform: "node", format: "esm", packages: "external", write: false,
     plugins: [{ name: "catalog-boundaries", setup(builder) {
       builder.onResolve({ filter: /^@\/db$/ }, ({ path }) => ({ path, namespace: "catalog-test" }));
@@ -102,6 +102,100 @@ test("catalog migrations, seller writes, matching and active offers use separate
     assert.deepEqual(sqlite.prepare("PRAGMA foreign_key_check").all(), []);
     assert.throws(() => sqlite.exec("UPDATE products SET catalog_product_id = NULL WHERE id = 'old-a'"), /must reference/);
     assert.throws(() => sqlite.exec("DELETE FROM catalog_products WHERE id = 'catalog-old-a'"), /FOREIGN KEY/);
+  });
+
+  await t.test("listing budgets filter exact cents, inclusive bounds, counts and pagination together", async () => {
+    const response = await api.getCatalog(new Request("http://localhost/api/catalog?minPrice=250&maxPrice=279&sort=price_asc"));
+    assert.equal(response.status, 200);
+    const range = await response.json();
+    assert.deepEqual(range.products.map(product => product.id), ["different-sku", "old-a"]);
+    assert.equal(range.pagination.total, 2);
+    assert.deepEqual((await api.searchCatalog({ minPrice: "90.01", maxPrice: "100" })).products.map(product => product.id), ["no-sku-a"]);
+    assert.deepEqual((await api.searchCatalog({ maxPrice: "90" })).products.map(product => product.id), ["no-sku-b"]);
+    assert.deepEqual((await api.searchCatalog({ minPrice: "279.01" })).products.map(product => product.id), ["old-b"]);
+    const paged = await api.searchCatalog({ minPrice: "90", maxPrice: "289", sort: "price_asc", page: 2, pageSize: 2 });
+    assert.deepEqual(paged.products.map(product => product.id), ["different-sku", "old-a"]);
+    assert.deepEqual(paged.pagination, { page: 2, pageSize: 2, total: 5, pages: 3 });
+    assert.equal((await api.searchCatalog({ maxPrice: "100", scale: "1:64" })).pagination.total, 0);
+  });
+
+  await t.test("invalid budgets return a useful client error and unknown preorder prices do not match", async () => {
+    for (const query of ["minPrice=-1", "maxPrice=nope", "minPrice=100&maxPrice=50", "maxPrice=1000001", "minPrice=1.001", "maxPrice=Infinity"]) {
+      const response = await api.getCatalog(new Request(`http://localhost/api/catalog?${query}`));
+      assert.equal(response.status, 400, query);
+      assert.match((await response.json()).error, /price/i);
+    }
+    sqlite.exec("UPDATE products SET availability_type='preorder', price_cents=0 WHERE id='old-a'");
+    try {
+      assert.ok((await api.searchCatalog({})).products.some(product => product.id === "old-a"));
+      assert.equal((await api.searchCatalog({ maxPrice: "0" })).pagination.total, 0);
+      assert.ok(!(await api.searchCatalog({ maxPrice: "300" })).products.some(product => product.id === "old-a"));
+      assert.ok(!(await api.searchCatalog({ minPrice: "0" })).products.some(product => product.id === "old-a"));
+    } finally {
+      sqlite.exec("UPDATE products SET availability_type='in_stock', price_cents=27900 WHERE id='old-a'");
+    }
+  });
+
+  await t.test("similar models exclude the current release and show distinct active releases before limiting", async () => {
+    const current = (await api.getCatalogListings(catalogId)).listings.find(product => product.id === "old-a");
+    const otherCatalogId = row("different-sku").catalog_product_id;
+    const duplicate = await api.saveStoreProduct(store("a"), { ...listing, sellerSku: "another-offer", catalogProductId: otherCatalogId });
+    try {
+      const related = await api.getRelatedProducts(current, 4);
+      assert.equal(related.length, 3);
+      assert.ok(related.every(product => product.id !== current.id && product.catalogProductId !== catalogId));
+      assert.equal(new Set(related.map(product => product.catalogProductId)).size, 3);
+      assert.equal((await api.getRelatedProducts(current, 2)).length, 2);
+      sqlite.prepare("UPDATE products SET inventory_quantity=0 WHERE catalog_product_id=?").run(otherCatalogId);
+      assert.ok(!(await api.getRelatedProducts(current, 4)).some(product => product.catalogProductId === otherCatalogId));
+      assert.ok((await api.getCatalogListings(catalogId)).listings.some(product => product.id === "old-b"), "Same-release alternatives remain in the offer comparison");
+    } finally {
+      sqlite.prepare("DELETE FROM products WHERE id=?").run(duplicate.productId);
+      sqlite.prepare("UPDATE products SET inventory_quantity=2 WHERE id='different-sku'").run();
+    }
+  });
+
+  await t.test("storefront search, scale facets and pagination stay within the approved store", async () => {
+    const insert = sqlite.prepare("INSERT INTO products (id,seller_id,catalog_product_id,slug,seller_sku,title,scale,model_manufacturer,vehicle_make,vehicle_model,price_cents,inventory_quantity,status,created_at) VALUES (?, ?, ?, ?, ?, 'Storefront fixture', ?, 'AUTOart', 'McLaren', 'F1', ?, 1, ?, ?)");
+    const ids = [];
+    const add = (id, seller, scale, price, status, created) => { ids.push(id); insert.run(id, seller, catalogId, id, id, scale, price, status, created); };
+    for (let i = 0; i < 25; i++) add(`storefront-${i}`, 'a', '1:43', 100000 + i, 'active', `2027-01-${String(i + 1).padStart(2, '0')} 00:00:00`);
+    add('storefront-other', 'b', '1:64', 1, 'active', '2027-02-01 00:00:00');
+    add('storefront-draft', 'a', '1:8', 1, 'draft', '2027-02-01 00:00:00');
+    try {
+      const first = await api.getSellerStorefront('a', { q: 'Storefront fixture', sort: 'newest', seller: 'b' });
+      assert.equal(first.catalog.pagination.total, 25);
+      assert.equal(first.products.length, 24);
+      assert.equal(first.products[0].id, 'storefront-24');
+      assert.ok(first.products.every(product => product.sellerId === 'a'));
+      assert.ok(!first.scales.includes('1:64') && !first.scales.includes('1:8'), 'Other sellers and unpublished listings do not contribute scale choices');
+      const second = await api.getSellerStorefront('a', { q: 'Storefront fixture', page: 2 });
+      assert.deepEqual(second.products.map(product => product.id), ['storefront-0']);
+      assert.equal(second.catalog.pagination.pages, 2);
+      const cheap = await api.getSellerStorefront('a', { q: 'Storefront fixture', scale: '1:43', sort: 'price_asc' });
+      assert.equal(cheap.products[0].priceCents, 100000);
+      const expensive = await api.getSellerStorefront('a', { q: 'Storefront fixture', sort: 'price_desc' });
+      assert.equal(expensive.products[0].priceCents, 100024);
+      const empty = await api.getSellerStorefront('a', { scale: '1:64' });
+      assert.equal(empty.catalog.pagination.total, 0);
+      assert.ok(empty.scales.includes('1:43'), 'Available scale choices remain useful after an empty filter');
+      sqlite.prepare("UPDATE products SET price_cents=100000,created_at='2027-01-01 00:00:00' WHERE seller_id='a' AND title='Storefront fixture'").run();
+      const tiedFirst = await api.getSellerStorefront('a', { q: 'Storefront fixture', sort: 'price_asc' });
+      const tiedSecond = await api.getSellerStorefront('a', { q: 'Storefront fixture', sort: 'price_asc', page: 2 });
+      assert.deepEqual([...tiedFirst.products, ...tiedSecond.products].map(product => product.id), Array.from({ length: 25 }, (_, i) => `storefront-${i}`).sort().reverse(), 'Identical prices and dates have stable page boundaries');
+      for (const status of ['suspended', 'applicant', 'onboarding']) {
+        sqlite.prepare("UPDATE sellers SET status=? WHERE id='a'").run(status);
+        assert.equal(await api.getSellerStorefront('a'), null);
+      }
+      sqlite.prepare("UPDATE sellers SET status='active',seller_terms_version='older-terms' WHERE id='a'").run();
+      assert.equal(await api.getSellerStorefront('a'), null, 'Outdated terms keep the public storefront unavailable');
+      sqlite.prepare("UPDATE sellers SET seller_terms_version=?,seller_terms_accepted_at=NULL WHERE id='a'").run(POLICY_VERSION);
+      assert.equal(await api.getSellerStorefront('a'), null, 'A version alone is not recorded acceptance');
+    } finally {
+      sqlite.prepare("UPDATE sellers SET status='active',seller_terms_version=?,seller_terms_accepted_at=CURRENT_TIMESTAMP WHERE id='a'").run(POLICY_VERSION);
+      for (const id of ids) sqlite.prepare('DELETE FROM products WHERE id=?').run(id);
+    }
+    assert.ok(await api.getSellerStorefront('a'), 'An active store with accepted current terms has a public storefront');
   });
 
   await t.test("catalog search finds SKU and manufacturer aliases even without live offers", async () => {

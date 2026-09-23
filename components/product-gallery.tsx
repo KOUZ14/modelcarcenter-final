@@ -26,9 +26,11 @@ const ZOOM_STEP = 0.5;
 export function ProductGallery({
   images,
   productName,
+  context = "listing",
 }: {
   images: GalleryImage[];
   productName: string;
+  context?: "listing" | "collection";
 }) {
   const [activeIndex, setActiveIndex] = useState(0);
   const [viewerOpen, setViewerOpen] = useState(false);
@@ -49,7 +51,8 @@ export function ProductGallery({
   const count = images.length;
   const activeImage = images[activeIndex];
   const activeAlt =
-    activeImage?.alt || `${productName}, product photo ${activeIndex + 1}`;
+    activeImage?.alt || `${productName}, photo ${activeIndex + 1}`;
+  const viewLabel = context === "listing" ? photoViewsFromAlt(activeImage?.alt).map(key => photoViews.find(view => view.key === key)?.label).join(" · ") : "";
 
   const resetView = useCallback(() => {
     setZoom(MIN_ZOOM);
@@ -103,6 +106,11 @@ export function ProductGallery({
     document.body.style.overflow = "hidden";
     closeRef.current?.focus();
 
+    return () => { document.body.style.overflow = previousOverflow; };
+  }, [viewerOpen]);
+
+  useEffect(() => {
+    if (!viewerOpen) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -142,7 +150,6 @@ export function ProductGallery({
 
     window.addEventListener("keydown", onKeyDown);
     return () => {
-      document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", onKeyDown);
     };
   }, [
@@ -195,8 +202,8 @@ export function ProductGallery({
 
   if (!activeImage) {
     return (
-      <section className="product-gallery product-gallery-empty" aria-label="Product photos">
-        <p>Product photos coming soon</p>
+      <section className="product-gallery product-gallery-empty" aria-label={context === "collection" ? "Collection piece photos" : "Product photos"}>
+        <p>{context === "collection" ? "No personal photos added yet" : "Product photos coming soon"}</p>
       </section>
     );
   }
@@ -205,7 +212,7 @@ export function ProductGallery({
     <section className="product-gallery" aria-label={`${productName} photos`}>
       <div className={`gallery-layout${count === 1 ? " single-image" : ""}`}>
         {count > 1 && (
-          <div className="gallery-thumbnails" aria-label="Choose a product photo">
+          <div className="gallery-thumbnails" aria-label="Choose a photo">
             {images.map((image, index) => (
               <button
                 className={index === activeIndex ? "active" : ""}
@@ -219,6 +226,7 @@ export function ProductGallery({
                   src={image.url}
                   alt=""
                   fill
+                  style={{ objectFit: "contain" }}
                   sizes="96px"
                   unoptimized
                 />
@@ -234,7 +242,7 @@ export function ProductGallery({
               className="gallery-open"
               type="button"
               ref={openerRef}
-              aria-label={`Inspect photo ${activeIndex + 1} of ${count} in full screen`}
+              aria-label={`Enlarge photo ${activeIndex + 1} of ${count}`}
               onClick={openViewer}
             >
               <Image
@@ -242,13 +250,14 @@ export function ProductGallery({
                 src={activeImage.url}
                 alt={activeAlt}
                 fill
+                style={{ objectFit: "contain" }}
                 priority={activeIndex === 0}
                 sizes="(max-width: 1000px) calc(100vw - 38px), 65vw"
                 unoptimized
               />
               <span className="gallery-inspect-hint">
                 <b aria-hidden="true">+</b>
-                Inspect details
+                Enlarge photo
               </span>
             </button>
 
@@ -275,12 +284,7 @@ export function ProductGallery({
             )}
           </div>
 
-          <div className="gallery-caption">
-            <span>{photoViewsFromAlt(activeImage?.alt).map(key => photoViews.find(view => view.key === key)?.label).join(" · ") || `Photo ${activeIndex + 1} · View not labeled by seller`}</span>
-            <button type="button" onClick={openViewer}>
-              Open inspection viewer
-            </button>
-          </div>
+          {viewLabel && <div className="gallery-caption"><span>{viewLabel}</span></div>}
         </div>
       </div>
 
@@ -294,7 +298,7 @@ export function ProductGallery({
           <header className="inspection-toolbar">
             <div>
               <span>
-                Photo {activeIndex + 1} of {count}
+                Photo {activeIndex + 1} of {count}{context === "listing" && <> · {viewLabel || "View not labeled by seller"}</>}
               </span>
               <strong id="inspection-viewer-title">{productName}</strong>
             </div>
@@ -351,6 +355,7 @@ export function ProductGallery({
               unoptimized
               draggable={false}
               style={{
+                objectFit: "contain",
                 transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${zoom})`,
               }}
             />

@@ -28,17 +28,19 @@ function authFixture(siteUrl, nodeEnv) {
   };
 }
 
-test("local magic-link sign-in accepts loopback aliases on the configured port", async () => {
-  const origins = ["http://localhost:5173", "http://127.0.0.1:5173", "http://[::1]:5173"];
-  for (const siteUrl of origins) {
-    const fixture = authFixture(siteUrl, "development");
-    for (const origin of origins) {
-      const response = await fixture.submit(origin);
-      assert.equal(response.status, 200, `${siteUrl} should accept ${origin}`);
-      assert.equal(new URL(fixture.deliveries.at(-1).url).origin, siteUrl);
+for (const port of [5173, 5174]) {
+  test(`local magic-link sign-in accepts loopback aliases on configured port ${port}`, async () => {
+    const origins = [`http://localhost:${port}`, `http://127.0.0.1:${port}`, `http://[::1]:${port}`];
+    for (const siteUrl of origins) {
+      const fixture = authFixture(siteUrl, "development");
+      for (const origin of origins) {
+        const response = await fixture.submit(origin);
+        assert.equal(response.status, 200, `${siteUrl} should accept ${origin}`);
+        assert.equal(new URL(fixture.deliveries.at(-1).url).origin, siteUrl);
+      }
     }
-  }
-});
+  });
+}
 
 test("local auth rejects unrelated origins, ports, schemes, and redirects", async () => {
   const fixture = authFixture("http://localhost:5173", "development");

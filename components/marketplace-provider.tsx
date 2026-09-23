@@ -146,7 +146,7 @@ export function MarketplaceProvider({ children }: { children: React.ReactNode })
   const addDirect = useCallback((product: ProductSummary, quantity: number) => {
     const existing = cart.find((item) => item.productId === product.id);
     const next = existing ? cart.map((item) => item.productId === product.id
-      ? { ...item, availableQuantity: product.availableQuantity, quantity: Math.min(10, product.availableQuantity, item.quantity + quantity) }
+      ? toCartItem(product, item.quantity + quantity)
       : item) : [...cart, toCartItem(product, quantity)];
     setCart(next);
     persistCart(next);
@@ -209,6 +209,10 @@ function cartItemFromProduct(product: ProductSummary, quantity: number): CartIte
     title: product.title,
     scale: product.scale,
     modelManufacturer: product.modelManufacturer,
+    modelCondition: product.modelCondition,
+    packagingCondition: product.packagingCondition,
+    originalBoxStatus: product.originalBoxStatus,
+    handlingTimeBusinessDays: product.handlingTimeBusinessDays,
     imageUrl: product.primaryImageUrl,
     priceCents: product.priceCents,
     currency: product.currency,

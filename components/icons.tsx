@@ -1,5 +1,6 @@
-export function Icon({ name }: { name: "search" | "heart" | "bag" | "message" | "arrow" | "check" | "menu" | "close" | "grid" | "users" | "bell" | "filters" }) {
+export function Icon({ name }: { name: "home" | "search" | "heart" | "bag" | "message" | "arrow" | "check" | "menu" | "close" | "grid" | "users" | "bell" | "filters" }) {
   const paths = {
+    home: <><path d="m3 10 9-7 9 7"/><path d="M5 9v12h14V9M9 21v-8h6v8"/></>,
     search: <><circle cx="11" cy="11" r="7"/><path d="m16 16 4 4"/></>,
     heart: <path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1.1-1.1a5.5 5.5 0 0 0-7.8 7.8l1.1 1.1L12 21l7.8-7.5 1.1-1.1a5.5 5.5 0 0 0-.1-7.8Z"/>,
     bag: <><path d="M6 8h12l1 13H5L6 8Z"/><path d="M9 9V6a3 3 0 0 1 6 0v3"/></>,

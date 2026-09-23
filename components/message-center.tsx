@@ -12,11 +12,14 @@ import {
 } from "react";
 import type { MessagingCenterData } from "@/lib/messaging";
 import { MAX_MESSAGE_LENGTH } from "@/lib/messaging-rules";
+import { formatUtcDate, formatUtcDateTime } from "@/lib/format";
 
 export function MessageCenter({
   initialData,
+  sellerContext = false,
 }: {
   initialData: MessagingCenterData;
+  sellerContext?: boolean;
 }) {
   const router=useRouter();
   const [data, setData] = useState(initialData);
@@ -26,10 +29,13 @@ export function MessageCenter({
   const [error, setError] = useState("");
   const threadEnd = useRef<HTMLDivElement>(null);
   const active = data.activeConversation;
+  const conversationUrl = (id: string) => `${sellerContext ? "/store?view=messages&" : "/messages?"}conversation=${encodeURIComponent(id)}`;
+  const firstScroll = useRef(true);
 
   useEffect(() => {
+    if (sellerContext && firstScroll.current) { firstScroll.current = false; return; }
     threadEnd.current?.scrollIntoView({ block: "end" });
-  }, [active?.id, active?.messages.length]);
+  }, [active?.id, active?.messages.length, sellerContext]);
 
   useEffect(() => {
     if (!active?.unreadCount) return;
@@ -58,7 +64,7 @@ export function MessageCenter({
     setLoadingConversation(conversationId);
     try {
       const response = await fetch(
-        `/api/messages?conversation=${encodeURIComponent(conversationId)}`,
+        `/api/messages?conversation=${encodeURIComponent(conversationId)}${sellerContext ? "&context=seller" : ""}`,
         { cache: "no-store" },
       );
       const body = (await response.json()) as ApiResponse;
@@ -69,7 +75,7 @@ export function MessageCenter({
       history.replaceState(
         null,
         "",
-        `/messages?conversation=${encodeURIComponent(conversationId)}`,
+        conversationUrl(conversationId),
       );
     } catch (caught) {
       setError(
@@ -90,12 +96,13 @@ export function MessageCenter({
     try {
       const payload = data.newConversation
         ? {
-            action: "start",
+            action: data.newConversation.sellerId ? "start_seller" : "start",
+            sellerId: data.newConversation.sellerId,
             productId: data.newConversation.productId,
             body: draft,
           }
         : { action: "send", conversationId: active?.id, body: draft };
-      const response = await post(payload);
+      const response = await post({ ...payload, context: sellerContext ? "seller" : undefined });
       const body = (await response.json()) as ApiResponse;
       if (response.ok && body.redirect) {router.push(body.redirect);router.refresh();return;}
       if (!response.ok || !body.data)
@@ -106,7 +113,7 @@ export function MessageCenter({
         history.replaceState(
           null,
           "",
-          `/messages?conversation=${encodeURIComponent(body.data.activeConversation.id)}`,
+          conversationUrl(body.data.activeConversation.id),
         );
     } catch (caught) {
       setError(
@@ -157,7 +164,7 @@ export function MessageCenter({
               <span className="conversation-copy">
                 <span>
                   <b>{conversation.otherPartyName}</b>
-                  <time>{relativeDate(conversation.lastMessageAt)}</time>
+                  <time title={formatUtcDateTime(conversation.lastMessageAt)}>{formatUtcDate(conversation.lastMessageAt)}</time>
                 </span>
                 <strong>{conversation.productTitle}</strong>
                 <small>
@@ -177,7 +184,7 @@ export function MessageCenter({
             <div className="conversation-list-empty">
               <span>01</span>
               <b>Your inbox is ready.</b>
-              <p>Open any listing and choose “Message seller” to begin.</p>
+              <p>{sellerContext ? "Buyer enquiries about your store will appear here." : "Choose “Message seller” on a listing or seller’s storefront to begin."}</p>
             </div>
           )}
         </div>
@@ -204,7 +211,7 @@ export function MessageCenter({
               >
                 <div>
                   <b>{message.senderLabel}</b>
-                  <time>{fullDate(message.createdAt)}</time>
+                  <time>{formatUtcDateTime(message.createdAt)}</time>
                 </div>
                 <p>{message.body}</p>
               </article>
@@ -267,10 +274,10 @@ function ComposeHeader({
         <p className="eyebrow">New conversation with {item.sellerName}</p>
         <h2>{item.productTitle}</h2>
         <p>
-          <Link href={`/products/${item.productSlug}`}>View listing</Link>
-          <span>·</span>
+          {item.productId && <><Link href={`/products/${item.productSlug}`}>View listing</Link><span>·</span></>}
           <Link href={`/sellers/${item.sellerSlug}`}>View seller</Link>
         </p>
+        {item.sellerId && <p>Ask about combined shipping, packaging, or a model you’re looking for.</p>}
       </div>
     </header>
   );
@@ -345,27 +352,4 @@ function post(payload: Record<string, unknown>) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-}
-
-function relativeDate(value: string) {
-  const date = new Date(value);
-  const now = new Date();
-  if (date.toDateString() === now.toDateString())
-    return new Intl.DateTimeFormat("en-US", {
-      hour: "numeric",
-      minute: "2-digit",
-    }).format(date);
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-  }).format(date);
-}
-
-function fullDate(value: string) {
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(new Date(value));
 }

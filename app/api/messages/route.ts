@@ -5,6 +5,7 @@ import {
   markConversationRead,
   sendConversationMessage,
   startConversation,
+  startSellerConversation,
 } from "@/lib/messaging";
 import { requiredString, ValidationError } from "@/lib/validation";
 
@@ -22,6 +23,8 @@ export async function GET(request: Request) {
       data: await getMessagingCenterData(collector.user.id, {
         conversationId,
         productId,
+        sellerId: url.searchParams.get("seller") || undefined,
+        sellerOnly: url.searchParams.get("context") === "seller",
       }),
     });
   } catch (error) {
@@ -35,8 +38,10 @@ export async function POST(request: Request) {
   try {
     const payload = await readJsonObject(request);
     const action = requiredString(payload.action, "action", 40);
-    if (action === "start") {
-      const result = await startConversation(
+    if (action === "start" || action === "start_seller") {
+      const result = action === "start_seller" ? await startSellerConversation(
+        collector.user.id, requiredString(payload.sellerId, "sellerId", 100), payload.body,
+      ) : await startConversation(
         collector.user.id,
         requiredString(payload.productId, "productId", 100),
         payload.body,
@@ -46,6 +51,7 @@ export async function POST(request: Request) {
         ok: true,
         data: await getMessagingCenterData(collector.user.id, {
           conversationId: result.conversationId,
+          sellerOnly: payload.context === "seller",
         }),
       });
     }
@@ -59,6 +65,7 @@ export async function POST(request: Request) {
         ok: true,
         data: await getMessagingCenterData(collector.user.id, {
           conversationId: result.conversationId,
+          sellerOnly: payload.context === "seller",
         }),
       });
     }

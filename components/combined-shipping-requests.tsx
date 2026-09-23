@@ -5,7 +5,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import type { CombinedShippingRequest } from "@/lib/combined-shipping";
 import { formatMoney } from "@/lib/format";
 
-export function CombinedShippingRequests() {
+export function CombinedShippingRequests({ sellerContext = false }: { sellerContext?: boolean } = {}) {
   const [requests, setRequests] = useState<CombinedShippingRequest[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -26,12 +26,13 @@ export function CombinedShippingRequests() {
     window.addEventListener("focus", refresh);
     return () => { active = false; clearInterval(timer); window.removeEventListener("focus", refresh); };
   }, []);
+  const visible = sellerContext ? requests.filter(request => request.viewerRole === "seller") : requests;
   return <section className="combined-requests" id="shipping-requests" aria-labelledby="shipping-requests-title">
-    <div className="panel-heading"><div><h2 id="shipping-requests-title">Combined shipping requests</h2><p>Review shipping prices before the buyer pays. Quotes are valid for 48 hours for the listed items and address.</p></div><Link className="text-link" href="/cart">Return to cart</Link></div>
+    <div className="panel-heading"><div><h2 id="shipping-requests-title">Combined shipping requests</h2><p>Quote shipping before payment. Quotes last 48 hours for the listed items and address.</p></div><Link className="text-link" href={sellerContext ? "/store?view=orders" : "/cart"}>{sellerContext ? "Open Orders" : "Return to cart"}</Link></div>
     {loading && <p role="status">Loading shipping requests…</p>}
     {error && <p className="form-error" role="alert">{error}</p>}
-    {!loading && !requests.length && <p>No shipping requests yet. Buyers can request a quote from their cart when buying two or more models from one seller.</p>}
-    {requests.map((request) => <ShippingRequestCard key={request.id} request={request} now={now} onUpdate={setRequests} />)}
+    {!loading && !visible.length && <p>No shipping requests yet. Buyers can request a quote from their cart when buying two or more models from one seller.</p>}
+    {visible.map((request) => <ShippingRequestCard key={request.id} request={request} now={now} onUpdate={setRequests} />)}
   </section>;
 }
 

@@ -5,12 +5,14 @@ export type MarketplaceFilters = {
   seller: string;
   condition: string;
   availability: string;
+  minPrice: string;
+  maxPrice: string;
   sort: "newest" | "price_asc" | "price_desc";
   page: number;
 };
 
 type SearchValues = { get(name: string): string | null };
-const filterNames = ["q", "scale", "manufacturer", "seller", "condition", "availability"] as const;
+const filterNames = ["q", "scale", "manufacturer", "seller", "condition", "availability", "minPrice", "maxPrice"] as const;
 
 export function readMarketplaceFilters(params: SearchValues): MarketplaceFilters {
   const sort = params.get("sort");
@@ -21,6 +23,8 @@ export function readMarketplaceFilters(params: SearchValues): MarketplaceFilters
     seller: params.get("seller") || "",
     condition: params.get("condition") || "",
     availability: params.get("availability") || "",
+    minPrice: (params.get("minPrice") || "").trim(),
+    maxPrice: (params.get("maxPrice") || "").trim(),
     sort: sort === "price_asc" || sort === "price_desc" ? sort : "newest",
     page: Math.max(1, Number.parseInt(params.get("page") || "1", 10) || 1),
   };
@@ -53,7 +57,9 @@ export function modelHuntPrefill(params: SearchValues) {
     preferredScale: filters.scale,
     modelManufacturer: filters.manufacturer,
     conditionPreference: filters.condition,
+    maxBudget: filters.maxPrice,
     notes: [
+      filters.minPrice ? `Minimum listing price: $${filters.minPrice}.` : "",
       filters.seller ? `Preferred seller: ${filters.seller}` : "",
       filters.availability === "in_stock" ? "Looking for an in-stock model." : "",
       filters.availability === "preorder" ? "Looking for an upcoming release." : "",

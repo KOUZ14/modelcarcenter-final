@@ -26,9 +26,9 @@ export function buildSellerSetup(store: SetupStore, inventory: Array<{ status: s
     (store.shippingMode !== "calculated" || carrierRatesConfigured));
   const terms = sellerAcceptedCurrentTerms(store);
   const steps = [
-    { id: "store", title: "Set up your store", complete: profile, href: "/store?view=settings#store-introduction", detail: "Add your introduction, specialty, general shipping location, and packing approach." },
+    { id: "store", title: "Set up your store", complete: profile, href: "/store?view=settings&filter=introduction#store-introduction", detail: "Add your introduction, specialty, general shipping location, and packing approach." },
     { id: "payments", title: "Connect your bank account to receive payments", complete: payments, href: "/store?view=payments", detail: "Provide identity and bank details securely with Stripe. Return here to check your connection." },
-    { id: "shipping", title: "Set shipping options", complete: shipping, href: "/store?view=settings#shipping-options", detail: "Save your private ship-from address, dispatch time, shipping charge, and packing dimensions." },
+    { id: "shipping", title: "Set shipping options", complete: shipping, href: "/store?view=settings&filter=shipping#shipping-options", detail: "Save your private ship-from address, dispatch time, shipping charge, and packing dimensions." },
     { id: "inventory", title: "Add your first model or upload inventory", complete: inventory.length > 0, href: "/store?view=inventory", detail: "Start with a draft. Add actual-item photos and condition details before publishing." },
   ];
   return { steps, completed: steps.filter(step => step.complete).length, termsAccepted: terms,

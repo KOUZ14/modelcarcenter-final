@@ -18,12 +18,56 @@ test('collector privacy, social permissions and shared inventory authority',asyn
  const sessions=new Map(),originalFetch=globalThis.fetch;
  globalThis.fetch=async(input,init={})=>{const url=new URL(input),body=new URLSearchParams(init.body);assert.equal(url.origin,'https://api.stripe.com');if(url.pathname.startsWith('/v1/accounts/'))return Response.json({charges_enabled:true,payouts_enabled:true});if(url.pathname==='/v1/customers')return Response.json({id:'cus_test'});if(url.pathname==='/v1/checkout/sessions'){const id=`cs_test_${sessions.size+1}`,metadata=Object.fromEntries([...body].filter(([k])=>/^metadata\[/.test(k)).map(([k,v])=>[k.slice(9,-1),v]));let base=0;for(let i=0;body.has(`line_items[${i}][quantity]`);i++)base+=Number(body.get(`line_items[${i}][quantity]`))*Number(body.get(`line_items[${i}][price_data][unit_amount]`));const s={id,url:`https://checkout.stripe.com/${id}`,status:'open',payment_status:'unpaid',metadata,amount_total:base+125,currency:'usd',total_details:{amount_tax:125},customer_details:{email:'buyer@example.test'},payment_intent:{id:`pi_${id}`,latest_charge:{id:`ch_${id}`,balance_transaction:{fee:90}}}};sessions.set(id,s);return Response.json(s);}if(url.pathname.startsWith('/v1/checkout/sessions/')){const s=sessions.get(url.pathname.split('/')[4]);assert.ok(s);if(url.pathname.endsWith('/expire'))s.status='expired';return Response.json(s);}throw Error('Unexpected Stripe operation '+url.pathname);};
  t.after(()=>{globalThis.fetch=originalFetch;});
- const output=await build({stdin:{contents:"export * from './lib/community.ts';export * from './lib/collection-offers.ts';export * from './lib/collector-messaging.ts';export * from './lib/inventory.ts';export * from './lib/community-images.ts';export * from './lib/collection-offer-payments.ts';export * from './lib/orders.ts';",resolveDir:root},bundle:true,platform:'node',format:'esm',packages:'external',write:false,plugins:[{name:'community-fixture',setup(b){b.onResolve({filter:/^(@\/db|\.\/config(?:\.ts)?|\.\/email(?:\.ts)?)$/},({path})=>({path:path.replace(/\.ts$/,''),namespace:'fixture'}));b.onLoad({filter:/.*/,namespace:'fixture'},({path})=>({contents:path==='./config'?'export const config=globalThis.__communityFixture.config;export const requireConfig=k=>config[k];':path==='./email'?'export const sendPaidOrderEmails=async()=>{};export const sendEmail=async()=>({sent:true});export const escapeHtml=v=>String(v);':'export const getDb=()=>globalThis.__communityFixture.db;export const getD1=()=>globalThis.__communityFixture.binding;'}));}}]});
+ const output=await build({stdin:{contents:"export * from './lib/community.ts';export { getMessagingCenterData, startSellerConversation } from './lib/messaging.ts';export * from './lib/collection-offers.ts';export * from './lib/collector-messaging.ts';export * from './lib/inventory.ts';export * from './lib/community-images.ts';export * from './lib/collection-offer-payments.ts';export * from './lib/orders.ts';",resolveDir:root},bundle:true,platform:'node',format:'esm',packages:'external',write:false,plugins:[{name:'community-fixture',setup(b){b.onResolve({filter:/^(@\/db|\.\/config(?:\.ts)?|\.\/email(?:\.ts)?)$/},({path})=>({path:path.replace(/\.ts$/,''),namespace:'fixture'}));b.onLoad({filter:/.*/,namespace:'fixture'},({path})=>({contents:path==='./config'?'export const config=globalThis.__communityFixture.config;export const requireConfig=k=>config[k];':path==='./email'?'export const sendPaidOrderEmails=async()=>{};export const sendEmail=async()=>({sent:true});export const escapeHtml=v=>String(v);':'export const getDb=()=>globalThis.__communityFixture.db;export const getD1=()=>globalThis.__communityFixture.binding;'}));}}]});
  await writeFile(bundle,output.outputFiles[0].contents);const api=await import(pathToFileURL(bundle).href);t.after(async()=>{db.close();delete globalThis.__communityFixture;await unlink(bundle);await rmdir(scratch);});
  for(const id of ['owner','buyer','buyer2']){db.prepare('INSERT INTO user (id,name,email,created_at,updated_at) VALUES (?,?,?,0,0)').run(id,id,id+'@example.test');db.prepare('INSERT INTO collector_profiles (id,user_id,display_name,handle) VALUES (?,?,?,?)').run(id,id,id,id);await api.settings(id);}
  db.prepare("INSERT INTO catalog_products (id,model_car_manufacturer,manufacturer_key,scale,vehicle_make,vehicle_model,title) VALUES ('model','MINI GT','minigt','1:64','Porsche','911','Porsche 911')").run();
  const make=async(extra={})=>api.savePiece('owner',{catalogId:'model',title:'ignored',scale:'ignored',maker:'ignored',visibility:'private',privateNotes:'PRIVATE SECRET',purchaseCost:'1000',photos:[],...extra});
  let piece;
+ await t.test('storefront contact works without a listing and preserves seller eligibility and message permissions',async()=>{
+  for(const id of ['store-owner','store-buyer','store-other']){
+   db.prepare('INSERT INTO user (id,name,email,created_at,updated_at) VALUES (?,?,?,0,0)').run(id,id,id+'@example.test');
+   db.prepare('INSERT INTO collector_profiles (id,user_id,display_name,handle) VALUES (?,?,?,?)').run(id,id,id,id);
+   await api.settings(id);
+  }
+  db.prepare("INSERT INTO sellers (id,owner_user_id,slug,store_name,contact_name,contact_email,status,seller_terms_version,seller_terms_accepted_at) VALUES ('empty-store','store-owner','empty-store','Empty Store','Owner','store@example.test','active',?,CURRENT_TIMESTAMP)").run(POLICY_VERSION);
+  const data=await api.getMessagingCenterData('store-buyer',{sellerId:'empty-store'});
+  assert.equal(data.newConversation.productId,null);
+  assert.equal(data.newConversation.sellerId,'empty-store');
+  assert.equal(data.newConversation.canMessage,true);
+  assert.equal((await api.getMessagingCenterData('store-owner',{sellerId:'empty-store'})).newConversation.canMessage,false);
+  await assert.rejects(()=>api.startSellerConversation('store-owner','empty-store','Hello'),/own store/);
+  await assert.rejects(()=>api.startSellerConversation('store-buyer','empty-store','   '),/Write a message/);
+  db.prepare("UPDATE sellers SET status='suspended' WHERE id='empty-store'").run();
+  await assert.rejects(()=>api.startSellerConversation('store-buyer','empty-store','Hello'),/no longer available/);
+  db.prepare("UPDATE sellers SET status='active',seller_terms_version='old' WHERE id='empty-store'").run();
+  await assert.rejects(()=>api.startSellerConversation('store-buyer','empty-store','Hello'),/no longer available/);
+  db.prepare("UPDATE sellers SET seller_terms_version=? WHERE id='empty-store'").run(POLICY_VERSION);
+  db.prepare("UPDATE community_settings SET contact='existing' WHERE user_id='store-owner'").run();
+  await assert.rejects(()=>api.startSellerConversation('store-buyer','empty-store','Hello'),/not accepting/);
+  db.prepare("UPDATE community_settings SET contact='requests' WHERE user_id='store-owner'").run();
+  const started=await api.startSellerConversation('store-buyer','empty-store','Can you source a blue Nissan?');
+  const thread=db.prepare('SELECT * FROM collector_threads WHERE id=?').get(started.conversationId);
+  assert.equal(thread.recipient_id,'store-owner');
+  assert.equal(thread.reference,'Store enquiry: Empty Store');
+  assert.equal(thread.status,'request');
+  assert.equal(db.prepare('SELECT body FROM collector_messages WHERE thread_id=?').get(thread.id).body,'Can you source a blue Nissan?');
+  await assert.rejects(()=>api.startSellerConversation('store-buyer','empty-store','Again'),/accepted/);
+  db.prepare("INSERT INTO collector_relationships (id,owner_id,target_id,kind,created_at) VALUES ('store-block','store-owner','store-other','block',0)").run();
+  await assert.rejects(()=>api.startSellerConversation('store-other','empty-store','Hello'),/unavailable|blocked/i);
+ });
+ await t.test('wanted releases remain separate from saved seller listings and belong to the current collector',async()=>{
+  const wanted={action:'wishlist',catalogId:'model',enabled:true};
+  await api.communityAction('owner',wanted);await api.communityAction('owner',wanted);
+  assert.equal(db.prepare("SELECT count(*) n FROM model_wishlist WHERE owner_id='owner'").get().n,1,'Adding the same release twice is idempotent');
+  assert.equal(db.prepare('SELECT count(*) n FROM wishlist_items').get().n,0,'Wanting a release does not save a seller listing');
+  await api.communityAction('buyer',wanted);
+  await api.communityAction('owner',{...wanted,enabled:false});
+  assert.equal(db.prepare("SELECT count(*) n FROM model_wishlist WHERE owner_id='owner'").get().n,0);
+  assert.equal(db.prepare("SELECT count(*) n FROM model_wishlist WHERE owner_id='buyer'").get().n,1,'Removal is scoped to the current collector');
+  await api.communityAction('buyer',{...wanted,enabled:false});
+  await assert.rejects(()=>api.communityAction('owner',{...wanted,catalogId:'missing'}),/unavailable/);
+ });
  await t.test('migration leaves profiles unpublished and collections default private',async()=>{assert.equal((await api.settings('owner')).published,0);piece=await make();assert.equal(await api.getPiece(piece.id,null),null);assert.equal((await api.getPiece(piece.id,'owner')).privateNotes,'PRIVATE SECRET');assert.equal((await api.getCollection('owner',null)).length,0);assert.deepEqual(await api.collectors(null),[]);});
  await t.test('publication is explicit; public projection excludes private fields and duplicates remain physical pieces',async()=>{
   await assert.rejects(()=>make({visibility:'public'}),/Confirm/);
@@ -32,6 +76,25 @@ test('collector privacy, social permissions and shared inventory authority',asyn
   const publicPiece=await api.getPiece(piece.id,null);assert.equal(publicPiece.availability,'not_for_sale');assert.ok(!('privateNotes' in publicPiece));assert.ok(!('purchaseCost' in publicPiece));
   await make();assert.equal((await api.getCollection('owner','owner')).length,2);assert.equal((await api.getCollection('owner',null)).length,1);
  });
+ await t.test('profile settings save atomically and defaults never rewrite existing piece visibility',async()=>{
+  db.prepare("INSERT INTO community_media (id,owner_id,created_at) VALUES ('avatar-next','owner',0),('cover-next','owner',0)").run();
+  const beforeProfile=db.prepare("SELECT * FROM collector_profiles WHERE user_id='owner'").get();
+  const beforeSettings=await api.settings('owner');
+  const beforePieces=db.prepare("SELECT id,visibility FROM collection_items WHERE owner_id='owner' ORDER BY id").all();
+  await assert.rejects(()=>api.communityAction('owner',{action:'settings',handle:'buyer',displayName:'Changed',avatarId:'avatar-next',coverId:'cover-next',published:false,visibility:'public'}));
+  assert.deepEqual(db.prepare("SELECT * FROM collector_profiles WHERE user_id='owner'").get(),beforeProfile);
+  assert.deepEqual(await api.settings('owner'),beforeSettings);
+  await assert.rejects(()=>api.communityAction('owner',{action:'settings',handle:'owner',displayName:'',avatarId:'avatar-next',coverId:'cover-next'}),/Display name/);
+  assert.deepEqual(db.prepare("SELECT * FROM collector_profiles WHERE user_id='owner'").get(),beforeProfile);
+  await api.communityAction('owner',{action:'settings',handle:'owner',displayName:'Owner',avatarId:'avatar-next',coverId:'cover-next',published:false,visibility:'public'});
+  assert.deepEqual(db.prepare("SELECT id,visibility FROM collection_items WHERE owner_id='owner' ORDER BY id").all(),beforePieces);
+  assert.equal((await api.getCollection('owner',null)).length,0,'A private profile hides even pieces marked public');
+  assert.equal(db.prepare("SELECT avatar_url FROM collector_profiles WHERE user_id='owner'").get().avatar_url,'/community/media/avatar-next');
+  assert.equal((await api.settings('owner')).cover_id,'cover-next');
+  await assert.rejects(()=>api.communityAction('owner',{action:'settings',handle:'owner',displayName:'Owner',published:true}),/Confirm publication/);
+  await api.communityAction('owner',{action:'settings',handle:'owner',displayName:'Owner',avatarId:'',coverId:'',published:true,publishConfirmed:true,visibility:'private'});
+  assert.equal((await api.getCollection('owner',null)).length,1,'Republishing reveals only the existing public piece');
+ });
  let post;
  await t.test('public item tags are reevaluated after privacy changes; Following stays chronological and empty when unfollowed',async()=>{
   post=await api.communityAction('owner',{action:'post',body:'A collector question',catalogId:'model',itemId:piece.id});assert.equal((await api.feed(null))[0].itemId,piece.id);assert.deepEqual(await api.feed('buyer',{tab:'following'}),[]);
@@ -39,12 +102,51 @@ test('collector privacy, social permissions and shared inventory authority',asyn
   const p=await api.getPiece(piece.id,'owner');await api.savePiece('owner',{...p,id:p.id,catalogId:'model',visibility:'private',photos:[]});assert.equal((await api.feed(null))[0].itemId,null);assert.equal(await api.getPiece(piece.id,'buyer'),null);
   await api.savePiece('owner',{...await api.getPiece(piece.id,'owner'),visibility:'public',publishConfirmed:true,photos:[]});
  });
+ await t.test('post identity includes release metadata without exposing a private tagged piece',async()=>{
+  const tagged=(await api.feed(null,{postId:post.id}))[0];
+  assert.equal(tagged.modelScale,'1:64');assert.equal(tagged.modelManufacturer,'MINI GT');
+  db.prepare("UPDATE catalog_products SET color='Red',primary_image_url='/test-model.jpg' WHERE id='model'").run();
+  const release=(await api.feed(null,{postId:post.id}))[0];
+  assert.equal(release.modelColor,'Red');assert.equal(release.modelImageUrl,'/test-model.jpg');
+  db.prepare("UPDATE catalog_products SET color=NULL,primary_image_url=NULL WHERE id='model'").run();
+  const personal=await make({color:'Gold',visibility:'public',publishConfirmed:true});
+  const personalPost=await api.communityAction('owner',{action:'post',body:'My custom build',itemId:personal.id});
+  try {
+   const visible=(await api.feed(null,{postId:personalPost.id}))[0];
+   assert.equal(visible.modelScale,'1:64');assert.equal(visible.modelManufacturer,'MINI GT');assert.equal(visible.modelColor,'Gold');
+   await api.savePiece('owner',{...await api.getPiece(personal.id,'owner'),visibility:'private',photos:[]});
+   const hidden=(await api.feed(null,{postId:personalPost.id}))[0];
+   for(const key of ['itemId','itemTitle','modelScale','modelManufacturer','modelColor','modelImageUrl'])assert.equal(hidden[key],null,key+' must not expose a private piece');
+  } finally {db.prepare('DELETE FROM community_posts WHERE id=?').run(personalPost.id);db.prepare('DELETE FROM collection_items WHERE id=?').run(personal.id);}
+ });
+ await t.test('comments supply timestamps and avatars while retaining profile and moderation requirements',async()=>{
+  await assert.rejects(()=>api.communityAction('buyer',{action:'comment',postId:post.id,body:'Not published'}),/Publish your profile/);
+  db.prepare("UPDATE collector_profiles SET avatar_url='/test-avatar.jpg' WHERE user_id='owner'").run();
+  await api.communityAction('owner',{action:'comment',postId:post.id,body:'@buyer A reply'});
+  const comment=(await api.comments(null,post.id))[0];
+  try {
+   assert.equal(comment.body,'@buyer A reply');assert.equal(comment.avatarUrl,'/test-avatar.jpg');assert.ok(comment.createdAt>0);assert.equal(comment.handle,'owner');
+   db.prepare("UPDATE community_comments SET status='hidden' WHERE id=?").run(comment.id);
+   assert.deepEqual(await api.comments(null,post.id),[]);
+  } finally {db.prepare('DELETE FROM community_comments WHERE id=?').run(comment.id);db.prepare("UPDATE collector_profiles SET avatar_url=NULL WHERE user_id='owner'").run();}
+ });
+ await t.test('model discussion pages keep exact tags and do not skip posts with matching timestamps',async()=>{
+  const insert=db.prepare("INSERT INTO community_posts (id,owner_id,body,catalog_id,created_at,status) VALUES (?,'owner','A model discussion',?,1000,?)");
+  for(const id of ['preview-c','preview-b','preview-a'])insert.run(id,'model','public');
+  insert.run('preview-unrelated',null,'public');insert.run('preview-hidden','model','hidden');
+  try {
+   const first=await api.feed(null,{catalogId:'model',order:'newest',before:1000,limit:2});
+   assert.deepEqual(first.map(p=>p.id),['preview-c','preview-b']);
+   const older=await api.feed(null,{catalogId:'model',order:'newest',before:first[1].createdAt,beforeId:first[1].id,limit:2});
+   assert.deepEqual(older.map(p=>p.id),['preview-a']);
+  } finally {db.prepare("DELETE FROM community_posts WHERE id IN ('preview-a','preview-b','preview-c','preview-unrelated','preview-hidden')").run();}
+ });
  await t.test('Not for sale rejects stale-client offers; request messages require acceptance; blocks cover offers and replies',async()=>{
   await assert.rejects(()=>api.createCollectionOffer('buyer',{itemId:piece.id,priceCents:1000,quantity:1,acceptedTerms:true,country:'US',postalCode:'94105'}),/not accepting/);
   const thread=await api.collectorMessageAction('buyer',{action:'start',recipientId:'owner',body:'Hello'});await assert.rejects(()=>api.collectorMessageAction('buyer',{action:'send',id:thread.id,body:'Again'}),/accepted/);
   await api.collectorMessageAction('owner',{action:'accept_request',id:thread.id});await api.collectorMessageAction('buyer',{action:'send',id:thread.id,body:'Thanks'});
   await api.communityAction('owner',{action:'relationship',kind:'block',targetId:'buyer'}).catch(async()=>{await api.communityAction('buyer',{action:'settings',handle:'buyer',displayName:'Buyer',published:true,publishConfirmed:true});await api.communityAction('owner',{action:'relationship',kind:'block',targetId:'buyer'});});
-  await assert.rejects(()=>api.collectorMessageAction('buyer',{action:'send',id:thread.id,body:'Bypass'}),/unavailable/);assert.deepEqual(await api.feed('buyer'),[]);assert.equal(await api.getPiece(piece.id,'buyer'),null);
+  await assert.rejects(()=>api.collectorMessageAction('buyer',{action:'send',id:thread.id,body:'Bypass'}),/unavailable/);assert.deepEqual(await api.feed('buyer'),[]);assert.deepEqual(await api.feed('buyer',{catalogId:'model',order:'newest',limit:2}),[]);assert.equal(await api.getPiece(piece.id,'buyer'),null);
   await api.communityAction('owner',{action:'relationship',kind:'block',targetId:'buyer',enabled:false});
  });
  db.prepare(`INSERT INTO sellers (id,owner_user_id,slug,store_name,contact_name,contact_email,status,stripe_account_id,stripe_charges_enabled,stripe_payouts_enabled,seller_terms_version,seller_terms_accepted_at,shipping_mode,default_shipping_cents,shipping_origin_street_1,shipping_origin_city,shipping_origin_region,shipping_origin_postal_code,shipping_origin_phone) VALUES ('seller','owner','seller','Seller','Owner','owner@example.test','active','acct_test',1,1,?,CURRENT_TIMESTAMP,'flat',600,'100 Market St','San Francisco','CA','94105','4155550100')`).run(POLICY_VERSION);

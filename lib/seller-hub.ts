@@ -1,8 +1,9 @@
 import { sellerProceedsAfterRefund } from "./seller-proceeds.ts";
 import { modelHuntMatches } from "./business.ts";
+import { listingPhotoEvidence, type EvidenceImage } from "./listing-evidence.ts";
 
 // Shared definitions keep the overview, queues, and drill-downs consistent.
-export const hubViews = ["overview", "orders", "inventory", "payments", "analytics", "settings", "help", "demand", "opportunities", "marketing"] as const;
+export const hubViews = ["overview", "orders", "inventory", "payments", "analytics", "settings", "help", "growth", "messages", "demand", "opportunities", "marketing"] as const;
 export type HubView = (typeof hubViews)[number];
 export type HubNavigate = (view: HubView, filter?: string, edit?: string) => void;
 export const inventoryViews = [
@@ -13,10 +14,11 @@ export const orderViews = [
   ["open", "Orders to ship"], ["shipped", "Shipped"], ["returns", "Returns"], ["all", "All orders"],
 ] as const;
 
-export type HubProduct = {
+export type HubProduct = Parameters<typeof listingPhotoEvidence>[0] & {
   id: string; title: string; sellerSku: string; status: string;
   inventoryQuantity: number; reservedQuantity: number; priceCents: number;
   availabilityType: string; createdAt: string;
+  images?: EvidenceImage[];
 };
 export type HubOrder = {
   id: string; buyerEmail: string; paymentStatus: string; fulfillmentStatus: string;
@@ -41,7 +43,8 @@ export function matchesInventoryView(product: HubProduct, view: string, slowIds:
     case "low": return product.status === "active" && product.availabilityType !== "preorder" && available > 0 && available <= 2;
     case "out": return ["active", "sold_out"].includes(product.status) && product.availabilityType !== "preorder" && available === 0;
     case "preorders": return product.availabilityType === "preorder" && product.status !== "rejected";
-    case "attention": return ["draft", "pending_review", "rejected"].includes(product.status);
+    case "attention": return ["draft", "pending_review", "rejected"].includes(product.status) ||
+      (product.availabilityType !== "preorder" && product.images !== undefined && !listingPhotoEvidence(product, product.images).complete);
     default: return true;
   }
 }

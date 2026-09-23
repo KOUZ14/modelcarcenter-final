@@ -3,11 +3,14 @@
 import { useEffect, useId, useImperativeHandle, useRef, useState, type Ref, type KeyboardEvent } from "react";
 import { addressFieldError, countryName, normalizeState, US_STATES, type Address, type AddressField, type AddressSuggestion } from "@/lib/address";
 
-export type AddressFieldsHandle = { setErrors: (fields: Record<string, string>) => void };
+export type AddressFieldsHandle = {
+  setErrors: (fields: Record<string, string>) => void;
+  focusFirstInvalid: () => void;
+};
 
 export function AddressFields({
   ref, initialValues = {}, fieldNames = {}, includeName = false, includePhone = false,
-  disabled = false, onChange, values: controlledValues,
+  disabled = false, onChange, values: controlledValues, compactHelp = false,
 }: {
   ref?: Ref<AddressFieldsHandle>;
   initialValues?: Partial<Address>;
@@ -15,6 +18,7 @@ export function AddressFields({
   includeName?: boolean;
   includePhone?: boolean;
   disabled?: boolean;
+  compactHelp?: boolean;
   values?: Partial<Address>;
   onChange?: (values: Address) => void;
 }) {
@@ -49,6 +53,14 @@ export function AddressFields({
   }, []);
 
   useImperativeHandle(ref, () => ({
+    focusFirstInvalid() {
+      const fields: AddressField[] = [...(includeName ? ["name" as const] : []), "street1", "city", "state", "zip", "country", ...(includePhone ? ["phone" as const] : [])];
+      const first = fields.find((field) => addressFieldError(field, values[field], values.country));
+      if (!first) return;
+      setErrors((current) => ({ ...current, [first]: addressFieldError(first, values[first], values.country) }));
+      const element = root.current?.querySelector<HTMLElement>(`[data-address-field="${first}"]`);
+      requestAnimationFrame(() => { openDetails(element ?? null); element?.focus(); element?.scrollIntoView({ block: "center" }); });
+    },
     setErrors(fields) {
       const next = Object.fromEntries((Object.keys(values) as AddressField[])
         .filter((field) => fields[name(field)]).map((field) => [field, fields[name(field)]]));
@@ -164,8 +176,8 @@ export function AddressFields({
         </ul>
         <span className="address-attribution" translate="no">Google Maps</span>
       </div>}
-      <p className="address-help" id={`${id}-status`} role="status">{status || (manual ? "Enter your address in the fields below." : "Start typing your street address to see suggestions.")}</p>
-      {isUS && manual && <p className="address-help">Optional autocomplete sends the street address you type to Google Maps. Enable it only if you want suggestions.</p>}
+      <p className="address-help" id={`${id}-status`} role="status">{status || (manual ? compactHelp ? "" : "Enter your address in the fields below." : "Start typing your street address to see suggestions.")}</p>
+      {isUS && manual && <p className="address-help">{compactHelp ? "Optional autocomplete shares your typed address with Google Maps." : "Optional autocomplete sends the street address you type to Google Maps. Enable it only if you want suggestions."}</p>}
       {isUS && <button className="text-button address-link" type="button" disabled={disabled} onClick={() => {
         cancelLookup(); setManual(!manual); setSuggestions([]); setExpanded(false); setStatus(""); token.current = "";
         root.current?.querySelector<HTMLInputElement>('[data-address-field="street1"]')?.focus();

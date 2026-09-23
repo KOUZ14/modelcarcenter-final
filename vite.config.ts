@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { release } from "node:os";
 import { fileURLToPath } from "node:url";
 import vinext from "vinext";
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv } from "vite";
 import hostingConfig from "./.openai/hosting.json" with { type: "json" };
 import { sites } from "./build/sites-vite-plugin.ts";
 
@@ -53,12 +53,21 @@ const localBindingConfig = {
   },
 };
 
-export default defineConfig(async () => {
+export default defineConfig(async ({ command, mode }) => {
   // Keep Wrangler and Miniflare state project-local. These are non-secret tool
   // settings; application environment belongs in ignored `.env*` files.
   process.env.WRANGLER_WRITE_LOGS ??= "false";
   process.env.WRANGLER_LOG_PATH ??= ".wrangler/logs";
   process.env.MINIFLARE_REGISTRY_PATH ??= ".wrangler/registry";
+
+  // Auth and email links use SITE_URL. Keep the local server on that port
+  // instead of letting Vite silently choose a different, untrusted origin.
+  const siteUrl = command === "serve"
+    ? new URL(loadEnv(mode, projectRoot, "SITE_URL").SITE_URL?.trim() || "http://localhost:5173")
+    : undefined;
+  const localPort = siteUrl && ["localhost", "127.0.0.1", "[::1]"].includes(siteUrl.hostname)
+    ? Number(siteUrl.port || (siteUrl.protocol === "https:" ? 443 : 80))
+    : undefined;
 
   // Wrangler snapshots its log path while the Cloudflare plugin is imported.
   const { cloudflare } = await import("@cloudflare/vite-plugin");
@@ -67,10 +76,28 @@ export default defineConfig(async () => {
     cacheDir,
     server: {
       host: "0.0.0.0",
+      port: localPort,
+      strictPort: true,
       allowedHosts: ["terminal.local"],
-      ...(isCodexSeatbeltSandbox
-        ? { watch: { useFsEvents: false, usePolling: true } }
-        : {}),
+      watch: {
+        // Runtime snapshots and generated files are large and change often.
+        // Watching them adds startup work and can trigger unrelated reloads.
+        ignored: [
+          "**/.sites-runtime/**",
+          "**/.wrangler/**",
+          "**/.next/**",
+          "**/dist/**",
+          "**/coverage/**",
+          "**/outputs/**",
+          "**/work/**",
+          "**/*.tsbuildinfo",
+        ],
+        // WSL misses Windows editor events on /mnt/c. Poll source files at a
+        // modest interval so saving in the IDE still triggers Vite updates.
+        ...(isCodexSeatbeltSandbox || isWslWindowsCheckout
+          ? { useFsEvents: false, usePolling: true, interval: 500, binaryInterval: 1_000 }
+          : {}),
+      },
     },
     plugins: [
       vinext(),

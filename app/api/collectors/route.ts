@@ -1,11 +1,11 @@
 import { getCurrentCollector, requireCollectorApi } from "@/lib/collector-auth";
-import { communityAction, collectors, comments, feed, getCollection, getPiece, getShelves, one, rows, searchCommunity, settings } from "@/lib/community";
+import { communityAction, collectors, comments, feed, getCollection, getPiece, getShelves, rows, searchCommunity, settings } from "@/lib/community";
 import { readJsonObject, routeError } from "@/lib/http";
 export const dynamic="force-dynamic";
 const headers={"Cache-Control":"private, no-store","Vary":"Cookie"};
 export async function GET(request:Request){try{
   const c=await getCurrentCollector(request.headers),user=c?.user.id??null,q=new URL(request.url).searchParams,view=q.get('view');
-  if(view==='feed')return Response.json({posts:await feed(user,{tab:q.get('tab')||undefined,topic:q.get('topic')||undefined,limit:Number(q.get('limit'))||20,before:Number(q.get('before'))||undefined}),collectors:await collectors(user),editorial:await one("SELECT * FROM community_editorial ORDER BY created_at DESC LIMIT 1")},{headers});
+  if(view==='feed')return Response.json({posts:await feed(user,{tab:q.get('tab')||undefined,topic:q.get('topic')||undefined,limit:Number(q.get('limit'))||20,before:Number(q.get('before'))||undefined}),collectors:await collectors(user)},{headers});
   if(view==='search')return Response.json(await searchCommunity(user,q.get('q')||'',q.get('type')||'models'),{headers});
   if(view==='comments')return Response.json({comments:await comments(user,q.get('post')||undefined,q.get('item')||undefined)},{headers});
   if(view==='piece'){const piece=await getPiece(q.get('id')||'',user);return Response.json({piece},{status:piece?200:404,headers});}

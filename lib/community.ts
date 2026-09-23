@@ -12,7 +12,8 @@ export const ids = (v: unknown) => Array.isArray(v) ? [...new Set(v.filter((x): 
 export const photos = (v: string) => JSON.parse(v) as string[];
 export type Piece = {id:string;ownerId:string;catalogId:string|null;listingId:string|null;title:string;scale:string;maker:string;carMake:string;color:string;story:string;condition:string;visibility:string;availability:string;photos:string;minimumCents:number;commentsEnabled:number;pinned:number;version:number;handle:string|null;displayName:string;listingSlug:string|null;priceCents:number|null;currency:string|null;shippingMode:string|null;shippingCents:number|null;handlingDays:number|null;privateNotes?:string;purchaseCost?:string};
 export type Collector = {userId:string;handle:string;displayName:string;bio:string;interests:string;region:string;published:number;count:number;followers:number;following:number;isFollowing:number};
-export type Post = {id:string;ownerId:string;body:string;photos:string;topic:string;prompt:string;catalogId:string|null;itemId:string|null;commercial:number;createdAt:number;handle:string;displayName:string;likes:number;saves:number;comments:number;liked:number;saved:number;itemTitle:string|null;availability:string|null;modelTitle:string|null;reason?:string};
+export type Post = {id:string;ownerId:string;body:string;photos:string;topic:string;prompt:string;catalogId:string|null;itemId:string|null;commercial:number;createdAt:number;handle:string;displayName:string;likes:number;saves:number;comments:number;liked:number;saved:number;itemTitle:string|null;availability:string|null;modelTitle:string|null;modelScale:string|null;modelManufacturer:string|null;modelColor:string|null;modelImageUrl:string|null;reason?:string};
+export type CommunityComment = {id:string;body:string;displayName:string;handle:string|null;avatarUrl:string|null;ownerId:string;createdAt:number};
 export const blockSQL = (ownerExpression: string) => `NOT EXISTS (SELECT 1 FROM collector_relationships b WHERE b.kind='block' AND ((b.owner_id=${ownerExpression} AND b.target_id=?) OR (b.owner_id=? AND b.target_id=${ownerExpression})))`;
 const pieceSelect = `i.id,i.owner_id ownerId,i.catalog_id catalogId,i.listing_id listingId,i.title,i.scale,i.maker,i.car_make carMake,i.color,i.story,CASE WHEN p.id IS NOT NULL THEN p.condition || CASE WHEN p.condition_notes!='' THEN ': '||p.condition_notes ELSE '' END ELSE i.condition END condition,i.visibility,
  CASE WHEN p.inventory_quantity=0 AND i.listing_id IS NOT NULL THEN 'previously_owned' WHEN p.reserved_quantity>0 AND i.listing_id IS NOT NULL THEN 'reserved' ELSE i.availability END availability,
@@ -92,7 +93,7 @@ export async function savePiece(userId:string,p:Record<string,unknown>) {
   for(const shelf of shelves)await run("INSERT INTO shelf_members (id,shelf_id,item_id) VALUES (?,?,?)",crypto.randomUUID(),shelf,id);
   return {id,version:(existing?Number(p.version):0)+1};
 }
-export async function feed(viewer:string|null, input:{tab?:string;topic?:string;limit?:number;before?:number;ownerId?:string;catalogId?:string;q?:string;postId?:string}={}) {
+export async function feed(viewer:string|null, input:{tab?:string;topic?:string;limit?:number;before?:number;beforeId?:string;order?:"newest";ownerId?:string;catalogId?:string;q?:string;postId?:string}={}) {
   const args:Value[]=[viewer,viewer,viewer,viewer];
   let where=`p.status='public' AND s.published=1 AND ${blockSQL("p.owner_id")} AND NOT EXISTS(SELECT 1 FROM collector_relationships r WHERE r.owner_id=? AND r.target_id=p.owner_id AND r.kind='mute') AND NOT EXISTS(SELECT 1 FROM community_post_actions a WHERE a.owner_id=? AND a.post_id=p.id AND a.kind='hide')`;
   args.push(viewer,viewer,viewer,viewer);
@@ -100,8 +101,10 @@ export async function feed(viewer:string|null, input:{tab?:string;topic?:string;
   if(input.tab==='saved'){where+=` AND EXISTS(SELECT 1 FROM community_post_actions a WHERE a.owner_id=? AND a.post_id=p.id AND a.kind='save')`;args.push(viewer);}
   for(const [column,val] of [["p.topic",input.topic],["p.owner_id",input.ownerId],["p.catalog_id",input.catalogId],["p.id",input.postId]] as const)if(val){where+=` AND ${column}=?`;args.push(val);}
   if(input.q){where+=" AND p.body LIKE ?";args.push(`%${text(input.q)}%`);}
-  const before=input.before||Date.now();where+=" AND p.created_at<=?";args.push(before);
-  const limit=Math.min(100,Math.max(1,input.limit||20));args.push(input.tab==='following'?limit:Math.min(200,limit*3));
+  const before=input.before||Date.now();
+  if(input.beforeId){where+=" AND (p.created_at<? OR (p.created_at=? AND p.id<?))";args.push(before,before,input.beforeId);}
+  else {where+=" AND p.created_at<=?";args.push(before);}
+  const limit=Math.min(100,Math.max(1,input.limit||20));args.push(input.tab==='following'||input.order==='newest'?limit:Math.min(200,limit*3));
   const result=await rows<Post>(`SELECT p.id,p.owner_id ownerId,p.body,p.photos,p.topic,p.prompt,p.catalog_id catalogId,
   CASE WHEN i.visibility='public' THEN i.id ELSE NULL END itemId,p.commercial,p.created_at createdAt,c.handle,c.display_name displayName,
   (SELECT count(*) FROM community_post_actions a WHERE a.post_id=p.id AND a.kind='like') likes,(SELECT count(*) FROM community_post_actions a WHERE a.post_id=p.id AND a.kind='save') saves,
@@ -110,9 +113,13 @@ export async function feed(viewer:string|null, input:{tab?:string;topic?:string;
   EXISTS(SELECT 1 FROM community_post_actions a WHERE a.post_id=p.id AND a.kind='save' AND a.owner_id=?) saved,
   CASE WHEN i.visibility='public' AND ${blockSQL("i.owner_id")} THEN i.title ELSE NULL END itemTitle,
   CASE WHEN i.visibility='public' THEN CASE WHEN pr.inventory_quantity=0 THEN 'previously_owned' WHEN pr.reserved_quantity>0 THEN 'reserved' ELSE i.availability END ELSE NULL END availability,
-  cat.title modelTitle FROM community_posts p JOIN collector_profiles c ON c.user_id=p.owner_id JOIN community_settings s ON s.user_id=p.owner_id
+  cat.title modelTitle,cat.primary_image_url modelImageUrl,
+  COALESCE(cat.scale,CASE WHEN i.visibility='public' THEN i.scale END) modelScale,
+  COALESCE(cat.model_car_manufacturer,CASE WHEN i.visibility='public' THEN i.maker END) modelManufacturer,
+  COALESCE(cat.color,CASE WHEN i.visibility='public' THEN i.color END) modelColor
+  FROM community_posts p JOIN collector_profiles c ON c.user_id=p.owner_id JOIN community_settings s ON s.user_id=p.owner_id
   LEFT JOIN collection_items i ON i.id=p.item_id AND i.owner_id=p.owner_id LEFT JOIN products pr ON pr.id=i.listing_id LEFT JOIN catalog_products cat ON cat.id=p.catalog_id WHERE ${where} ORDER BY p.created_at DESC,p.id DESC LIMIT ?`,...args);
-  if(input.tab==='following'||input.tab==='saved'||input.postId)return result;
+  if(input.order==='newest'||input.tab==='following'||input.tab==='saved'||input.postId)return result;
   const interests=viewer?(await settings(viewer)).interests.toLowerCase().split(",").map(v=>v.trim()).filter(Boolean):[];
   const followed=viewer?await rows<{target_id:string}>("SELECT target_id FROM collector_relationships WHERE owner_id=? AND kind='follow'",viewer):[];
   const wish=viewer?await rows<{catalog_id:string}>("SELECT catalog_id FROM model_wishlist WHERE owner_id=?",viewer):[];
@@ -122,7 +129,7 @@ export async function feed(viewer:string|null, input:{tab?:string;topic?:string;
 export async function comments(viewer:string|null,postId?:string,itemId?:string) {
   if(postId&&!(await feed(viewer,{postId})).length)return [];
   if(itemId&&!await getPiece(itemId,viewer))return [];
-  return rows<{id:string;body:string;displayName:string;handle:string;ownerId:string;createdAt:number}>(`SELECT a.id,a.body,c.display_name displayName,c.handle,a.owner_id ownerId,a.created_at createdAt FROM community_comments a JOIN collector_profiles c ON c.user_id=a.owner_id WHERE a.status='public' AND ${postId?'a.post_id':'a.item_id'}=? AND ${blockSQL("a.owner_id")} ORDER BY a.created_at LIMIT 100`,postId||itemId||null,viewer,viewer);
+  return rows<CommunityComment>(`SELECT a.id,a.body,c.display_name displayName,c.handle,c.avatar_url avatarUrl,a.owner_id ownerId,a.created_at createdAt FROM community_comments a JOIN collector_profiles c ON c.user_id=a.owner_id WHERE a.status='public' AND ${postId?'a.post_id':'a.item_id'}=? AND ${blockSQL("a.owner_id")} ORDER BY a.created_at,a.id LIMIT 100`,postId||itemId||null,viewer,viewer);
 }
 export async function communityAction(userId:string,p:Record<string,unknown>) {
   const action=required(p.action,"Action");const now=Date.now();
@@ -130,8 +137,14 @@ export async function communityAction(userId:string,p:Record<string,unknown>) {
     const handle=required(p.handle,"Handle",30).toLowerCase();if(!/^[a-z0-9][a-z0-9_-]{2,29}$/.test(handle))throw new ValidationError("Use 3–30 letters, numbers, underscores or hyphens for your handle.");
     const s=await settings(userId);if(p.published===true&&!s.published&&p.publishConfirmed!==true)throw new ValidationError("Confirm publication of your profile.");
     const avatarId=text(p.avatarId)||null,coverId=text(p.coverId)||null;for(const id of [avatarId,coverId])if(id&&!await one('SELECT id FROM community_media WHERE id=? AND owner_id=? AND item_id IS NULL AND post_id IS NULL AND thread_id IS NULL',id,userId))throw new ValidationError('Choose a profile photo that you uploaded.');
-    if(p.avatarId!==undefined)await run('UPDATE collector_profiles SET avatar_url=? WHERE user_id=?',avatarId?'/community/media/'+avatarId:null,userId);if(p.coverId!==undefined)await run('UPDATE community_settings SET cover_id=? WHERE user_id=?',coverId,userId);
-    await getD1().batch([getD1().prepare("UPDATE collector_profiles SET handle=?,display_name=?,bio=? WHERE user_id=?").bind(handle,required(p.displayName,"Display name",100),text(p.bio,500),userId),getD1().prepare("UPDATE community_settings SET published=?,visibility=?,interests=?,region=?,contact=?,social_notifications=?,discovery_notifications=? WHERE user_id=?").bind(p.published===true?1:0,p.visibility==='public'?'public':'private',text(p.interests,300),text(p.region,80),['everyone','following','existing'].includes(String(p.contact))?String(p.contact):'requests',p.socialNotifications===false?0:1,p.discoveryNotifications===true?1:0,userId)]);return {handle};
+    const changes=[
+      getD1().prepare("UPDATE collector_profiles SET handle=?,display_name=?,bio=? WHERE user_id=?").bind(handle,required(p.displayName,"Display name",100),text(p.bio,500),userId),
+      getD1().prepare("UPDATE community_settings SET published=?,visibility=?,interests=?,region=?,contact=?,social_notifications=?,discovery_notifications=? WHERE user_id=?").bind(p.published===true?1:0,p.visibility==='public'?'public':'private',text(p.interests,300),text(p.region,80),['everyone','following','existing'].includes(String(p.contact))?String(p.contact):'requests',p.socialNotifications===false?0:1,p.discoveryNotifications===true?1:0,userId),
+    ];
+    if(p.avatarId!==undefined)changes.push(getD1().prepare('UPDATE collector_profiles SET avatar_url=? WHERE user_id=?').bind(avatarId?'/community/media/'+avatarId:null,userId));
+    if(p.coverId!==undefined)changes.push(getD1().prepare('UPDATE community_settings SET cover_id=? WHERE user_id=?').bind(coverId,userId));
+    // A rejected handle or invalid setting must not partially publish new profile images.
+    await getD1().batch(changes);return {handle};
   }
   if(action==='piece')return savePiece(userId,p);
   if(action==='shelf'){const id=crypto.randomUUID();await run("INSERT INTO collection_shelves (id,owner_id,name,created_at) VALUES (?,?,?,?)",id,userId,required(p.name,"Shelf name",80),now);return {id};}

@@ -82,9 +82,9 @@ test("cart preserves the full address, rejects late quotes, and refreshes after 
   });
   await writeFile(bundlePath, result.outputFiles[0].contents);
   const { CartPage } = await import(pathToFileURL(bundlePath).href);
-  function render() {
+  function render(props = { automaticTax: true, taxBehavior: "exclusive" }) {
     stateIndex = refIndex = effectIndex = 0;
-    tree = CartPage({ automaticTax: true, taxBehavior: "exclusive" });
+    tree = CartPage(props);
     return tree;
   }
   function find(predicate, node = tree) {
@@ -100,11 +100,15 @@ test("cart preserves the full address, rejects late quotes, and refreshes after 
   const delivery = () => find((node) => node.type === "address-fields");
   const form = () => find((node) => node.type === "form");
   const pay = () => find((node) => node.props?.className === "button dark checkout-button");
+  const mobile = () => find((node) => node.props?.className === "cart-mobile-summary");
+  const text = (node) => node == null || typeof node === "boolean" ? "" : typeof node !== "object" ? String(node) : [node.props?.children].flat(Infinity).map(text).join(" ");
   const quoteResponse = (id) => Response.json({ quoteId: id, expiresAt: new Date(Date.now() + 60000).toISOString(), options: [{ id, provider: "Carrier", serviceLevel: "Ground", amountCents: 900, currency: "USD", estimatedDays: 3 }] });
   render();
   await Promise.resolve();
   render();
   assert.deepEqual(delivery().props.values, address);
+  assert.match(text(mobile()), /Item subtotal.*\$150\.00.*shipping/);
+  assert.doesNotMatch(text(mobile()), /Total before tax/, "Missing carrier rates must not look like a complete total");
   form().props.ref.current = { reportValidity: () => true };
   find((node) => node.props?.className === "consent-check checkout-consent").props.children[0].props.onChange({ target: { checked: true } });
   render();
@@ -121,11 +125,12 @@ test("cart preserves the full address, rejects late quotes, and refreshes after 
   await newQuote;
   render();
   assert.equal(pay().props.disabled, false);
+  assert.match(text(mobile()), /Total before tax.*\$165\.00/, "The mobile total includes both sellers and their shipping");
   pending[0].resolve(quoteResponse("old"));
   await oldQuote;
   render();
   const payment = pay().props.onClick();
-  void pay().props.onClick();
+  find(node => node.type === "button", mobile()).props.onClick();
   assert.equal(pending.length, 3, "Repeated clicks start only one payment");
   assert.equal(pending[2].url, "/api/checkout");
   assert.deepEqual(pending[2].body.items, [{ productId: "model", quantity: 1 }, { productId: "other", quantity: 1 }], "One payment includes every selected seller");
@@ -215,4 +220,45 @@ test("cart preserves the full address, rejects late quotes, and refreshes after 
   await new Promise(resolve => setImmediate(resolve));
   render();
   assert.equal(pay().props.disabled, false);
+
+  // Fixed rates are available before an address; the next action still takes
+  // the buyer to delivery details and never tries to create a payment.
+  fixture.marketplace.cart = [
+    { ...fixture.marketplace.cart[0], shippingMode: "flat", shippingCents: 695, modelCondition: "near_mint", packagingCondition: "good", originalBoxStatus: "included", handlingTimeBusinessDays: 1 },
+    { productId: "other", sellerId: "other-store", sellerName: "Other Store", quantity: 1, priceCents: 5000, currency: "usd", shippingMode: "flat", shippingCents: 795 },
+  ];
+  delivery().props.onChange({ ...updated, name: "", street1: "" });
+  render();
+  let deliveryFocus = 0;
+  delivery().props.ref.current = { focusFirstInvalid: () => deliveryFocus++ };
+  const beforeDelivery = pending.length;
+  const next = find(node => node.type === "button", mobile());
+  assert.equal(next.props.children, "Enter delivery details");
+  assert.equal(next.props.disabled, false);
+  assert.match(text(mobile()), /Total before tax.*\$164\.90/);
+  assert.match(text(find(node => node.props?.className === "cart-summary")), /Fixed seller rates/);
+  assert.match(text(find(node => node.props?.className === "cart-item-condition")), /Near mint/);
+  assert.match(text(find(node => node.props?.className === "cart-item-packaging")), /Packaging:.*Good.*Original box:.*Included/);
+  assert.match(text(find(node => node.props?.className === "cart-dispatch-note")), /Dispatch within 1 business day/);
+  next.props.onClick();
+  const blockerLink = find(node => node.type === "a", find(node => node.props?.id === "checkout-blocker"));
+  blockerLink.props.onClick({ preventDefault() {} });
+  assert.equal(deliveryFocus, 2, "Both delivery shortcuts reach the first incomplete field");
+  assert.equal(pending.length, beforeDelivery, "A delivery shortcut cannot start checkout");
+  assert.equal(pay().props.disabled, true);
+  const sellerCheckbox = id => find(node => node.type === "input" && node.props.type === "checkbox", find(node => node.type === "section" && node.key === id));
+  sellerCheckbox("store").props.onChange();
+  render();
+  assert.match(text(mobile()), /\$57\.95/, "Unselected sellers are excluded from the visible total");
+  sellerCheckbox("other-store").props.onChange();
+  render();
+  assert.match(text(mobile()), /Order total.*—.*Select sellers/);
+  assert.equal(fixture.marketplace.cart.length, 2, "Selection never removes items");
+  sellerCheckbox("store").props.onChange();
+  sellerCheckbox("other-store").props.onChange();
+  render({ automaticTax: true, taxBehavior: "inclusive" });
+  assert.match(text(mobile()), /Total \(tax included\)/, "Tax-inclusive stores must not label their price before tax");
+  fixture.marketplace.cart[1].currency = "eur";
+  render();
+  assert.match(text(mobile()), /Order total.*—.*Select sellers/, "Currencies are never added together");
 });

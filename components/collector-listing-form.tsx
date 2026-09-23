@@ -471,7 +471,7 @@ export function CollectorListingForm({
             </span>
           </summary>
           <div className="listing-section-content">
-          <p>Upload 4–8 original photos. Do not reuse another seller&apos;s photos.</p>
+          <p>Add original photos of your item. Factory-sealed models need at least two exterior views; other models need at least four photos. Do not reuse another seller&apos;s photos.</p>
           <ProductImageFields productId={productId || undefined} images={images} primaryImageUrl={primaryImageUrl} files={files} disabled={busy} onFilesChange={setFiles} onRemove={productId ? removeImage : undefined} onRemoveLegacy={productId ? removeLegacyImage : undefined} onReorder={productId ? reorderImages : undefined} />
           <RequiredPhotoChecklist product={product} />
           </div>

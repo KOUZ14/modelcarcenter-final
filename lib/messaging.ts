@@ -38,7 +38,7 @@ const conversationSelection = {
 
 export async function getMessagingCenterData(
   userId: string,
-  input: { conversationId?: string; productId?: string } = {},
+  input: { conversationId?: string; productId?: string; sellerId?: string; sellerOnly?: boolean } = {},
 ) {
   const db = getDb();
   const rows = await db
@@ -46,7 +46,7 @@ export async function getMessagingCenterData(
     .from(conversations)
     .innerJoin(sellers, eq(conversations.sellerId, sellers.id))
     .where(
-      or(
+      input.sellerOnly ? eq(sellers.ownerUserId, userId) : or(
         eq(conversations.buyerUserId, userId),
         eq(sellers.ownerUserId, userId),
       ),
@@ -142,6 +142,16 @@ export async function getMessagingCenterData(
     }
   }
 
+  if (!input.productId && input.sellerId) {
+    const seller = await getMessageableSeller(input.sellerId);
+    newConversation = {
+      sellerId: seller.id, productId: null, productSlug: "", productTitle: `Ask ${seller.storeName}`,
+      productImageUrl: seller.logoUrl, sellerName: seller.storeName, sellerSlug: seller.slug,
+      canMessage: Boolean(seller.ownerUserId && seller.ownerUserId !== userId),
+      unavailableReason: seller.ownerUserId === userId ? "This is your own store." : seller.ownerUserId ? null : "This seller is not available for in-app messages yet.",
+    };
+  }
+
   const selected =
     rows.find((row) => row.id === selectedId) ??
     (newConversation ? null : rows[0] ?? null);
@@ -198,7 +208,8 @@ export type MessagingCenterData = {
     }>;
   }) | null;
   newConversation: {
-    productId: string;
+    productId: string | null;
+    sellerId?: string;
     productSlug: string;
     productTitle: string;
     productImageUrl: string | null;
@@ -228,6 +239,18 @@ export async function startConversation(
   const conversationId=await startCollectorThread(userId,product.sellerOwnerUserId,undefined,false,product.title);
   await collectorMessageAction(userId,{action:'send',id:conversationId,body});
   return {conversationId,collectorThread:true};
+}
+
+export async function startSellerConversation(userId: string, sellerId: string, rawBody: unknown) {
+  const body = requireMessageBody(rawBody);
+  const seller = await getMessageableSeller(sellerId);
+  if (!seller.ownerUserId) throw new ValidationError("This seller is not available for in-app messages yet.");
+  if (seller.ownerUserId === userId) throw new ValidationError("You cannot message your own store.");
+  // The recipient comes from the approved seller record. Existing contact preferences,
+  // message requests and blocks apply even when the seller has no active listings.
+  const conversationId = await startCollectorThread(userId, seller.ownerUserId, undefined, false, `Store enquiry: ${seller.storeName}`);
+  await collectorMessageAction(userId, { action: "send", id: conversationId, body });
+  return { conversationId, collectorThread: true };
 }
 
 export async function sendConversationMessage(
@@ -302,6 +325,13 @@ async function requireConversationAccess(userId: string, conversationId: string)
     ...row,
     role: row.buyerUserId === userId ? ("buyer" as const) : ("seller" as const),
   };
+}
+
+async function getMessageableSeller(sellerId: string) {
+  const rows = await getDb().select({ id: sellers.id, ownerUserId: sellers.ownerUserId, storeName: sellers.storeName, slug: sellers.slug, logoUrl: sellers.logoUrl })
+    .from(sellers).where(and(eq(sellers.id, sellerId), eq(sellers.status, "active"), eq(sellers.sellerTermsVersion, POLICY_VERSION), isNotNull(sellers.sellerTermsAcceptedAt))).limit(1);
+  if (!rows[0]) throw new ValidationError("This seller is no longer available.");
+  return rows[0];
 }
 
 async function getMessageableProduct(productId: string) {

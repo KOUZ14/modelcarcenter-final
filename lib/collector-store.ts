@@ -88,6 +88,10 @@ const cartSelection = {
   title: products.title,
   scale: products.scale,
   modelManufacturer: products.modelManufacturer,
+  modelCondition: products.modelCondition,
+  packagingCondition: products.packagingCondition,
+  originalBoxStatus: products.originalBoxStatus,
+  handlingTimeBusinessDays: sellers.handlingTimeBusinessDays,
   imageUrl: products.primaryImageUrl,
   priceCents: products.priceCents,
   currency: products.currency,
@@ -127,6 +131,10 @@ export async function getAccountCart(userId: string): Promise<CartItem[]> {
       title: row.title,
       scale: row.scale,
       modelManufacturer: row.modelManufacturer,
+      modelCondition: row.modelCondition,
+      packagingCondition: row.packagingCondition,
+      originalBoxStatus: row.originalBoxStatus,
+      handlingTimeBusinessDays: row.handlingTimeBusinessDays,
       imageUrl: row.imageUrl,
       priceCents: row.priceCents,
       currency: row.currency,
@@ -318,7 +326,7 @@ export async function mergeGuestData(
 
 export async function getGarageData(userId: string) {
   const db = getDb();
-  const [wishlist, orderRows, huntRows, sellerRows] = await Promise.all([
+  const [wishlist, orderRows, huntRows, sellerRows, savedListingRows] = await Promise.all([
     getWishlistIds(userId),
     db
       .select({
@@ -369,6 +377,19 @@ export async function getGarageData(userId: string) {
       .where(eq(wantedRequests.userId, userId))
       .orderBy(desc(wantedRequests.createdAt)),
     db.select().from(sellers).where(eq(sellers.ownerUserId, userId)).limit(1),
+    db.select({
+      id: products.id, slug: products.slug, title: products.title, scale: products.scale,
+      modelManufacturer: products.modelManufacturer, modelCondition: products.modelCondition,
+      sellerName: sellers.storeName, primaryImageUrl: products.primaryImageUrl,
+      priceCents: products.priceCents, currency: products.currency,
+      availabilityType: products.availabilityType, inventoryQuantity: products.inventoryQuantity,
+      reservedQuantity: products.reservedQuantity,
+    }).from(wishlistItems)
+      .innerJoin(products, eq(wishlistItems.productId, products.id))
+      .innerJoin(sellers, eq(products.sellerId, sellers.id))
+      .where(and(eq(wishlistItems.userId, userId), inArray(products.status, ["active", "sold_out"]),
+        eq(sellers.status, "active"), eq(sellers.sellerTermsVersion, POLICY_VERSION), isNotNull(sellers.sellerTermsAcceptedAt)))
+      .orderBy(desc(wishlistItems.createdAt), desc(wishlistItems.id)).limit(2),
   ]);
   const ids = orderRows.map((order) => order.id);
   const [items, feedbackRows, shipmentLinks] = ids.length
@@ -464,6 +485,9 @@ export async function getGarageData(userId: string) {
     : [];
   return {
     wishlist,
+    savedListings: savedListingRows.map(({ inventoryQuantity, reservedQuantity, ...listing }) => ({
+      ...listing, availableQuantity: Math.max(0, inventoryQuantity - reservedQuantity),
+    })),
     orders: orderRows.map((order) => ({
       ...order,
       feedbackEligibility: getVerifiedFeedbackEligibility(order),

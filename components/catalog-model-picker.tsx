@@ -105,9 +105,11 @@ export function CatalogModelPicker({ initial, disabled, listingSaved, initialQue
         </div>
         <div className="form-row">
           <label>Vehicle model<input name="vehicleModel" required maxLength={120} placeholder="F1" /></label>
-          <label>Variant / edition<input name="vehicleVariant" maxLength={150} placeholder="Road Car" /></label>
+          <label>Color<input name="color" maxLength={80} /></label>
         </div>
-        <div className="form-row"><label>Color<input name="color" maxLength={80} /></label><label>Livery<input name="livery" maxLength={150} /></label></div>
+        <details><summary>Release details (optional)</summary>
+        <p>Add the details that distinguish this release from another version of the same model.</p>
+        <div className="form-row"><label>Variant / edition<input name="vehicleVariant" maxLength={150} placeholder="Road Car" /></label><label>Livery<input name="livery" maxLength={150} /></label></div>
         <div className="form-row"><label>Edition<input name="edition" maxLength={150}/></label><label>Packaging variant<input name="packagingVariant" maxLength={150}/></label></div>
         <div className="form-row"><label>Version<select name="versionKind"><option value="regular">Regular</option><option value="chase">Chase</option></select></label><label>Set / assortment contents<input name="setContents" maxLength={2000}/></label></div>
         <div className="form-row"><label>Vehicle year<input name="vehicleYear" maxLength={20} /></label><label>Model release year<input name="releaseYear" maxLength={20} /></label></div>
@@ -115,6 +117,7 @@ export function CatalogModelPicker({ initial, disabled, listingSaved, initialQue
         <label>Material (optional)<input name="material" maxLength={120} /></label>
         <details><summary>Manufacturer announcement (optional)</summary><p>General release information does not establish a seller allocation or dispatch promise.</p><label>Release status<select name="releaseStatus"><option value="unknown">Unknown</option><option value="announced">Announced</option></select></label><label>Date precision<select name="manufacturerReleasePrecision"><option value="unknown">Unknown</option><option value="day">Day</option><option value="month">Month</option><option value="quarter">Quarter</option></select></label><div className="form-row"><label>Start<input name="manufacturerReleaseStart" placeholder="2027-01 or 2027-Q1"/></label><label>End<input name="manufacturerReleaseEnd" placeholder="2027-02 or 2027-Q2"/></label></div><label>Manufacturer source<input name="releaseSource" maxLength={2000}/></label><label>Media type<select name="catalogPreviewMedia"><option value="false">Production imagery</option><option value="true">Preview / prototype / render</option></select></label></details>
         <label>Catalog description (optional)<textarea name="catalogDescription" maxLength={4000} rows={3} placeholder="General details about this model. Describe the condition of your copy in the listing." /></label>
+        </details>
         <button className="button dark small" type="button" onClick={() => void checkModel()}>Check model and continue</button>
       </fieldset>}
       {similar.length > 0 && <div role="status"><h3>We found a similar model</h3><p>Check the color, livery, edition and year before choosing.</p>{modelRows(similar)}<button className="button outline small" type="button" disabled={disabled || busy} onClick={() => { if (candidate) { setNewModel({ ...candidate, confirmDifferentModel: "true" }); setCreating(false); setSimilar([]); onReady(true); } }}>This is a different model</button></div>}

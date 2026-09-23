@@ -8,7 +8,9 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
-import { formatMoney } from "@/lib/format";
+import { formatCondition, formatMoney, formatUtcDate } from "@/lib/format";
+import { orderDeliveryLabel, orderTrackingHref, type SavedListingPreview } from "@/lib/account-presentation";
+import "./account-dashboard.css";
 import {
   ShipmentTimeline,
   type ShipmentTimelineData,
@@ -16,6 +18,7 @@ import {
 
 type GarageData = {
   wishlist: string[];
+  savedListings: SavedListingPreview[];
   orders: Array<
     Record<string, unknown> & {
       items: Array<Record<string, unknown>>;
@@ -46,6 +49,11 @@ const tabs = [
   "sales",
   "profile",
 ] as const;
+const tabLabels: Record<(typeof tabs)[number], string> = {
+  overview: "Overview", wishlist: "Wishlist", hunts: "Model Hunts", orders: "My Orders",
+  listings: "My Listings", sales: "My Sales", profile: "Account settings",
+};
+const sectionHref = (view: string) => `/account?view=${view}#account-content`;
 
 export function AccountDashboard({
   initialView,
@@ -61,12 +69,7 @@ export function AccountDashboard({
   isNew: boolean;
 }) {
   const router = useRouter();
-  const professionalStore = data.seller?.sellerType === "professional";
-  const [view, setView] = useState<(typeof tabs)[number]>(
-    tabs.includes(initialView as never)
-      ? (initialView as (typeof tabs)[number])
-      : "overview",
-  );
+  const view = tabs.includes(initialView as never) ? initialView as (typeof tabs)[number] : "overview";
   const [message, setMessage] = useState(
     isNew && !profile.onboardingCompleted
       ? "Welcome to My Garage. Add the display name collectors will see."
@@ -97,42 +100,28 @@ export function AccountDashboard({
     return body;
   }
   return (
-    <div className="garage-layout">
+    <div className="garage-layout account-dashboard">
       <aside className="garage-nav">
-        <p className="eyebrow">Collector account</p>
         <h1>My Garage</h1>
-        <p>
-          {profile.displayName}
-          <br />
-          <span>{email}</span>
-        </p>
+        <p className="account-identity"><strong>{profile.displayName}</strong><span>{email}</span></p>
+        <label className="account-section-picker" htmlFor="account-section">Account section
+          <select id="account-section" value={view} onChange={event => router.push(sectionHref(event.target.value))}>
+            {tabs.map(tab => <option key={tab} value={tab}>{tabLabels[tab]}</option>)}
+          </select>
+        </label>
         <nav aria-label="My Garage sections">
           {tabs.map((tab) => (
-            <button
+            <Link
               key={tab}
-              className={view === tab ? "active" : ""}
-              onClick={() => {
-                setView(tab);
-                history.replaceState(null, "", `/account?view=${tab}`);
-              }}
+              href={sectionHref(tab)}
+              aria-current={view === tab ? "page" : undefined}
             >
-              {tab === "hunts"
-                ? "Model Hunts"
-                : tab === "listings"
-                  ? "My Listings"
-                  : tab === "orders"
-                    ? "My Orders"
-                  : tab === "sales"
-                    ? "My Sales"
-                    : tab[0].toUpperCase() + tab.slice(1)}
-            </button>
+              {tabLabels[tab]}
+            </Link>
           ))}
         </nav>
-        <Link className="button dark small" href={professionalStore ? "/store" : "/sell/model"}>
-          {professionalStore ? "Open Seller Hub" : "Sell a Model"}
-        </Link>
       </aside>
-      <section className="garage-content">
+      <section className="garage-content" id="account-content" tabIndex={-1} aria-label={tabLabels[view]}>
         {message && (
           <p className="admin-message" role="status">
             {message}
@@ -161,17 +150,7 @@ function GarageView({
   action(payload: Record<string, unknown>): Promise<unknown>;
 }) {
   if (view === "overview") return <Overview data={data} />;
-  if (view === "wishlist")
-    return (
-      <EmptyOrCount
-        count={data.wishlist.length}
-        title="Wishlist"
-        empty="No saved models yet."
-        cta="Browse Models"
-        href="/marketplace"
-        detail={`${data.wishlist.length} model${data.wishlist.length === 1 ? "" : "s"} saved across your devices.`}
-      />
-    );
+  if (view === "wishlist") return <SavedModels data={data}/>;
   if (view === "hunts") return <Hunts rows={data.hunts} />;
   if (view === "orders") return <Orders rows={data.orders} action={action} />;
   if (view === "listings")
@@ -196,43 +175,63 @@ function Overview({ data }: { data: GarageData }) {
   const activeListings = data.listings.filter((listing) =>
     ["active", "pending_review"].includes(String(listing.status)),
   ).length;
-  return (
-    <>
-      <div className="garage-heading">
-        <p className="eyebrow">Buy · Save · Hunt · Sell</p>
-        <h2>Your collector activity</h2>
+  const latestOrder = data.orders[0];
+  const metrics = [
+    ["Wishlist", data.wishlist.length, "wishlist"], ["Orders", data.orders.length, "orders"],
+    ["Active hunts", activeHunts, "hunts"], ["Active listings", activeListings, "listings"], ["Sales", data.sales.length, "sales"],
+  ] as const;
+  return <div className="account-overview">
+    <h2 className="sr-only">Overview</h2>
+    {latestOrder ? <section className="account-recent" aria-labelledby="recent-order-heading">
+      <div className="account-activity-heading"><h3 id="recent-order-heading">Latest order</h3><Link href={sectionHref("orders")}>All orders</Link></div>
+      <article className="account-order-preview">
+        <OrderItems order={latestOrder} compact/>
+        <p className="account-order-seller">{String(latestOrder.sellerName)} · {date(String(latestOrder.createdAt))}</p>
+        <OrderProgress order={latestOrder}/>
+        <Link className="button dark small" href={`/account?view=orders#order-${encodeURIComponent(String(latestOrder.id))}`}>View order</Link>
+      </article>
+    </section> : <section className="account-empty-activity"><h3>No orders yet</h3><p>Your purchases and delivery updates will appear here.</p><Link className="button dark small" href="/marketplace">Browse models</Link><Link className="account-inline-link" href={sectionHref("orders")}>Orders &amp; preorders</Link></section>}
+    <SavedModels data={data} compact/>
+    <nav className="account-totals" aria-label="Account activity totals">
+      {metrics.map(([label, count, tab]) => <Link key={tab} href={sectionHref(tab)}><span>{label}</span><strong>{count}</strong></Link>)}
+    </nav>
+    <div className="account-secondary-links"><Link href="/model-hunt">Start a Model Hunt</Link><Link href={professionalStore ? "/store" : sectionHref("listings")}>{professionalStore ? "Open Seller Hub" : "Manage selling"}</Link></div>
+  </div>;
+}
+
+function SavedModels({ data, compact = false }: { data: GarageData; compact?: boolean }) {
+  return <section className="account-saved" aria-label="Saved listings">
+    <div className="account-activity-heading">{compact ? <h3>Saved listings</h3> : <h2>Your wishlist</h2>}{data.wishlist.length > 0 && <Link href="/wishlist">View all ({data.wishlist.length})</Link>}</div>
+    {!compact && <p>Specific sellers’ listings you’ve saved. Your wishlist also includes models you’re looking for.</p>}
+    {data.savedListings.map(listing => <Link className="account-saved-row" key={listing.id} href={`/products/${encodeURIComponent(listing.slug)}`}>
+      {listing.primaryImageUrl ? <Image src={listing.primaryImageUrl} alt="" width={96} height={72} unoptimized/> : <span className="account-image-placeholder">No photo</span>}
+      <div><h3>{listing.title}</h3><p>{listing.scale} · {listing.modelManufacturer} · {formatCondition(listing.modelCondition)}</p><strong>{formatMoney(listing.priceCents, listing.currency)}</strong><p>{listing.sellerName}{listing.availabilityType === "preorder" ? " · Preorder" : listing.availableQuantity < 1 ? " · Not available" : ""}</p></div>
+    </Link>)}
+    {!data.savedListings.length && <p>{data.wishlist.length ? "Your saved listings aren’t currently available. Open your wishlist to review them." : "No saved listings yet. Save a seller’s listing while browsing to find it here."}</p>}
+    {!compact && data.wishlist.length > 0 && <Link className="button dark small" href="/wishlist">Open your wishlist</Link>}
+    {!data.wishlist.length && <Link className={compact ? "account-inline-link" : "button dark small"} href="/marketplace">Browse models</Link>}
+  </section>;
+}
+
+function OrderItems({ order, compact = false }: { order: GarageData["orders"][number]; compact?: boolean }) {
+  const items = compact ? order.items.slice(0, 1) : order.items;
+  return <div className="account-order-items">
+    {items.map(item => <div className="account-order-item" key={String(item.id)}>
+      {item.imageUrlSnapshot ? <Image src={String(item.imageUrlSnapshot)} alt="" width={96} height={72} unoptimized/> : <span className="account-image-placeholder">No photo</span>}
+      <div><h3>{String(item.productTitleSnapshot)}</h3><p>{[item.scaleSnapshot, item.manufacturerSnapshot].filter(Boolean).join(" · ")} · Qty {String(item.quantity)}</p>
+        {item.availabilityTypeSnapshot === "preorder" && <p>Preorder{item.releaseDateSnapshot ? ` · Release ${date(String(item.releaseDateSnapshot))}` : ""}</p>}
+        {!compact && order.fulfillmentStatus === "delivered" && <Link className="account-inline-link" href={`/collection?fromOrderItem=${encodeURIComponent(String(item.id))}`}>Add to my collection</Link>}
       </div>
-      <div className="metric-grid garage-metrics">
-        <article>
-          <span>Wishlist</span>
-          <b>{data.wishlist.length}</b>
-        </article>
-        <article>
-          <span>Active Model Hunts</span>
-          <b>{activeHunts}</b>
-        </article>
-        <article>
-          <span>Orders</span>
-          <b>{data.orders.length}</b>
-        </article>
-        <article>
-          <span>Active listings</span>
-          <b>{activeListings}</b>
-        </article>
-        <article>
-          <span>Sales</span>
-          <b>{data.sales.length}</b>
-        </article>
-      </div>
-      <div className="garage-quick">
-        <Link href="/marketplace">Find a Model</Link>
-        <Link href="/#model-hunt">Start a Model Hunt</Link>
-        <Link href={professionalStore ? "/store" : "/sell/model"}>
-          {professionalStore ? "Manage Store" : "Sell a Model"}
-        </Link>
-      </div>
-    </>
-  );
+    </div>)}
+    {!items.length && <p>Item details are unavailable. Contact support with your order number.</p>}
+    {compact && order.items.length > 1 && <p>+ {order.items.length - 1} more {order.items.length === 2 ? "model" : "models"} in this order</p>}
+  </div>;
+}
+
+function OrderProgress({ order }: { order: GarageData["orders"][number] }) {
+  return <div className="account-order-progress"><p><strong>{orderDeliveryLabel(order)}</strong><span>{String(order.paymentStatus).replaceAll("_", " ")}</span></p><strong>{formatMoney(Number(order.totalCents), String(order.currency))}</strong>
+    {order.shipment?.eta && order.shipment.status !== "delivered" && order.fulfillmentStatus !== "delivered" && <p className="account-order-eta">Estimated delivery: {date(order.shipment.eta)}</p>}
+  </div>;
 }
 
 function EmptyOrCount({
@@ -337,61 +336,34 @@ function Orders({
   action(payload: Record<string, unknown>): Promise<unknown>;
 }) {
   return (
-    <div className="garage-section">
-      <p className="eyebrow">Orders</p>
+    <div className="garage-section account-orders">
       <h2>My Orders</h2>
       <p>Purchases, preorder deposits, payments and delivery updates.</p>
       <PreorderDashboard orderIds={rows.map(order => String(order.id))}>
-        {preorders=>rows.map((order) => (
-          <article key={String(order.id)} id={`order-${String(order.id)}`}>
-            <div>
+        {preorders=>rows.map((order) => {
+          const trackingHref = orderTrackingHref(order);
+          return <article className="account-buyer-order" key={String(order.id)} id={`order-${String(order.id)}`}>
+            <header className="account-order-meta">
               <b>{String(order.orderNumber)}</b>
               <span>{date(String(order.createdAt))}</span>
-            </div>
-            <h3>{String(order.sellerName)}</h3>
-            {order.items.map((item) => (
-              <div className="order-line" key={String(item.id)}>
-                {Boolean(item.imageUrlSnapshot) ? (
-                  <Image
-                    src={String(item.imageUrlSnapshot)}
-                    alt=""
-                    width={64}
-                    height={64}
-                    unoptimized
-                  />
-                ) : (
-                  <span />
-                )}
-                <p>
-                  {String(item.productTitleSnapshot)}{order.fulfillmentStatus === 'delivered' && <Link href={`/collection?fromOrderItem=${encodeURIComponent(String(item.id))}`}> · Add to my collection</Link>} × {String(item.quantity)}
-                  {item.availabilityTypeSnapshot === "preorder" && item.releaseDateSnapshot ? ` · Preorder releases ${date(String(item.releaseDateSnapshot))}` : ""}
-                </p>
-              </div>
-            ))}
-            <p>
-              <span className={`status ${String(order.paymentStatus)}`}>
-                {String(order.paymentStatus)}
-              </span>{" "}
-              <span className={`status ${String(order.fulfillmentStatus)}`}>
-                {String(order.fulfillmentStatus)}
-              </span>{" "}
-              · {formatMoney(Number(order.totalCents), String(order.currency))}
-            </p>
-            {Boolean(order.trackingNumber) && !order.shipment && (
-              <p>
-                Tracking: {String(order.carrier)} ·{" "}
-                {String(order.trackingNumber)}
-              </p>
-            )}
-            {order.shipment && <ShipmentTimeline shipment={order.shipment} />}
-            <OrderProtectionSummary order={{ createdAt: String(order.createdAt), paidAt: order.paidAt ? String(order.paidAt) : null, shippedAt: order.shippedAt ? String(order.shippedAt) : null, deliveredAt: order.deliveredAt ? String(order.deliveredAt) : null, refundRequestDeadline: order.refundRequestDeadline ? String(order.refundRequestDeadline) : null, protectionPolicyVersion: order.protectionPolicyVersion ? String(order.protectionPolicyVersion) : null }}/>
-            <PreorderOrderHistory reservation={preorders.find(r=>r.orderId===String(order.id))}/>
-            <Link className="button outline small" href={`/resolution?order=${String(order.id)}`}>
+            </header>
+            <OrderItems order={order}/>
+            <p className="account-order-seller">From {order.sellerSlug ? <Link href={`/sellers/${encodeURIComponent(String(order.sellerSlug))}`}>{String(order.sellerName)}</Link> : String(order.sellerName)}</p>
+            <OrderProgress order={order}/>
+            {!order.shipment && Boolean(order.trackingNumber) && <p className="account-tracking-number">{String(order.carrier || "Carrier tracking")}: {String(order.trackingNumber)}</p>}
+            {!order.shipment && !order.trackingNumber && order.fulfillmentStatus !== "cancelled" && <p className="account-tracking-note">Tracking has not been added yet.</p>}
+            <div className="account-order-actions">
+              {trackingHref && <a className="button dark small" href={trackingHref} target="_blank" rel="noopener noreferrer">Track package</a>}
+              <Link className={`button ${trackingHref ? "outline" : "dark"} small`} href={`/resolution?order=${encodeURIComponent(String(order.id))}`}>
               Get help with this order
-            </Link>
+              </Link>
+            </div>
+            <OrderProtectionSummary compact order={{ createdAt: String(order.createdAt), paidAt: order.paidAt ? String(order.paidAt) : null, shippedAt: order.shippedAt ? String(order.shippedAt) : null, deliveredAt: order.deliveredAt ? String(order.deliveredAt) : null, refundRequestDeadline: order.refundRequestDeadline ? String(order.refundRequestDeadline) : null, protectionPolicyVersion: order.protectionPolicyVersion ? String(order.protectionPolicyVersion) : null }}/>
+            {order.shipment && <details className="account-shipment-details"><summary>Shipment details &amp; tracking history</summary><ShipmentTimeline shipment={order.shipment}/></details>}
+            <PreorderOrderHistory reservation={preorders.find(r=>r.orderId===String(order.id))}/>
             <VerifiedFeedbackAvailability order={order} action={action} />
-          </article>
-        ))}
+          </article>;
+        })}
       </PreorderDashboard>
     </div>
   );
@@ -548,9 +520,9 @@ function Listings({
           <p className="eyebrow">Selling</p>
           <h2>My Listings</h2>
         </div>
-        <Link className="button dark small" href="/sell/model">
+        {rows.length > 0 && <Link className="button dark small" href="/sell/model">
           Sell a Model
-        </Link>
+        </Link>}
       </div>
       {seller &&
         (!seller.stripeChargesEnabled || !seller.stripePayoutsEnabled) && (
@@ -880,9 +852,7 @@ function collectorPayoutLabel(sale: GarageData["sales"][number]) {
 }
 
 function date(value: string) {
-  return new Intl.DateTimeFormat("en-US", { dateStyle: "medium" }).format(
-    new Date(value),
-  );
+  return formatUtcDate(value);
 }
 
 function formatAddress(value: unknown) {

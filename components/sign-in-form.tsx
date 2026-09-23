@@ -26,7 +26,9 @@ export function SignInForm({
       returnTo.startsWith("/") && !returnTo.startsWith("//")
         ? returnTo
         : "/account";
-    const newUserCallbackURL = `${callbackURL}${callbackURL.includes("?") ? "&" : "?"}new=1`;
+    const newUserReturn = new URL(callbackURL, "https://modelcarcenter.invalid");
+    newUserReturn.searchParams.set("new", "1");
+    const newUserCallbackURL = `${newUserReturn.pathname}${newUserReturn.search}${newUserReturn.hash}`;
     const errorParams = new URLSearchParams({ error: "invalid-link", returnTo: callbackURL });
     if (saveOrder) errorParams.set("intent", "save-order");
     try {

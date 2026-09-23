@@ -11,8 +11,11 @@ import "@/components/discovery.css";
 
 export const dynamic = "force-dynamic";
 
-export default async function CatalogModelPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function CatalogModelPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const { id } = await params;
+  const query = await searchParams;
+  const discussionLimit = Math.min(100, Math.max(20, Math.floor(Number(query.discussionLimit) || 20)));
+  const before = Number(query.before);
   const result = await getCatalogListings(id);
   if (!result) notFound();
   const { model, listings } = result;
@@ -51,6 +54,6 @@ export default async function CatalogModelPage({ params }: { params: Promise<{ i
         </div>
       </li>)}</ul>}
     </section>
-    <ModelCommunity catalogId={model.id}/>
+    <ModelCommunity catalogId={model.id} limit={discussionLimit} before={Number.isFinite(before) && before > 0 ? before : undefined} beforeId={typeof query.beforePost === "string" ? query.beforePost : undefined}/>
   </div><SiteFooter /></main>;
 }

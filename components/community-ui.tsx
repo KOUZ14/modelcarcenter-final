@@ -1,10 +1,12 @@
 "use client";
 import Link from "next/link";
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import type { Collector, Piece, Post } from "@/lib/community";
+import type { Collector, Piece } from "@/lib/community";
+import { pieceAvailabilityLabel } from "@/lib/community-presentation";
+import "./community.css";
 
-export const availabilityLabel:Record<string,string>={not_for_sale:'Not for sale',open_to_offers:'Open to offers',for_sale:'For sale',reserved:'Reserved · pending payment',previously_owned:'Previously owned'};
+export { availabilityLabel } from "@/lib/community-presentation";
 export function photoUrl(id:string){return `/community/media/${encodeURIComponent(id)}`;}
 export async function communityRequest(payload:Record<string,unknown>,endpoint='/api/collectors'){
   const r=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
@@ -15,10 +17,39 @@ export function Action({payload,children,className='',endpoint,onDone}:{payload:
   const [busy,setBusy]=useState(false),[error,setError]=useState(''),router=useRouter();
   return <span className="community-action"><button type="button" className={className} disabled={busy} onClick={async()=>{setBusy(true);setError('');try{await communityRequest(payload,endpoint);onDone?.();router.refresh();}catch(e){setError((e as Error).message);}finally{setBusy(false);}}}>{busy?'Saving…':children}</button>{error&&<small role="alert">{error}</small>}</span>;
 }
-export function PhotoUpload({value,onChange}:{value:string[];onChange:(ids:string[])=>void}){
-  const [busy,setBusy]=useState(false),[error,setError]=useState('');
-  return <div className="photo-upload"><label>Personal photos <input type="file" accept="image/jpeg,image/png,image/webp" multiple disabled={busy||value.length>=6} onChange={async event=>{const files=Array.from(event.target.files||[]).slice(0,6-value.length);setBusy(true);setError('');const uploaded=[...value];try{for(const file of files){if(file.size>10*1024*1024)throw new Error('Choose photos under 10 MB.');const bitmap=await createImageBitmap(file),ratio=Math.min(1,1600/Math.max(bitmap.width,bitmap.height)),canvas=document.createElement('canvas');canvas.width=Math.round(bitmap.width*ratio);canvas.height=Math.round(bitmap.height*ratio);const ctx=canvas.getContext('2d');if(!ctx)throw new Error('Photo conversion unavailable.');ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(bitmap,0,0,canvas.width,canvas.height);bitmap.close();const blob=await new Promise<Blob>((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(new Error('Could not read photo.')),'image/jpeg',0.85));const form=new FormData();form.set('photo',blob,'photo.jpg');const res=await fetch('/api/collectors/photos',{method:'POST',body:form});const data=await res.json();if(!res.ok)throw new Error(data.error);uploaded.push(data.id);onChange([...uploaded]);}}catch(e){setError((e as Error).message);}finally{setBusy(false);event.target.value='';}}}/></label><p className="muted">Up to 6 photos. Location metadata is removed. {busy?'Uploading…':''}</p><div className="photo-thumbs">{value.map(id=><div key={id}><img src={photoUrl(id)} alt="Your uploaded model photo" width={100} height={80}/><button type="button" onClick={()=>onChange(value.filter(x=>x!==id))} aria-label="Remove photo">Remove</button></div>)}</div>{error&&<p role="alert">{error}</p>}</div>;
+export function PhotoUpload({ value, onChange, compact = false, onBusyChange }: { value: string[]; onChange: (ids: string[]) => void; compact?: boolean; onBusyChange?: (busy: boolean) => void }) {
+  const [busy, setBusy] = useState(false), [error, setError] = useState("");
+  return <div className={`photo-upload ${compact ? "photo-upload-compact" : ""}`}>
+    <label className={compact ? "photo-add-control" : undefined}>{compact ? value.length ? "Add more photos" : "+ Add photos" : "Personal photos"}
+      <input className={compact ? "sr-only" : undefined} type="file" accept="image/jpeg,image/png,image/webp" multiple disabled={busy || value.length >= 6} onChange={async event => {
+        const input = event.currentTarget;
+        const files = Array.from(input.files || []).slice(0, 6 - value.length);
+        if (!files.length) return;
+        setBusy(true); onBusyChange?.(true); setError("");
+        const uploaded = [...value];
+        try {
+          for (const file of files) {
+            if (file.size > 10 * 1024 * 1024) throw new Error("Choose photos under 10 MB.");
+            const bitmap = await createImageBitmap(file), ratio = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height)), canvas = document.createElement("canvas");
+            canvas.width = Math.round(bitmap.width * ratio); canvas.height = Math.round(bitmap.height * ratio);
+            const ctx = canvas.getContext("2d"); if (!ctx) throw new Error("Photo conversion unavailable.");
+            ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height); bitmap.close();
+            const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(b => b ? resolve(b) : reject(new Error("Could not read photo.")), "image/jpeg", 0.85));
+            const form = new FormData(); form.set("photo", blob, "photo.jpg");
+            const response = await fetch("/api/collectors/photos", { method: "POST", body: form }), data = await response.json();
+            if (!response.ok) throw new Error(data.error);
+            uploaded.push(data.id); onChange([...uploaded]);
+          }
+        } catch (e) { setError((e as Error).message); }
+        finally { setBusy(false); onBusyChange?.(false); input.value = ""; }
+      }}/>
+    </label>
+    <p className="muted" role={busy ? "status" : undefined}>{busy ? "Uploading photos…" : "Up to 6 photos · Location metadata removed."}</p>
+    <div className="photo-thumbs">{value.map(id => <div key={id}><img src={photoUrl(id)} alt="Your uploaded model photo" width={100} height={80}/><button type="button" disabled={busy} onClick={() => onChange(value.filter(x => x !== id))} aria-label="Remove photo">Remove</button></div>)}</div>
+    {error && <p role="alert">{error}</p>}
+  </div>;
 }
+
 type Model={id:string;title:string;scale:string;modelManufacturer:string;manufacturerSku:string|null;color:string|null;primaryImageUrl:string|null};
 export function ModelPicker({value,onChange}:{value:string;onChange:(id:string)=>void}){
   const [query,setQuery]=useState(''),[models,setModels]=useState<Model[]>([]),[error,setError]=useState('');
@@ -27,24 +58,30 @@ export function ModelPicker({value,onChange}:{value:string;onChange:(id:string)=
 }
 export function PieceCard({piece,owner=false}:{piece:Piece;owner?:boolean}){
   const photos=JSON.parse(piece.photos) as string[];
-  return <article className="piece-card"><Link href={`/collection/${piece.id}`} className="piece-photo">{photos[0]?<img src={photoUrl(photos[0])} alt={piece.title} loading="lazy" width={500} height={375}/>:<span>No personal photo yet</span>}{piece.pinned===1&&<span className="pinned">Favorite</span>}</Link><div><small>{piece.scale} · {piece.maker}</small><h3><Link href={`/collection/${piece.id}`}>{piece.title}</Link></h3><span className="availability">{availabilityLabel[piece.availability]}</span>{owner&&<span className="privacy-label">{piece.visibility==='public'?'Public':'Private'}</span>}{owner&&<Link className="edit-piece" href={`/collection?edit=${piece.id}`}>Edit piece</Link>}</div></article>;
+  return <article className="piece-card"><Link href={`/collection/${piece.id}`} className="piece-photo">{photos[0]?<img src={photoUrl(photos[0])} alt={piece.title} loading="lazy" width={500} height={375}/>:<span>No personal photo yet</span>}{piece.pinned===1&&<span className="pinned">Favorite</span>}</Link><div><small>{piece.scale} · {piece.maker}</small><h3><Link href={`/collection/${piece.id}`}>{piece.title}</Link></h3><span className="availability">{pieceAvailabilityLabel(piece.availability)}</span>{owner&&<span className="privacy-label">{piece.visibility==='public'?'Public':'Private'}</span>}{owner&&<Link className="edit-piece" href={`/collection?edit=${piece.id}`}>Edit piece</Link>}</div></article>;
 }
 export function CollectorCard({collector}:{collector:Collector}){return <div className="collector-card"><Link className="collector-avatar" href={`/collectors/${collector.handle}`} aria-label={collector.displayName}>{collector.displayName.slice(0,1)}</Link><div><Link href={`/collectors/${collector.handle}`}><strong>{collector.displayName}</strong></Link><small>@{collector.handle} · {collector.count} public pieces</small><p>{collector.interests}</p></div><Action payload={{action:'relationship',kind:'follow',targetId:collector.userId,enabled:!collector.isFollowing}}>{collector.isFollowing?'Following':'Follow'}</Action></div>;}
 export function ReportButton({type,id}:{type:string;id:string}){const[open,setOpen]=useState(false),[reason,setReason]=useState('');return <>{!open?<button type="button" onClick={()=>setOpen(true)}>Report</button>:<div><label>Reason for report<textarea value={reason} onChange={e=>setReason(e.target.value)} maxLength={1000}/></label><Action payload={{action:'report',targetType:type,targetId:id,reason}} onDone={()=>setOpen(false)}>Send report</Action><button type="button" onClick={()=>setOpen(false)}>Cancel</button></div>}</>;}
 export function PhotoCarousel({photos,alt}:{photos:string[];alt:string}){const[index,setIndex]=useState(0);if(!photos.length)return null;return <div className="post-photo"><img src={photoUrl(photos[index]||photos[0])} alt={`${alt}, photo ${index+1} of ${photos.length}`} width={900} height={675} loading="lazy"/>{photos.length>1&&<div className="carousel-controls"><button type="button" onClick={()=>setIndex((index+photos.length-1)%photos.length)} aria-label="Previous photo">←</button><span aria-live="polite">{index+1} / {photos.length}</span><button type="button" onClick={()=>setIndex((index+1)%photos.length)} aria-label="Next photo">→</button></div>}</div>;}
-export function ModelPanel({post,onClose}:{post:Post;onClose:()=>void}){const dialog=useRef<HTMLDialogElement>(null);useEffect(()=>{dialog.current?.showModal();},[]);return <dialog className="model-dialog" ref={dialog} onCancel={onClose} onClose={onClose}><button type="button" className="dialog-close" aria-label="Close model details" onClick={onClose}>×</button><p className="eyebrow">Tagged model</p><h2>{post.modelTitle||post.itemTitle}</h2><p>{post.availability?availabilityLabel[post.availability]:'Catalog model'}</p><p>A catalog tag identifies a model. It does not mean the pictured piece is for sale.</p><div className="community-buttons">{post.catalogId&&<><Action className="button dark" payload={{action:'wishlist',catalogId:post.catalogId}}>Add model to wishlist</Action><Link className="button outline" href={`/models/${post.catalogId}`}>Catalog details & listings</Link></>}{post.itemId&&<Link href={`/collection/${post.itemId}`}>View this owner’s piece</Link>}</div></dialog>;}
-export function PostCard({post,refresh}:{post:Post;refresh?:()=>void}){
-  const[expanded,setExpanded]=useState(false),[panel,setPanel]=useState(false);
-  return <article className="community-post"><header><Link className="collector-avatar" href={`/collectors/${post.handle}`}>{post.displayName.slice(0,1)}</Link><div><Link href={`/collectors/${post.handle}`}><strong>{post.displayName}</strong></Link><small><time dateTime={new Date(post.createdAt).toISOString()}>{new Date(post.createdAt).toLocaleDateString()}</time>{post.commercial?' · Commercial post':''}</small></div><details className="post-menu"><summary aria-label="Post options">•••</summary><div><p>{post.reason||'Public collector contribution'}</p><button type="button" onClick={()=>void navigator.clipboard?.writeText(`${location.origin}/community/posts/${post.id}`)}>Copy share link</button><Action payload={{action:'post_action',postId:post.id,kind:'hide'}} onDone={refresh}>Hide post</Action><Action payload={{action:'relationship',targetId:post.ownerId,kind:'mute'}} onDone={refresh}>Mute collector</Action><Action payload={{action:'relationship',targetId:post.ownerId,kind:'block'}} onDone={refresh}>Block collector</Action><ReportButton type="post" id={post.id}/></div></details></header><PhotoCarousel photos={JSON.parse(post.photos)} alt={`Model photography by ${post.displayName}`}/><div className="post-content">{post.prompt&&<small className="eyebrow">{post.prompt}</small>}<p className="post-caption">{expanded||post.body.length<300?post.body:post.body.slice(0,300)+'…'}{post.body.length>=300&&<button type="button" onClick={()=>setExpanded(!expanded)}>{expanded?'Show less':'Expand'}</button>}</p>{(post.catalogId||post.itemId)&&<button type="button" className="tagged-model" onClick={()=>setPanel(true)}>{post.modelTitle||post.itemTitle} <span>View model →</span></button>}<footer><Action payload={{action:'post_action',postId:post.id,kind:'like',enabled:!post.liked}} onDone={refresh}>{post.liked?'Liked':'Like'} · {post.likes}</Action><Link href={`/community/posts/${post.id}`}>Comment · {post.comments}</Link><Action payload={{action:'post_action',postId:post.id,kind:'save',enabled:!post.saved}} onDone={refresh}>{post.saved?'Post saved':'Save post'}</Action></footer></div>{panel&&<ModelPanel post={post} onClose={()=>setPanel(false)}/>}</article>;
+export { ModelPanel, PostCard } from "./community-post";
+export { CommentSection } from "./community-discussion";
+export function CommunityFrame({ children, view = "", tab = "for_you" }: { children: ReactNode; view?: string; tab?: string }) {
+  const current = view === "collectors" || view === "collections" ? view : tab === "saved" ? "saved" : "feed";
+  return <div className="community-layout shell">
+    <aside className="community-sidebar">
+      <nav className="community-navigation" aria-label="Community">
+        {[["feed", "/community", "Feed"], ["collectors", "/community?view=collectors", "Collectors"], ["collections", "/community?view=collections", "Collections"], ["saved", "/community?tab=saved", "Saved"]].map(([key, href, label]) => <Link key={key} href={href} aria-current={current === key ? "page" : undefined}>{label}</Link>)}
+        <details className="community-nav-more" onKeyDown={event => { if (event.key === "Escape") { event.currentTarget.open = false; event.currentTarget.querySelector("summary")?.focus(); } }}>
+          <summary aria-label="More community links"><span>More</span><span aria-hidden="true">⌄</span></summary>
+          <div><Link href="/collection">My collection</Link><Link href="/wishlist">Wishlist</Link></div>
+        </details>
+      </nav>
+    </aside>
+    {children}
+  </div>;
 }
-export function CommentSection({postId,itemId,enabled=true}:{postId?:string;itemId?:string;enabled?:boolean}){
-  const[list,setList]=useState<Array<{id:string;body:string;displayName:string;handle:string}>>([]),[body,setBody]=useState(''),[error,setError]=useState('');
-  const load=()=>fetch(`/api/collectors?view=comments&${postId?'post='+postId:'item='+itemId}`).then(r=>r.json()).then(d=>setList(d.comments||[]));
-  useEffect(()=>{void load().catch(()=>setError('Comments unavailable.'));},[postId,itemId]); // eslint-disable-line react-hooks/exhaustive-deps
-  return <section className="comment-section"><h2>Discussion</h2>{list.map(c=><article key={c.id}><Link href={`/collectors/${c.handle}`}><strong>{c.displayName}</strong></Link><p>{c.body}</p><ReportButton type="comment" id={c.id}/></article>)}{!list.length&&<p>No comments yet.</p>}{enabled?<form onSubmit={async e=>{e.preventDefault();try{await communityRequest({action:'comment',postId,itemId,body});setBody('');await load();}catch(e){setError((e as Error).message);}}}><label>Add a comment<textarea required value={body} onChange={e=>setBody(e.target.value)} maxLength={2000}/></label><button className="button dark">Post comment</button></form>:<p>New comments are turned off.</p>}{error&&<p role="alert">{error}</p>}</section>;
-}
-export function CommunityFrame({children}:{children:ReactNode}){return <div className="community-layout shell"><aside className="community-sidebar"><p className="eyebrow">Collectors</p><Link href="/community">Community feed</Link><Link href="/community?view=collectors">Explore collectors</Link><Link href="/community?view=collections">Browse collections</Link><Link href="/community?tab=saved">Saved posts</Link><Link href="/collection">My Collection</Link><Link href="/wishlist">Wishlist</Link></aside>{children}</div>;}
-export function SubmitForm({children,onSubmit,label='Save'}:{children:ReactNode;onSubmit:(form:FormData)=>Promise<void>;label?:string}){
-  const[busy,setBusy]=useState(false),[error,setError]=useState('');async function submit(e:FormEvent<HTMLFormElement>){e.preventDefault();const form=new FormData(e.currentTarget);setBusy(true);setError('');try{await onSubmit(form);}catch(e){setError((e as Error).message);}finally{setBusy(false);}}
-  return <form className="community-form" onSubmit={submit}>{children}{error&&<p role="alert" className="form-error">{error}</p>}<button className="button dark" disabled={busy}>{busy?'Saving…':label}</button></form>;
+
+export function SubmitForm({children,onSubmit,label='Save',disabled=false}:{children:ReactNode;onSubmit:(form:FormData)=>Promise<void>;label?:string;disabled?:boolean}){
+  const[busy,setBusy]=useState(false),[error,setError]=useState('');async function submit(e:FormEvent<HTMLFormElement>){e.preventDefault();if(busy||disabled)return;const form=new FormData(e.currentTarget);setBusy(true);setError('');try{await onSubmit(form);}catch(e){setError((e as Error).message);}finally{setBusy(false);}}
+  return <form className="community-form" onSubmit={submit} aria-busy={busy||disabled}>{children}{error&&<p role="alert" className="form-error">{error}</p>}<button className="button dark" disabled={busy||disabled}>{busy?'Saving…':label}</button></form>;
 }

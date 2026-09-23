@@ -82,6 +82,10 @@ export type CartItem = {
   title: string;
   scale: string;
   modelManufacturer: string;
+  modelCondition?: string;
+  packagingCondition?: string;
+  originalBoxStatus?: string;
+  handlingTimeBusinessDays?: number;
   imageUrl: string | null;
   priceCents: number;
   currency: string;

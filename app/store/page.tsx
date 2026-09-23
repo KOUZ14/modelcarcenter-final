@@ -5,6 +5,7 @@ import { SiteFooter } from "@/components/site-footer";
 import { SiteHeader } from "@/components/site-header";
 import { requireCollector } from "@/lib/collector-auth";
 import { getStoreDashboardData } from "@/lib/store";
+import { SellerMessages } from "@/components/seller-messages";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
@@ -15,11 +16,11 @@ export const metadata: Metadata = {
 export default async function StorePage({
   searchParams,
 }: {
-  searchParams: Promise<{ view?: string; edit?: string; filter?: string; preorder?: string }>;
+  searchParams: Promise<{ view?: string; edit?: string; filter?: string; preorder?: string; conversation?: string; thread?: string; tab?: string }>;
 }) {
   const query = await searchParams;
   const returnParams=new URLSearchParams();
-  for(const key of ["view","edit","filter","preorder"] as const)if(query[key])returnParams.set(key,query[key]);
+  for(const key of ["view","edit","filter","preorder","conversation","thread","tab"] as const)if(query[key])returnParams.set(key,query[key]);
   const account = await requireCollector(returnParams.size ? `/store?${returnParams}` : "/store");
   const data = await getStoreDashboardData(account.user.id);
   if (!data)
@@ -54,6 +55,7 @@ export default async function StorePage({
       initialPreorderId={query.preorder}
       initialFilter={query.filter}
       email={account.user.email}
+      messages={query.view === "messages" ? <SellerMessages userId={account.user.id} conversation={query.conversation} thread={query.thread} tab={query.tab}/> : undefined}
     />
   );
 }

@@ -25,7 +25,7 @@ test("the built artifact contains the real marketplace and no starter preview ma
   assert.match(source, /Verified marketplace record/i);
   assert.match(source, /Completed transactions/i);
   assert.match(source, /On-time shipment/i);
-  assert.match(source, /Resolved cases/i);
+  assert.match(source, /Seller reviews/i);
   assert.doesNotMatch(source, /codex-preview/i);
 });
 

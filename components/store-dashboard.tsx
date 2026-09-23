@@ -1,27 +1,30 @@
 "use client";
 
 import { SellerFeeDisclosure } from "./seller-fee-disclosure";
-import { SellerSetup, SellerNextActions, SellerPayments, SellerHelp } from "./seller-setup";
+import { SellerPayments, SellerHelp, SellerThumbnail } from "./seller-setup";
 import { SellerInventoryUpload, SellerBulkStock } from "./seller-inventory-upload";
-import { ContextualHelp } from "./contextual-help";
+import { StoreLogoUpload } from "./store-logo-upload";
+import { StoreCountrySelect } from "./store-country-select";
 import { trackEvent, sellerSetupElapsed } from "@/lib/analytics-client";
 import { useTaskMeasurement } from "./use-task-measurement";
 import { listingPhotoEvidence } from "@/lib/listing-evidence";
 import { activeProtectionPolicy } from "@/lib/protection";
 import type { buildSellerSetup } from "@/lib/seller-setup";
 import "./seller-workflows.css";
+import "./seller-dashboard.css";
+import { SellerNavigation } from "./seller-navigation";
+import { needsShipment, prioritizeOrders, sellerOrderPayout } from "@/lib/seller-dashboard";
 import { SellerOrderAmounts } from "./seller-order-amounts";
 import { PreorderSeller, SellerPreorderOrders } from "./preorder-seller";
 
 import Link from "next/link";
 import { CatalogModelPicker } from "./catalog-model-picker";
 import { useRouter } from "next/navigation";
-import { HubOverview, HubDemand, HubOpportunities, HubMarketing, HubAnalytics } from "./seller-hub-panels";
+import { HubOverview, HubGrowth, HubAnalytics } from "./seller-hub-panels";
 import { hubViews, inventoryViews, orderViews, matchesInventoryView, matchesOrderView, type HubView, type HubNavigate, type SellerHubMetrics } from "@/lib/seller-hub";
 import type { SellerHubDemand } from "@/lib/seller-hub-data";
-import { BrandLogo } from "@/components/brand-logo";
 import { useDialogFocus } from "./use-dialog-focus";
-import { FormEvent, useMemo, useRef, useState } from "react";
+import { FormEvent, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { AddressFields, type AddressFieldsHandle } from "./address-fields";
 import { SHIP_FROM_FIELD_NAMES, shipFromAddressValues } from "@/lib/address";
 import { formatMoney, formatUtcDate, formatUtcDateTime } from "@/lib/format";
@@ -127,17 +130,21 @@ type Product = {
   createdAt: string;
 };
 
-type OrderItem = {
+export type OrderItem = {
   id: string;
   productTitleSnapshot: string;
   sellerSkuSnapshot: string;
+  productId: string | null;
+  imageUrlSnapshot: string | null;
+  scaleSnapshot: string;
+  manufacturerSnapshot: string;
   quantity: number;
   unitPriceCents: number;
   availabilityTypeSnapshot: "in_stock" | "preorder";
   releaseDateSnapshot: string | null;
 };
 
-type StoreOrder = {
+export type StoreOrder = {
   id: string;
   orderNumber: string;
   buyerEmail: string;
@@ -168,6 +175,8 @@ type StoreOrder = {
   carrier: string | null;
   trackingNumber: string | null;
   createdAt: string;
+  paidAt: string | null;
+  isTestOrder: boolean;
   shipByAt: string | null;
   deliveredAt: string | null;
   payoutEligibleAt: string | null;
@@ -205,6 +214,7 @@ type Analytics = {
 };
 
 export type StoreData = {
+  asOf: string;
   store: Store;
   setup: ReturnType<typeof buildSellerSetup>;
   fee: {
@@ -228,6 +238,16 @@ export type StoreData = {
 const tabs = hubViews;
 type Tab = HubView;
 
+function subscribeHashChange(onChange: () => void) {
+  window.addEventListener("hashchange", onChange);
+  return () => window.removeEventListener("hashchange", onChange);
+}
+const pageHash = () => window.location.hash;
+const serverHash = () => "";
+function usePageHash() {
+  return useSyncExternalStore(subscribeHashChange, pageHash, serverHash);
+}
+
 export function StoreDashboard({
   data,
   initialView,
@@ -235,6 +255,7 @@ export function StoreDashboard({
   initialPreorderId,
   initialFilter,
   email,
+  messages,
 }: {
   data: StoreData;
   initialView: string;
@@ -242,13 +263,15 @@ export function StoreDashboard({
   initialPreorderId?: string;
   initialFilter?: string;
   email: string;
+  messages?: ReactNode;
 }) {
   const firstView = tabs.includes(initialView as Tab)
     ? (initialView as Tab)
     : initialProductId
       ? "inventory"
       : "overview";
-  const view = firstView;
+  const view = ["demand", "opportunities", "marketing"].includes(firstView) ? "growth" : firstView;
+  const growthFilter = firstView === "marketing" ? (initialFilter === "discounts" ? "pricing" : "promoted") : initialFilter;
   const router = useRouter();
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -290,44 +313,8 @@ export function StoreDashboard({
   };
 
   return (
-    <div className="store-layout seller-hub">
-      <aside className="store-sidebar">
-        <Link className="store-brand" href="/">
-          <BrandLogo priority/>
-          <b>Seller Dashboard</b>
-        </Link>
-        <div className="store-identity">
-          <p className="eyebrow">Professional seller</p>
-          <h1>{data.store.storeName}</h1>
-          <span>{email}</span>
-          <span className={`status ${data.store.status}`}>
-            {data.store.status}
-          </span>
-        </div>
-        <nav aria-label="Seller Hub sections">
-          {tabs.map((tab) => (
-            <button
-              key={tab}
-              className={`${view === tab ? "active" : ""} ${["orders", "inventory", "payments"].includes(tab) ? "seller-primary-nav" : ""}`}
-              aria-current={view === tab ? "page" : undefined}
-              onClick={() => selectView(tab)}
-            >
-              {({ overview: "Overview & setup", orders: "Orders", inventory: "Inventory", payments: "Payments", analytics: "Sales and performance", settings: "Store settings", help: "Help", demand: "Buyer demand", opportunities: "Opportunities", marketing: "Marketing" })[tab]}
-              {tab === "orders" && data.analytics.unfulfilledOrders > 0 && (
-                <span>{data.analytics.unfulfilledOrders}</span>
-              )}
-            </button>
-          ))}
-          <Link className="store-messages-link" href="/messages">
-            Buyer messages
-          </Link>
-        </nav>
-        <div className="store-sidebar-links">
-          <Link href={`/sellers/${data.store.slug}`}>View storefront</Link>
-          <Link href="/account">My Garage</Link>
-          <Link href="/marketplace">Back to marketplace</Link>
-        </div>
-      </aside>
+    <div className="store-layout seller-hub seller-workspace">
+      <SellerNavigation storeName={data.store.storeName} slug={data.store.slug} email={email} status={data.store.status} termsAccepted={data.setup.termsAccepted} view={view} orders={data.analytics.unfulfilledOrders}/>
       <main id="main-content" tabIndex={-1} className="store-main">
         {suspended && (
           <div className="store-alert" role="alert">
@@ -349,13 +336,12 @@ export function StoreDashboard({
           </p>
         )}
         {view === "overview" && (
-          <><SellerSetup data={data} /><SellerNextActions data={data} /><HubOverview data={data} navigate={selectView} /></>
+          <HubOverview data={data} navigate={selectView} />
         )}
         {view === "payments" && <SellerPayments data={data} action={action} />}
         {view === "help" && <SellerHelp />}
-        {view === "demand" && <HubDemand data={data} navigate={selectView} filter={initialFilter} />}
-        {view === "opportunities" && <HubOpportunities data={data} navigate={selectView} />}
-        {view === "marketing" && <HubMarketing data={data} navigate={selectView} filter={initialFilter} />}
+        {view === "growth" && <HubGrowth data={data} navigate={selectView} filter={growthFilter} />}
+        {view === "messages" && messages}
         {view === "inventory" && (
           <Inventory
             key={`inventory-${initialFilter}-${initialProductId}-${initialPreorderId}`}
@@ -365,6 +351,7 @@ export function StoreDashboard({
             initialPreorderId={initialPreorderId}
             queue={inventoryViews.some(([value]) => value === initialFilter) ? initialFilter! : "all"}
             slowIds={data.hub.slowIds}
+            initialTool={initialFilter}
             navigate={selectView}
             disabled={suspended}
             action={action}
@@ -383,13 +370,16 @@ export function StoreDashboard({
             action={action}
           />
         )}
-        {view === "analytics" && <HubAnalytics data={data} navigate={selectView}><AnalyticsView analytics={data.analytics} /></HubAnalytics>}
+        {view === "analytics" && <HubAnalytics data={data} navigate={selectView} />}
         {view === "settings" && (
           <StoreSettings
+            key={`settings-${initialFilter}`}
             store={data.store}
             fee={data.fee}
             disabled={suspended}
             action={action}
+            setup={data.setup}
+            section={initialFilter}
           />
         )}
       </main>
@@ -404,6 +394,7 @@ function Inventory({
   initialPreorderId,
   queue,
   slowIds,
+  initialTool,
   navigate,
   disabled,
   action,
@@ -414,6 +405,7 @@ function Inventory({
   initialPreorderId?: string;
   queue: string;
   slowIds: string[];
+  initialTool?: string;
   navigate: HubNavigate;
   disabled: boolean;
   action(
@@ -426,6 +418,9 @@ function Inventory({
   const [preorder, setPreorder] = useState(rows.find(row=>row.id===initialPreorderId&&row.availabilityType==="preorder") ?? null);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
+  const [chosenTool, setTool] = useState<string | null>(initialTool === "bulk" || initialTool === "import" ? initialTool : null);
+  const hash = usePageHash();
+  const tool = chosenTool ?? (hash === "#inventory-upload" ? "import" : "");
   const visible = useMemo(
     () =>
       rows.filter((row) => {
@@ -465,12 +460,15 @@ function Inventory({
           Add model
         </button>
       </header>
-      <ContextualHelp id="seller-inventory" title="Have a spreadsheet? Add multiple models at once" action={{href:"/store?view=help",label:"Read the short inventory guide"}}><p><a href="#inventory-upload">Upload inventory from a spreadsheet</a>. Keep the same seller SKUs to update existing models. New models start as drafts.</p></ContextualHelp>
+      <div className="seller-inventory-toolbar"><button className="button outline small" aria-expanded={tool === "bulk"} onClick={() => setTool(tool === "bulk" ? "" : "bulk")}>Update stock &amp; price</button><button className="button outline small" aria-expanded={tool === "import"} onClick={() => setTool(tool === "import" ? "" : "import")}>Import CSV</button></div>
+      {tool === "bulk" && <SellerBulkStock products={rows} disabled={disabled} action={action} expanded />}
+      {tool === "import" && <SellerInventoryUpload disabled={disabled} action={action} expanded />}
       <nav className="hub-filters" aria-label="Inventory views">
         {inventoryViews.map(([value, label]) => <button key={value} aria-pressed={queue === value} onClick={() => navigate("inventory", value)}>{label}<span>{rows.filter((row) => matchesInventoryView(row, value, slowIds)).length}</span></button>)}
       </nav>
       {queue === "slow" && <p className="hub-note">Active, in-stock listings at least 90 days old with no paid sale in the last 90 days.</p>}
       {queue === "low" && <p className="hub-note">Active, in-stock listings with 1–2 available units, after reservations.</p>}
+      {queue === "attention" && <p className="hub-note">Drafts, listings in review or rejected, and in-stock listings missing required photo evidence. Each listing counts once.</p>}
       <div className="store-inventory-tools">
         <input
           aria-label="Search inventory"
@@ -516,8 +514,9 @@ function Inventory({
             </thead>
             <tbody>
               {visible.map((product) => (
-                <tr key={product.id}>
-                  <td>
+                <tr key={product.id} className="seller-inventory-item">
+                  <td className="seller-product-cell">
+                    <SellerThumbnail src={product.primaryImageUrl} title={product.title}/><div>
                     <b>{product.title}</b>
                     <small>
                       {product.scale} · {product.modelManufacturer}
@@ -525,27 +524,29 @@ function Inventory({
                     {product.availabilityType === "preorder" && product.releaseDate && (
                       <small>Preorder · expected to ship {formatUtcDate(product.releaseDate)}</small>
                     )}
-                    {product.availabilityType !== "preorder" && !listingPhotoEvidence(product, product.images).complete && <small className="form-error">Photos need attention: {listingPhotoEvidence(product, product.images).missing.join(", ")}. Open Edit to label or add actual photos.</small>}
+                    {product.availabilityType !== "preorder" && !listingPhotoEvidence(product, product.images).complete && <button className="seller-photo-status" disabled={disabled} onClick={() => setEditing(product)}>Photos incomplete · Review →</button>}
+                    </div>
                   </td>
-                  <td>{product.sellerSku}</td>
-                  <td>{formatMoney(product.priceCents, product.currency)}</td>
-                  <td>
-                    {product.availabilityType === "preorder" ? `${product.preorder?.capacity ?? 0} preorder units` : `${product.inventoryQuantity - product.reservedQuantity} available`}
+                  <td data-label="SKU">{product.sellerSku}</td>
+                  <td data-label="Price" className="seller-money">{formatMoney(product.priceCents, product.currency)}</td>
+                  <td data-label="Stock">
+                    {product.availabilityType === "preorder" ? `${product.preorder?.capacity ?? 0} preorder units` : `${Math.max(0, product.inventoryQuantity - product.reservedQuantity)} available`}
                     {product.reservedQuantity > 0 && (
                       <small>{product.reservedQuantity} reserved</small>
                     )}
                   </td>
-                  <td>
+                  <td data-label="Status">
                     <span className={`status ${product.status}`}>
                       {product.status.replace("_", " ")}
                     </span>
                   </td>
-                  <td>
+                  <td className="seller-inventory-actions">
                     <div className="row-actions">
-                      <button disabled={disabled} onClick={() => setEditing(product)}>
+                      <button className="button dark small" disabled={disabled} onClick={() => setEditing(product)}>
                         Edit
                       </button>
-                      {!disabled && product.status === "active" && product.availabilityType === "in_stock" && product.inventoryQuantity > product.reservedQuantity && <Link href={`/store?view=marketing&filter=promoted&promotion_product=${encodeURIComponent(product.id)}`}>Promote</Link>}
+                      <details><summary>More actions</summary><div className="seller-item-more">
+                      {!disabled && product.status === "active" && product.availabilityType === "in_stock" && product.inventoryQuantity > product.reservedQuantity && <Link href={`/store?view=growth&filter=promoted&promotion_product=${encodeURIComponent(product.id)}`}>Promote</Link>}
                       {product.availabilityType === "preorder" && <button onClick={()=>setPreorder(product)}>Manage preorder</button>}
                       {product.status === "active" ? (
                         <button disabled={disabled} onClick={() => void setStatus(product, "inactive")}>
@@ -559,6 +560,7 @@ function Inventory({
                       <button disabled={disabled} onClick={() => void archive(product)}>
                         Archive
                       </button>
+                      </div></details>
                     </div>
                   </td>
                 </tr>
@@ -568,9 +570,7 @@ function Inventory({
         </div>
         {!visible.length && <p className="store-empty">No inventory matches those filters.</p>}
       </section>
-      <SellerFeeDisclosure marketplaceFeeBps={marketplaceFeeBps} />
-      <SellerBulkStock products={rows} disabled={disabled} action={action} />
-      <SellerInventoryUpload disabled={disabled} action={action} />
+      <details className="store-panel"><summary>Selling fees</summary><SellerFeeDisclosure marketplaceFeeBps={marketplaceFeeBps} /></details>
       {preorder && <PreorderInventoryDialog listing={preorder} onClose={()=>setPreorder(null)}/>}
       {editing && (
         <ProductEditor
@@ -607,10 +607,11 @@ function ProductEditor({
   ): Promise<Record<string, unknown>>;
   onClose(): void;
 }) {
-  const dialog = useDialogFocus(onClose);
   const task = useTaskMeasurement("listing");
+  const router = useRouter();
   const [catalogReady, setCatalogReady] = useState(Boolean(product?.catalogProductId));
   const [busy, setBusy] = useState(false);
+  const dialog = useDialogFocus(() => { if (!busy) onClose(); });
   const [productId, setProductId] = useState(product?.id ?? "");
   const [files, setFiles] = useState<File[]>([]);
   const [images, setImages] = useState(product?.images ?? []);
@@ -625,6 +626,7 @@ function ProductEditor({
   >(product?.availabilityType ?? "in_stock");
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (busy) return;
     if (!catalogReady) { setImageError("Choose a catalog model first."); return; }
     setBusy(true);
     setImageError("");
@@ -660,7 +662,9 @@ function ProductEditor({
         });
       }
       task.complete();
-      window.location.reload();
+      onClose();
+      router.replace("/store?view=inventory");
+      router.refresh();
     } catch (reason) {
       setImageError(
         reason instanceof Error ? reason.message : "The product could not be saved.",
@@ -733,24 +737,28 @@ function ProductEditor({
     });
   }
   return (
-    <div className="store-editor-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <div className="store-editor-backdrop seller-full-editor" role="presentation">
       <section ref={dialog} tabIndex={-1} className="store-editor" role="dialog" aria-modal="true" aria-labelledby="product-editor-title">
-        <div className="panel-heading">
+        <div className="panel-heading seller-editor-heading">
           <div>
             <p className="eyebrow">Inventory item</p>
             <h2 id="product-editor-title">{product ? "Edit listing" : "Create listing"}</h2>
           </div>
-          <button type="button" className="dialog-close" aria-label="Close" onClick={onClose}>×</button>
+          <button type="button" className="dialog-close" aria-label="Close listing editor" disabled={busy} onClick={onClose}>×</button>
         </div>
+        <nav className="seller-editor-nav" aria-label="Listing sections"><a href="#listing-model">Model</a><a href="#listing-price">Price &amp; stock</a><a href="#listing-condition">Condition</a><a href="#listing-photos">Photos</a></nav>
         <form className="admin-form" onSubmit={submit} onChange={task.start}>
+          <div className="seller-editor-scroll">
+          <section id="listing-model"><h3>Model</h3>
           <CatalogModelPicker initial={product} listingSaved={Boolean(productId)} disabled={busy} onReady={setCatalogReady} />
+          </section>
           <fieldset className="catalog-listing-fields" hidden={!catalogReady} disabled={!catalogReady}>
           <div className="form-row">
             <label>Seller SKU<input name="sellerSku" required maxLength={100} defaultValue={product?.sellerSku ?? ""} /></label>
             <label>Listing title (optional)<input name="title" maxLength={200} defaultValue={product?.title ?? ""} /></label>
           </div>
-          <label>Condition notes<textarea name="conditionNotes" maxLength={2000} defaultValue={product?.conditionNotes ?? ""} /></label>
           <label>Description<textarea name="description" rows={4} maxLength={4000} defaultValue={product?.description ?? ""} /></label>
+          <section id="listing-price"><h3>Price &amp; stock</h3>
           <div className="form-row">
             <label>Full item price (USD)<input name="price" inputMode="decimal" required value={price} onChange={e => setPrice(e.target.value)} /></label>
             <label>{availabilityType === "preorder" ? "Quantity available to preorder" : "Inventory quantity"}<input name="inventoryQuantity" type="number" min={availabilityType === "preorder" ? 1 : product?.reservedQuantity ?? 0} max={100000} required defaultValue={product?.preorder?.capacity ?? product?.inventoryQuantity ?? 1} /></label>
@@ -790,8 +798,11 @@ function ProductEditor({
               <div className="preorder-deposit-preview"><strong>10% deposit{Number(price) > 0 ? ` · ${formatMoney(Math.round(Number(price) * 10), "usd")} per item` : ""}</strong><p>Buyers pay the deposit now and the remaining balance when you mark stock ready. Shipping and applicable tax are shown before payment.</p><p>The deposit is non-refundable for a change of mind, unless you approve a refund. If you cannot fulfill, the buyer is refunded. Required refunds for delays and other consumer rights still apply.</p></div>
             </>}
           </fieldset>
-          <fieldset><legend>Package override (optional)</legend><p className="form-note">Leave all four blank to use the store default package for calculated checkout rates.</p><div className="parcel-grid"><label>Length (in)<input name="packageLength" inputMode="decimal" defaultValue={product?.packageLength ?? ""} /></label><label>Width (in)<input name="packageWidth" inputMode="decimal" defaultValue={product?.packageWidth ?? ""} /></label><label>Height (in)<input name="packageHeight" inputMode="decimal" defaultValue={product?.packageHeight ?? ""} /></label><label>Weight (lb)<input name="packageWeight" inputMode="decimal" defaultValue={product?.packageWeight ?? ""} /></label></div></fieldset>
+          <details><summary>Package override (optional)</summary><p className="form-note">Leave all four blank to use the store default package for calculated checkout rates.</p><div className="parcel-grid"><label>Length (in)<input name="packageLength" inputMode="decimal" defaultValue={product?.packageLength ?? ""} /></label><label>Width (in)<input name="packageWidth" inputMode="decimal" defaultValue={product?.packageWidth ?? ""} /></label><label>Height (in)<input name="packageHeight" inputMode="decimal" defaultValue={product?.packageHeight ?? ""} /></label><label>Weight (lb)<input name="packageWeight" inputMode="decimal" defaultValue={product?.packageWeight ?? ""} /></label></div></details>
+          </section><section id="listing-condition"><h3>Condition</h3>
+          <label>Condition notes<textarea name="conditionNotes" maxLength={2000} defaultValue={product?.conditionNotes ?? ""} /></label>
           <CollectibleListingFields product={product} includeIdentity={false}/>
+          </section><section id="listing-photos"><h3>Photos</h3>
           <ProductImageFields
             productId={productId || undefined}
             images={images}
@@ -804,14 +815,16 @@ function ProductEditor({
             onReorder={productId ? reorderImages : undefined}
           />
           {availabilityType !== "preorder" ? <RequiredPhotoChecklist product={product}/> : <p className="form-note">Upload a product image or preview. Describe any prototype images or expected production differences in the listing.</p>}
+          </section>
           <label>Search keywords<input name="keywords" maxLength={1000} defaultValue={product?.keywords ?? ""} /></label>
-          {imageError && <p className="form-error" role="alert">{imageError}</p>}
           {product && product.reservedQuantity > 0 && <p className="form-note">Inventory cannot be reduced below {product.reservedQuantity} reserved units.</p>}
-          <div className="row-actions">
-            <button className="button dark small" disabled={busy}>{busy ? "Saving…" : product ? "Save changes" : "Create draft"}</button>
-            <button type="button" onClick={onClose}>Cancel</button>
-          </div>
-            </fieldset>
+          <details className="seller-publish-checklist"><summary>Before publishing</summary><ul><li>Choose the correct catalog model.</li><li>Set price, available stock, and your SKU.</li><li>Confirm model and packaging condition; disclose missing parts and defects.</li><li>{availabilityType === "preorder" ? "Add preview imagery and an expected ship date." : "Add actual-item photos and label each required view."}</li><li>Complete store setup and accept current Seller Terms.</li></ul><p>Saving a new listing creates a draft. Publish from Inventory after completing these checks.</p></details>
+          </fieldset></div>
+          <footer className="seller-editor-footer">
+            {imageError && <p className="form-error" role="alert">{imageError}</p>}
+            <button className="button dark" disabled={busy || !catalogReady}>{busy ? "Saving…" : product ? "Save changes" : "Save draft"}</button>
+            <button type="button" className="button outline" disabled={busy} onClick={onClose}>Cancel</button>
+          </footer>
       </form>
       </section>
     </div>
@@ -846,45 +859,42 @@ function Orders({
       orderHandlingReminder(order).level,
     ),
   ).length;
-  const visible = rows.filter((order) => matchesOrderView(order, filter, returnOrderIds));
+  const visible = prioritizeOrders(rows.filter((order) => matchesOrderView(order, filter, returnOrderIds)));
   return (
     <div className="store-stack">
       <header className="store-page-heading">
-        <div><p className="eyebrow">Fulfillment</p><h2>Orders</h2><p>Compare protected carrier rates, print labels, and follow tracking events.</p>{urgentCount > 0 && <p className="handling-summary"><b>{urgentCount} handling reminder{urgentCount === 1 ? "" : "s"}</b> need attention.</p>}</div>
-        <select aria-label="Filter orders" value={filter} onChange={(event) => navigate("orders", event.target.value)}>
-          <option value="open">Awaiting shipment</option><option value="preorders">Preorders</option><option value="all">All orders</option><option value="shipped">Shipped</option><option value="returns">Returns</option><option value="refunded">Refunded</option><option value="cancelled">Cancelled</option>
-        </select>
+        <div><h2>Orders</h2><p>{urgentCount ? `${urgentCount} dispatch deadlines need attention.` : "Items, dispatch deadlines, and tracking."}</p></div>
+        <label className="seller-control">Order queue<select aria-label="Filter orders" value={filter} onChange={(event) => navigate("orders", event.target.value)}>
+          {orderViews.map(([value, label]) => <option key={value} value={value}>{label} · {rows.filter(row => matchesOrderView(row, value, returnOrderIds)).length}</option>)}<option value="preorders">Preorders</option><option value="refunded">Refunded</option><option value="cancelled">Cancelled</option>
+        </select></label>
       </header>
-      <nav className="hub-filters" aria-label="Order queues">{orderViews.map(([value, label]) => <button key={value} aria-pressed={filter === value} onClick={() => navigate("orders", value)}>{label}<span>{rows.filter((row) => matchesOrderView(row, value, returnOrderIds)).length}</span></button>)}<button aria-pressed={filter === "preorders"} onClick={()=>navigate("orders","preorders")}>Preorders</button></nav>
       {filter === "returns" && <div className="hub-callout"><p>Orders with a return-and-refund request. Review each case and respond in the Resolution Center.</p><Link className="button outline small" href="/resolution">Manage returns</Link></div>}
       <div className="store-orders">
         {["preorders","all"].includes(filter)&&<SellerPreorderOrders showEmpty={filter==="preorders"}/>}
-        {visible.map((order) => (
-          <article className="store-order" key={order.id} id={`order-${order.id}`}>
-            <div className="store-order-header">
-              <div><p className="eyebrow">{date(order.createdAt)}</p><h3>{order.orderNumber}</h3></div>
-              <div><HandlingBadge order={order} /> <span className={`status ${order.paymentStatus}`}>{order.paymentStatus}</span> <span className={`status ${order.fulfillmentStatus}`}>{order.fulfillmentStatus}</span></div>
-            </div>
-            <div className="store-order-body">
-              {rows.length === 1 && ["unfulfilled", "processing"].includes(order.fulfillmentStatus) && <ContextualHelp id="seller-first-order" title="Your first order: what to do next"><p>{order.shipByAt ? `Ship by ${formatUtcDateTime(order.shipByAt)}.` : "Check the dispatch details before packing."} Protect the model, accessories, and included box inside a sturdy outer shipping box. {shipping.configured ? "Create a shipping label below, or buy postage separately and add tracking." : "Buy postage with your carrier, then add the carrier and tracking number below."} <Link href="/store?view=help">Packing and shipping help</Link></p></ContextualHelp>}
-              <div>
-                <h4>Items</h4>
-                {order.items.map((item) => <p key={item.id}><b>{item.productTitleSnapshot}</b><br /><span>{item.sellerSkuSnapshot} · {item.quantity} × {formatMoney(item.unitPriceCents, order.currency)}</span>{item.availabilityTypeSnapshot === "preorder" && item.releaseDateSnapshot && <><br /><span className="order-preorder-date">Preorder · Expected release {date(item.releaseDateSnapshot)}</span></>}</p>)}
-                <SellerOrderAmounts order={order} /><p><b>Payout:</b> {sellerPayoutLabel(order)}</p>
-              </div>
-              <div>
-                <h4>Ship to</h4><p><b>{order.buyerName || "Customer"}</b><br />{formatAddress(order.shippingAddress)}</p><p><a href={`mailto:${order.buyerEmail}`}>{order.buyerEmail}</a></p>
-                {order.shippingMode === "calculated" && <p className="shipping-service-commitment"><b>Buyer selected:</b> {order.selectedShippingCarrier} {order.selectedShippingService}{order.selectedShippingEstimatedDays == null ? "" : ` (about ${order.selectedShippingEstimatedDays} business days)`}. Use this service or an equal/faster one.</p>}
-                {["paid", "partially_refunded"].includes(order.paymentStatus) && <ShipmentPanel order={order} compatibleOrders={compatibleOrdersFor(order, rows)} store={store} shipping={shipping} disabled={disabled} action={action} />}
-                <Link className="button outline small" href={`/resolution?order=${order.id}`}>Open resolution record</Link>
-              </div>
-            </div>
-          </article>
-        ))}
+        {visible.map(order => <SellerOrderCard key={order.id} order={order} rows={rows} store={store} shipping={shipping} disabled={disabled} action={action}/>)}
         {!visible.length && filter!=="preorders" && <p className="store-empty">{filter==="all" ? "No fully paid orders yet." : "No orders match this view."}</p>}
       </div>
     </div>
   );
+}
+
+function SellerOrderCard({ order, rows, store, shipping, disabled, action }: {
+  order: StoreOrder;
+} & Pick<Parameters<typeof Orders>[0], "rows" | "store" | "shipping" | "disabled" | "action">) {
+  const readyToShip = needsShipment(order);
+  return <article className="store-order seller-queue-order" id={`order-${order.id}`}>
+    <header className="store-order-header"><div><span>{date(order.createdAt)}{order.isTestOrder ? " · Test order" : ""}</span><h3>{order.orderNumber}</h3></div><b className="seller-money">{formatMoney(order.totalCents, order.currency)}</b></header>
+    <div className="seller-order-status"><HandlingBadge order={order}/><span className={`status ${order.paymentStatus}`}>{order.paymentStatus.replaceAll("_", " ")}</span><span className={`status ${order.fulfillmentStatus}`}>{order.fulfillmentStatus.replaceAll("_", " ")}</span></div>
+    <ul className="seller-packing-items">{order.items.map(item => <li key={item.id}><SellerThumbnail src={item.imageUrlSnapshot} title={item.productTitleSnapshot}/><div><strong>{item.productTitleSnapshot}</strong><p>{item.scaleSnapshot} · {item.manufacturerSnapshot}</p><p><b>Qty {item.quantity}</b> · SKU {item.sellerSkuSnapshot}</p>{item.availabilityTypeSnapshot === "preorder" && item.releaseDateSnapshot && <p>Preorder · expected {date(item.releaseDateSnapshot)}</p>}</div></li>)}</ul>
+    {!order.items.length && <div className="seller-data-note"><strong>Item details are missing from this order.</strong><p>The model, SKU, and quantity were not recorded. Confirm the packing details with support before shipping.</p><Link href={`/contact?order=${encodeURIComponent(order.orderNumber)}`}>Resolve missing order items →</Link></div>}
+    {readyToShip && <p className="seller-dispatch-date">{order.shipByAt ? `Dispatch deadline: ${dateTime(order.shipByAt)}` : "Dispatch deadline not recorded — check with support."}</p>}
+    <details className="seller-fulfillment"><summary>{readyToShip && order.items.length && !order.shipment ? "Create shipment" : "Delivery & tracking details"}</summary><div className="seller-fulfillment-content"><h4>Ship to</h4><p><strong>{order.buyerName || "Customer"}</strong><br/>{formatAddress(order.shippingAddress)}</p><p><a href={`mailto:${order.buyerEmail}`}>{order.buyerEmail}</a></p>
+      {order.shippingMode === "calculated" && <p><b>Buyer selected:</b> {order.selectedShippingCarrier} {order.selectedShippingService}{order.selectedShippingEstimatedDays == null ? "" : ` · about ${order.selectedShippingEstimatedDays} business days`}. Use this service or an equal/faster one.</p>}
+      {["paid", "partially_refunded"].includes(order.paymentStatus) && (order.items.length || !readyToShip) ? <ShipmentPanel order={order} compatibleOrders={compatibleOrdersFor(order, rows).filter(candidate => candidate.items.length > 0)} store={store} shipping={shipping} disabled={disabled} action={action}/> : <p>{readyToShip ? "Shipment creation is unavailable until this order’s items are confirmed." : "Shipment creation requires a paid order."}</p>}
+    </div></details>
+    <details className="seller-order-finances"><summary>Payment & fee details</summary><SellerOrderAmounts order={order}/><p><b>Payout:</b> {sellerOrderPayout(order).label}</p>{order.processingFeePayer === "platform" && <p>This order records processing paid by MCC under its earlier fee arrangement. New orders deduct actual processing from seller proceeds.</p>}{order.paymentFlow === "destination" && <p>Legacy direct payouts are excluded from MCC’s held/released totals. Check Stripe for this payment’s payout history.</p>}</details>
+    <div className="seller-task-links"><Link href={`/store?view=messages`}>Buyer messages →</Link><Link href={`/resolution?order=${order.id}`}>Order support →</Link></div>
+  </article>;
 }
 
 function ShipmentPanel({
@@ -1109,34 +1119,38 @@ async function shippingRequest(payload: Record<string, unknown>) {
   return body;
 }
 
-function AnalyticsView({ analytics }: { analytics: Analytics }) {
-  const max = Math.max(1, ...analytics.monthlySales.map((month) => month.grossCents));
-  return <section className="store-panel"><p className="eyebrow">Last six calendar months</p><h3>Revenue over time</h3><p className="hub-note">Gross item sales before fees and refunds. The current month is partial; sales are grouped by order creation date.</p><div className="sales-bars">{analytics.monthlySales.map((month) => <div key={month.key}><div><span>{month.label}</span><b>{formatMoney(month.grossCents)}</b></div><div className="sales-bar-track"><span style={{ width: `${month.grossCents / max * 100}%`, minWidth: 0 }} /></div><small>{month.orders} paid orders</small></div>)}</div></section>;
-}
-
 function StoreSettings({
   store,
   fee,
   disabled,
   action,
+  setup,
+  section,
 }: {
   store: Store;
   fee: StoreData["fee"];
   disabled: boolean;
+  setup: StoreData["setup"];
+  section?: string;
   action(
     payload: Record<string, unknown>,
     options?: { reload?: boolean; message?: string },
   ): Promise<Record<string, unknown>>;
 }) {
   const addressRef = useRef<AddressFieldsHandle>(null);
+  const settingsRouter = useRouter();
   const [saveError, setSaveError] = useState("");
   const [acceptedSellerTerms, setAcceptedSellerTerms] = useState(false);
+  const [logoBusy, setLogoBusy] = useState(false);
+  const hash = usePageHash();
+  const selected = ["shipping", "terms", "payments", "introduction"].includes(section ?? "") ? section! : hash === "#seller-terms" ? "terms" : hash === "#shipping-options" ? "shipping" : "introduction";
   const currentSellerTerms =
     store.sellerTermsVersion === POLICY_VERSION &&
     Boolean(store.sellerTermsAcceptedAt);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (disabled || logoBusy) return;
     setSaveError("");
     try {
       await action(
@@ -1151,31 +1165,41 @@ function StoreSettings({
   }
 
   async function acceptTerms() {
-    await action(
-      {
-        action: "accept_seller_terms",
-        sellerTermsVersion: POLICY_VERSION,
-      },
-      { reload: true, message: "Current Seller Terms accepted." },
-    );
+    setSaveError("");
+    try {
+      await action(
+        {
+          action: "accept_seller_terms",
+          sellerTermsVersion: POLICY_VERSION,
+        },
+        { reload: true, message: "Current Seller Terms accepted." },
+      );
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "Seller Terms could not be saved. Please try again.");
+    }
   }
   return (
     <div className="store-stack">
-      <header className="store-page-heading"><div><p className="eyebrow">Storefront</p><h2>Store settings</h2><p>Update the public details and policies customers see.</p></div></header>
-      <section className="store-panel store-settings">
-        <form className="admin-form" id="store-introduction" onSubmit={submit}>
+      <header className="store-page-heading"><div><h2>Settings</h2><p>Manage one part of your store at a time.</p></div></header>
+      {!setup.readyToPublish && <div className="seller-data-note"><strong>Before publishing</strong><div className="seller-task-links">{!currentSellerTerms && <Link href="/store?view=settings&filter=terms#seller-terms">Accept Seller Terms →</Link>}{setup.steps.filter(step => !step.complete && step.id !== "inventory").map(step => <Link key={step.id} href={step.href}>{step.title} →</Link>)}{store.status !== "active" && <Link href="/store?view=payments">Resolve store status →</Link>}</div></div>}
+      <label className="seller-control">Settings section<select value={selected} onChange={event => settingsRouter.push(`/store?view=settings&filter=${event.target.value}`)}><option value="introduction">Storefront details</option><option value="shipping">Shipping & returns</option><option value="payments">Payments & fees</option><option value="terms">Seller Terms</option></select></label>
+      {saveError && <p className="form-error" role="alert">{saveError}</p>}
+      <section hidden={!["introduction", "shipping"].includes(selected)} className="store-panel store-settings">
+        <form hidden={selected !== "introduction"} className="admin-form" id="store-introduction" onSubmit={submit}>
+          <h3>Storefront details</h3>
           <input type="hidden" name="section" value="introduction" />
-          {saveError && <p className="form-error" role="alert">{saveError}</p>}
+
           <div className="form-row"><label>Store name<input name="storeName" required maxLength={120} disabled={disabled} defaultValue={store.storeName} /></label><label>Primary contact<input name="contactName" required maxLength={120} disabled={disabled} defaultValue={store.contactName} /></label></div>
           <label>Account email<input value={store.contactEmail} disabled /><span>Contact support to change the email that owns this store.</span></label>
           <label>Store introduction<textarea name="description" rows={4} minLength={30} maxLength={2000} required disabled={disabled} defaultValue={store.description} /><span>Tell buyers what you sell and why you collect or specialize in these models.</span></label>
           <label>Specialty<input name="specialty" required maxLength={300} disabled={disabled} defaultValue={store.specialty} placeholder="For example, Japanese 1:64 models and vintage racing cars" /></label>
           <label>How you pack models<textarea name="packingApproach" required minLength={20} maxLength={1000} rows={3} disabled={disabled} defaultValue={store.packingApproach} placeholder="Explain how you protect the model, included box, and accessories in transit." /></label>
-          <div className="form-row"><label>Public shipping state or region<input name="shippingOriginRegion" required maxLength={80} disabled={disabled} defaultValue={store.shippingOriginRegion ?? ""} /></label><label>Shipping country (two-letter code)<input name="shippingOriginCountry" required minLength={2} maxLength={2} disabled={disabled} defaultValue={store.shippingOriginCountry} /></label></div><p className="form-note">Only this general region and country are public. Do not put your street address in your introduction or packing description.</p>
-          <div className="form-row"><label>Website URL<input name="websiteUrl" type="url" disabled={disabled} defaultValue={store.websiteUrl ?? ""} /></label><label>Logo URL<input name="logoUrl" type="url" disabled={disabled} defaultValue={store.logoUrl ?? ""} /></label></div>
-          <button className="button dark small" disabled={disabled}>Save store introduction</button>
+          <div className="form-row"><label>Public shipping state or region<input name="shippingOriginRegion" required maxLength={80} disabled={disabled} defaultValue={store.shippingOriginRegion ?? ""} /></label><StoreCountrySelect value={store.shippingOriginCountry} disabled={disabled}/></div><p className="form-note">Only this region and country are public. Update your private ship-from address in Shipping after changing country.</p>
+          <label>Website URL<input name="websiteUrl" type="url" disabled={disabled} defaultValue={store.websiteUrl ?? ""} /></label>
+          <StoreLogoUpload initialUrl={store.logoUrl} disabled={disabled} onBusy={setLogoBusy}/>
+          <button className="button dark small" disabled={disabled || logoBusy}>Save store introduction</button>
         </form>
-        <form className="admin-form" id="shipping-options" onSubmit={submit}>
+        <form hidden={selected !== "shipping"} className="admin-form" id="shipping-options" onSubmit={submit}>
           <input type="hidden" name="section" value="shipping" />
           <h3>Set shipping options</h3>
           <div className="form-row"><label>Shipping model<select name="shippingMode" required disabled={disabled} defaultValue={store.shippingMode}><option value="calculated">Calculated carrier rates</option><option value="flat">Flat-rate shipping</option><option value="free">Free shipping</option></select></label><label>Handling time (business days)<input name="handlingTimeBusinessDays" type="number" min={1} max={10} required disabled={disabled} defaultValue={store.handlingTimeBusinessDays} /></label></div>
@@ -1190,8 +1214,8 @@ function StoreSettings({
           <button className="button dark small" disabled={disabled}>Save shipping options</button>
         </form>
       </section>
-      <section className="store-panel payout-status"><p className="eyebrow">Payments</p><h3>Connect your bank account to receive payments</h3><p>Bank and identity details stay securely with Stripe. <Link href="/store?view=payments">Open Payments to connect or check your account</Link>.</p></section>
-      <section className="store-panel payout-status" id="seller-terms">
+      <section hidden={selected !== "payments"} className="store-panel payout-status"><h3>Payments</h3><p>Bank and identity details stay securely with Stripe.</p><Link className="button dark small" href="/store?view=payments">Open Payments</Link></section>
+      <section hidden={selected !== "terms"} className="store-panel payout-status" id="seller-terms">
         <p className="eyebrow">Seller agreement</p>
         <h3>{currentSellerTerms ? "Current Seller Terms accepted" : "Action required before selling"}</h3>
         {currentSellerTerms ? (
@@ -1220,7 +1244,7 @@ function StoreSettings({
           </>
         )}
       </section>
-      <section className="store-panel payout-status"><p className="eyebrow">Selling fees</p><h3>{fee.rateKind === "founding_professional" ? "Founding Seller Rate" : "Professional Store Rate"} — {feePercent(fee.marketplaceFeeBps)} marketplace fee</h3>{fee.foundingPromotionActive && <p>Your promotional rate is active. It automatically becomes the {feePercent(fee.standardMarketplaceFeeBps)} standard professional rate when the six-month period ends.</p>}<SellerFeeDisclosure marketplaceFeeBps={fee.marketplaceFeeBps} /><p>Seller proceeds become eligible for release {activeProtectionPolicy.deliveredDays} calendar days after carrier-confirmed delivery if no case is open and the actual processing fee is available. Stripe controls bank-payout timing after release.</p></section>
+      <section hidden={selected !== "payments"} className="store-panel payout-status"><h3>{fee.rateKind === "founding_professional" ? "Founding Seller Rate" : "Professional Store Rate"} · {feePercent(fee.marketplaceFeeBps)} marketplace fee</h3>{fee.foundingPromotionActive && <p>Your promotional rate becomes the {feePercent(fee.standardMarketplaceFeeBps)} standard rate when the six-month period ends.</p>}<SellerFeeDisclosure marketplaceFeeBps={fee.marketplaceFeeBps} /><p>New-order proceeds become eligible {activeProtectionPolicy.deliveredDays} calendar days after confirmed delivery if no case is open and actual processing fees are available. See Payments for each order’s dates and holds.</p></section>
     </div>
   );
 }
@@ -1289,22 +1313,6 @@ function formatAddress(value: string) {
   } catch {
     return "Shipping address unavailable";
   }
-}
-
-function sellerPayoutLabel(order: StoreOrder) {
-  if (order.paymentFlow === "destination") return "Legacy Stripe payout schedule";
-  if (order.sellerTransferStatus === "transferred")
-    return order.sellerTransferredAt
-      ? `Released to Stripe ${date(order.sellerTransferredAt)}`
-      : "Released to Stripe";
-  if (order.sellerTransferStatus === "processing") return "Release processing";
-  if (order.sellerTransferStatus === "failed") return "Release will be retried";
-  if (order.sellerTransferStatus === "cancelled") return "Cancelled";
-  if (order.sellerTransferStatus === "reversed") return "Reversed for refund";
-  if (order.processingFeePayer === "seller" && order.paymentProcessingFeeCents == null) return "Held — awaiting actual Stripe processing fee";
-  return order.payoutEligibleAt
-    ? `Held through ${date(order.payoutEligibleAt)}`
-    : "Held until the protection deadline after delivery";
 }
 
 function date(value: string) {

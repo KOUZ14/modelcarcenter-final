@@ -57,9 +57,19 @@ npm run dev
 
 Open the exact local URL printed by Vite (normally `http://localhost:5173`).
 
+For a loopback `SITE_URL`, Vite uses its port and exits if that port is occupied. To use another port, set it in `.env.local` (for example, `SITE_URL=http://localhost:5174`) and restart the dev server. Keep any explicit `--port` argument in sync with `SITE_URL` so authentication, email links, and checkout returns use the same origin.
+
 The seed command is safe for development only. It inserts one seller and four products whose names begin with `[DEMO]`. It is never called by the application, build, migration, or production deployment.
 
-On native Windows, use WSL2 for the scripted workflow. If running Vite directly from PowerShell, ensure Node 22+ is on `PATH`, then run `npx vite`.
+On native Windows, ensure Node 22.13+ is on `PATH`, then run `npm run dev` in PowerShell. The build and database scripts still require Bash/WSL2.
+
+### Updates while developing
+
+Leave `npm run dev` running and save your `.tsx`, `.ts`, or `.css` changes. Vite applies hot updates or reloads the page automatically. Refresh the browser with `Ctrl+R` if you need to refetch data; there is no need to restart the server for ordinary page, component, style, or API edits. Use `Ctrl+Shift+R` if the browser is displaying stale assets.
+
+Restart after changing environment values, installing dependencies, or changing server configuration if Vite has not already restarted itself. Do not use `--force` for routine starts: it discards the dependency optimization cache.
+
+For WSL checkouts on a Windows drive (`/mnt/c/...`), Vite polls for saved edits every 500 ms because Windows editor events can be missed. Generated files, runtime snapshots, and local database state are excluded from watching to reduce startup work and unnecessary reloads. For faster startup, run Node directly on Windows for a `C:\...` checkout, or keep a WSL checkout in `~/projects/...` and edit it through your editor's WSL integration. Keep one dev server per checkout and avoid running a full build alongside it when measuring performance. See [Vite's WSL guidance](https://vite.dev/config/server-options#server-watch).
 
 ### WSL dependency-cache errors
 

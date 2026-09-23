@@ -4,7 +4,7 @@ import Image from "next/image";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { AddressFields, type AddressFieldsHandle } from "./address-fields";
 import { useMarketplace } from "./marketplace-provider";
-import { formatMoney as money } from "@/lib/format";
+import { formatCondition, formatMoney as money } from "@/lib/format";
 import { POLICY_VERSION } from "@/lib/legal";
 import { getShippingZip, setShippingZip } from "@/lib/shipping-destination";
 import { CHECKOUT_ADDRESS_KEY, CHECKOUT_SESSION_KEY, checkoutAddressKey, readCheckoutAddressDraft } from "@/lib/checkout-address";
@@ -125,6 +125,21 @@ export function CartPage({ automaticTax, taxBehavior }: { automaticTax: boolean;
   const shipping = ready ? selected.reduce((sum, group) => sum + shippingFor(group).amount!, 0) : null;
   const working = selected.some((group) => calculating[group.sellerId]);
   const currency = selected[0]?.items[0].currency ?? cart[0]?.currency ?? "usd";
+  const fixedShipping = selected.length > 0 && selected.every((group) => (sources[group.sellerId] ?? "standard") === "standard" && group.items[0].shippingMode !== "calculated");
+  const totalLabel = automaticTax && taxBehavior === "inclusive" ? "Total (tax included)" : "Total before tax";
+  function goToSection(id: string) {
+    const element = document.getElementById(id);
+    element?.focus();
+    element?.scrollIntoView({ block: "start" });
+  }
+  function enterDelivery() { addressRef.current?.focusFirstInvalid(); }
+  function nextStep() {
+    if (!selected.length || !sameCurrency) goToSection("seller-selection");
+    else if (!addressComplete) enterDelivery();
+    else if (!ready) goToSection("shipping-step");
+    else if (!acceptedPolicies) goToSection("order-summary-heading");
+    else void checkout();
+  }
   async function calculate(group: typeof groups[number], automatic = false) {
     if (loading || calculating[group.sellerId] || !destination || !addressComplete || (!automatic && !addressForm.current?.reportValidity())) return;
     const currentRevision = revision.current, cartKey = itemKey(group.items);
@@ -174,7 +189,9 @@ export function CartPage({ automaticTax, taxBehavior }: { automaticTax: boolean;
   async function checkout() {
     if (checkoutLock.current || loading || working || requesting || !ready || !authReady || !acceptedPolicies || !destination || !addressForm.current?.reportValidity()) return;
     // Recheck the deadline at payment even if a background tab delayed its timer.
-    if (selected.some((group) => !shippingFor(group, Date.now()).selection)) { setClock(Date.now()); setError("A shipping quote expired. Refresh carrier options or choose standard shipping before paying."); return; }
+    // eslint-disable-next-line react-hooks/purity -- Payment click handlers must check the current quote expiry, not the last rendered clock.
+    const checkoutTime = Date.now();
+    if (selected.some((group) => !shippingFor(group, checkoutTime).selection)) { setClock(checkoutTime); setError("A shipping quote expired. Refresh carrier options or choose standard shipping before paying."); return; }
     checkoutLock.current = true; setLoading(true); setError("");
     trackEvent("shipping_completed", { result: "success", count: selected.length });
     trackEvent("checkout_started", { count: selected.length });
@@ -195,39 +212,45 @@ export function CartPage({ automaticTax, taxBehavior }: { automaticTax: boolean;
         const matching = requests.filter((request) => combinedRequestMatches(request, group.items, destination) && Date.parse(request.expiresAt) > clock && ["pending", "quoted", "declined"].includes(request.status));
         const source = sources[group.sellerId] ?? "standard";
         const selectedRequest = matching.find((request) => request.id === source);
+        const fixed = source === "standard" && group.items[0].shippingMode !== "calculated";
+        const dispatchDays = group.items[0].handlingTimeBusinessDays;
         const shippingLabel = details.amount !== null
           ? details.amount === 0 ? "Free" : money(details.amount, group.items[0].currency)
           : source === "standard" ? "Calculate rates" : selectedRequest?.status === "pending" ? "Awaiting quote" : "Review quote";
     return <details className="cart-shipping-disclosure" open={addressComplete} key={group.sellerId}>
-            <summary><span>{group.sellerName} shipping</span><strong>{shippingLabel}</strong></summary>
+            <summary><span>{group.sellerName}<small>{fixed ? "Fixed rate per order" : source === "standard" ? "Carrier quote" : "Seller quote"}</small></span><strong>{shippingLabel}</strong></summary>
             <div className="seller-shipping-options">
-              <label className="shipping-source"><input type="radio" name={`shipping-source-${group.sellerId}`} checked={source === "standard"} disabled={loading} onChange={() => chooseSource(group.sellerId, "standard")}/>Use standard shipping</label>
-              {source === "standard" && group.items[0].shippingMode === "calculated" && <button className="button outline small" type="button" disabled={loading || calculating[group.sellerId]} onClick={() => void calculate(group)}>{calculating[group.sellerId] ? "Calculating…" : details.quote ? "Refresh carrier options" : "Calculate carrier options"}</button>}
+              <label className="shipping-source"><input type="radio" name={`shipping-source-${group.sellerId}`} checked={source === "standard"} disabled={loading} onChange={() => chooseSource(group.sellerId, "standard")}/>{group.items[0].shippingMode === "calculated" ? "Use carrier rates" : group.items[0].shippingMode === "free" ? "Use free shipping" : "Use flat-rate shipping"}</label>
+              <p className="cart-dispatch-note">{dispatchDays != null ? `Dispatch within ${dispatchDays} business day${dispatchDays === 1 ? "" : "s"}.` : "Dispatch time not specified."}{fixed && " Carrier and delivery time not specified."}</p>
+              {source === "standard" && group.items[0].shippingMode === "calculated" && <button className="button outline small" type="button" disabled={loading || calculating[group.sellerId]} onClick={() => addressComplete ? void calculate(group) : enterDelivery()}>{calculating[group.sellerId] ? "Calculating…" : !addressComplete ? "Enter delivery details for rates" : details.quote ? "Refresh carrier options" : "Calculate carrier options"}</button>}
               {details.quote && <fieldset className="shipping-options"><legend>Carrier service</legend>{details.quote.options.map((option) => <label className="shipping-option" key={option.id}><input type="radio" name={`shippingRate-${group.sellerId}`} checked={rates[group.sellerId] === option.id} disabled={loading} onChange={() => setRates((state) => ({ ...state, [group.sellerId]: option.id }))}/><span><b>{option.provider} {option.serviceLevel}</b><small>{option.estimatedDays ? `Estimated ${option.estimatedDays} business days in transit after dispatch` : "Carrier estimate unavailable"}</small></span><b>{money(option.amountCents, option.currency)}</b></label>)}</fieldset>}
               {itemCount >= 2 && <details className="combined-shipping-disclosure">
                 <summary>Request combined shipping</summary>
                 <div className="combined-shipping-choice">
-                  <p>Ask for one shipping price for these items. Your items and delivery address are shared with this seller. Stock is reserved only at checkout.</p>
+                  <p>Shares these items and your delivery address with this seller. Stock is reserved at checkout.</p>
                   {collector ? <button className="button outline small" type="button" disabled={loading || requesting !== null} onClick={() => void requestShipping(group)}>{requesting === group.sellerId ? "Sending request…" : "Request combined shipping quote"}</button> : <Link className="text-link" href="/sign-in?returnTo=/cart">Sign in to request a shipping quote</Link>}
                 </div>
               </details>}
-              {matching.map((request) => <label className="shipping-source" key={request.id}><input type="radio" name={`shipping-source-${group.sellerId}`} checked={source === request.id} disabled={loading || request.status === "declined"} onChange={() => chooseSource(group.sellerId, request.id)}/><span>{request.status === "quoted" ? <>Seller quote: <b>{money(request.amountCents!, request.currency)}</b> — {request.carrier} {request.service}, about {request.estimatedDays} business days. Expires {new Date(request.expiresAt).toLocaleString()}.</> : request.status === "pending" ? "Waiting for the seller’s quote" : "The seller could not offer combined shipping."}{request.sellerNote && <small>{request.sellerNote}</small>}</span></label>)}
+              {matching.map((request) => <label className="shipping-source" key={request.id}><input type="radio" name={`shipping-source-${group.sellerId}`} checked={source === request.id} disabled={loading || request.status === "declined"} onChange={() => chooseSource(group.sellerId, request.id)}/><span>{request.status === "quoted" ? <>Seller quote: <b>{money(request.amountCents!, request.currency)}</b> — {request.carrier} {request.service}{request.estimatedDays != null && <>, estimated {request.estimatedDays} business days in transit after dispatch</>}. Expires {new Date(request.expiresAt).toLocaleString()}.</> : request.status === "pending" ? "Waiting for the seller’s quote" : "The seller could not offer combined shipping."}{request.sellerNote && <small>{request.sellerNote}</small>}</span></label>)}
               {matching.length > 0 && <Link className="text-link" href="/messages#shipping-requests">Manage shipping requests</Link>}
-              {source !== "standard" && !details.selection && <p className="form-note">This quote is pending, expired, or no longer matches your items and address. Wait for a valid quote, choose standard shipping, or uncheck this seller to buy the other items now.</p>}
+              {source !== "standard" && !details.selection && <p className="form-note">No valid quote for these items and address. Choose standard shipping, wait for a new quote, or uncheck this seller.</p>}
               {(details.quote?.insuranceRequired || details.quote?.signatureRequired) && <p className="form-note">Required insurance and signature protection are included.</p>}
             </div>
           </details>;
   }
   if (!authReady) return <p role="status">Loading your cart…</p>;
   if (!cart.length) return <div className="empty-state cart-empty"><h1>Your cart is empty.</h1><p>Browse current inventory and add a model when you find the right one.</p><Link className="button dark" href="/marketplace">Browse model cars</Link></div>;
-  const blockedReason = !addressComplete ? "Complete your delivery name and address to continue." : !selected.length ? "Select at least one seller to continue." : !sameCurrency ? "Select sellers using the same currency." : working ? "Calculating shipping. Your items and address are saved." : !ready ? "Choose shipping for each selected seller. If calculation failed, retry below your delivery details." : !acceptedPolicies ? "Confirm the age and policy agreement to continue to payment." : requesting ? "Wait for your shipping request to finish." : "";
+  const blockedReason = !selected.length ? "Select at least one seller to continue." : !sameCurrency ? "Select sellers using the same currency." : !addressComplete ? "Complete your delivery name and address to continue." : working ? "Calculating shipping…" : !ready ? "Choose shipping for each selected seller." : !acceptedPolicies ? "Confirm the age and policy agreement to continue to payment." : requesting ? "Wait for your shipping request to finish." : "";
+  const blockerTarget = !selected.length || !sameCurrency ? "seller-selection" : !addressComplete ? "delivery-address-heading" : !ready ? "shipping-step" : !acceptedPolicies ? "checkout-agreement" : null;
+  const nextLabel = loading ? "Starting checkout…" : !selected.length || !sameCurrency ? "Select sellers" : !addressComplete ? "Enter delivery details" : working ? "Calculating…" : requesting ? "Sending request…" : !ready ? "Choose shipping" : !acceptedPolicies ? "Review order" : "Continue to payment";
   return <div>
     <header className="cart-header">
       <div><h1>Your cart</h1><p>{totalItems} item{totalItems === 1 ? "" : "s"} from {groups.length} seller{groups.length === 1 ? "" : "s"}</p></div>
-      <nav className="cart-jump-links" aria-label="Cart sections"><a href="#delivery-address-heading">Delivery address</a><a href="#order-summary-heading">Checkout summary</a></nav>
+      <Link className="text-link cart-browse-link" href="/marketplace">Browse models</Link>
     </header>
-    <ol className="checkout-steps" aria-label="Checkout progress"><li aria-current={!addressComplete ? "step" : undefined}><a href="#delivery-address-heading">1. Delivery details</a><span aria-hidden="true">→</span></li><li aria-current={addressComplete && !ready ? "step" : undefined}><a href="#shipping-step">2. Shipping</a><span aria-hidden="true">→</span></li><li aria-current={addressComplete && ready ? "step" : undefined}><a href="#order-summary-heading">3. Payment</a></li></ol>
+    <nav className="cart-progress" aria-label="Cart sections"><ol><li><a href="#delivery-address-heading" aria-current={!addressComplete ? "step" : undefined}><span>1</span>Delivery</a></li><li><a href="#shipping-step" aria-current={addressComplete && !ready ? "step" : undefined}><span>2</span>Shipping</a></li><li><a href="#order-summary-heading" aria-current={addressComplete && ready ? "step" : undefined}><span>3</span>Order summary</a></li></ol></nav>
     <div className="cart-layout"><div className="cart-details">
+      <section aria-label="Items by seller"><p className="cart-selection-help" id="seller-selection" tabIndex={-1}>{groups.length > 1 ? "Select sellers to check out now. Other items stay in your cart." : "Review your items before checkout."}</p>
       <div className="seller-cart-groups">{groups.map((group) => {
         const isSelected = groups.length === 1 || !excluded.includes(group.sellerId);
         const itemCount = group.items.reduce((sum, item) => sum + item.quantity, 0);
@@ -238,11 +261,13 @@ export function CartPage({ automaticTax, taxBehavior }: { automaticTax: boolean;
           </header>
           <div className="cart-items">{group.items.map((item) => <article className="cart-item" key={item.productId}>
             <Link className="cart-item-image" href={`/products/${item.slug}`} aria-label={`View ${item.title}`}>
-              {item.imageUrl ? <Image src={item.imageUrl} alt="" width={88} height={88} unoptimized/> : <div className="cart-image-placeholder"/>}
+              {item.imageUrl ? <Image src={item.imageUrl} alt="" width={88} height={88} style={{ objectFit: "contain" }} unoptimized/> : <div className="cart-image-placeholder"/>}
             </Link>
             <div className="cart-item-content">
               <h3><Link href={`/products/${item.slug}`}>{item.title}</Link></h3>
               <p className="product-meta">{item.scale} · {item.modelManufacturer}</p>
+              <p className="cart-item-condition">Condition: {formatCondition(item.modelCondition || "not_specified")}</p>
+              <p className="cart-item-packaging">Packaging: {formatCondition(item.packagingCondition || "not_specified")} · Original box: {formatCondition(item.originalBoxStatus || "not_specified")}</p>
               {item.availabilityType === "preorder" && item.releaseDate && <p className="cart-preorder-note">Preorder · Expected release {item.releaseDate}</p>}
               <div className="cart-item-controls">
                 <label>Qty<select aria-label={`Quantity for ${item.title}`} value={item.quantity} disabled={loading} onChange={(event) => setQuantity(item.productId, Number(event.target.value))}>{Array.from({ length: Math.min(10, item.availableQuantity) }, (_, index) => <option key={index + 1}>{index + 1}</option>)}</select></label>
@@ -253,23 +278,21 @@ export function CartPage({ automaticTax, taxBehavior }: { automaticTax: boolean;
           </article>)}</div>
           {group.items.length > 1 && <button className="text-button cart-remove-seller" type="button" disabled={loading} onClick={() => clearSellerCart(group.sellerId)}>Remove all from {group.sellerName}</button>}
         </section>;
-      })}</div>
+      })}</div></section>
       {destination && <form ref={addressForm} className="checkout-shipping-form" onSubmit={calculateSelected} aria-labelledby="delivery-address-heading">
-        <h2 id="delivery-address-heading" tabIndex={-1}>1. Delivery details</h2><p>Your address is saved in this tab and carried into secure payment. No account needed.</p>
-        <AddressFields ref={addressRef} includeName disabled={loading} initialValues={destination} values={destination} onChange={(address) => { task.start(); automaticAttempt.current = ""; revision.current += 1; setDestination(address); setShippingZip(address.zip); setQuotes({}); setRates({}); setCalculating({}); setError(""); try { sessionStorage.setItem(CHECKOUT_ADDRESS_KEY, JSON.stringify(address)); } catch { /* Optional storage. */ } }}/>
-        <h3 id="shipping-step" tabIndex={-1}>2. Shipping</h3><p>{groups.length > 1 ? "Each seller ships separately. Review a shipping service for each seller below; delivery and returns are handled separately." : "Review your seller’s shipping above."} Rates calculate automatically when your address is complete.</p>
-        {selected.some((group) => group.items[0].shippingMode === "calculated") && <button className="button outline small" disabled={loading || working || !addressComplete}>{working ? "Calculating…" : "Retry shipping calculation"}</button>}
+        <h2 id="delivery-address-heading" tabIndex={-1}>Delivery details</h2><p>Saved in this tab for secure checkout.</p>
+        <AddressFields ref={addressRef} includeName compactHelp disabled={loading} initialValues={destination} values={destination} onChange={(address) => { task.start(); automaticAttempt.current = ""; revision.current += 1; setDestination(address); setShippingZip(address.zip); setQuotes({}); setRates({}); setCalculating({}); setError(""); try { sessionStorage.setItem(CHECKOUT_ADDRESS_KEY, JSON.stringify(address)); } catch { /* Optional storage. */ } }}/>
       </form>}
-      <div className="checkout-carrier-groups">{selected.map(shippingControls)}</div>
-    </div><aside className="cart-summary" aria-labelledby="order-summary-heading"><h2 id="order-summary-heading" tabIndex={-1}>3. Payment</h2><p>{selected.length} seller{selected.length === 1 ? "" : "s"} · One payment</p>
-      <dl><div><dt>Item subtotal</dt><dd>{sameCurrency ? money(subtotal, currency) : "Select sellers using the same currency"}</dd></div><div><dt>Shipping</dt><dd>{shipping === null ? "Confirm each seller’s shipping" : shipping === 0 ? "Free" : money(shipping, currency)}</dd></div>{shipping !== null && <div className="total"><dt>{automaticTax && taxBehavior === "exclusive" ? "Total before tax" : "Total"}</dt><dd>{money(subtotal + shipping, currency)}</dd></div>}</dl>
-      <p>{automaticTax ? taxBehavior === "inclusive" ? "Prices include applicable tax. You’ll see the tax breakdown before payment." : "Applicable tax is calculated on the secure payment page. Review tax and the final total there before you pay." : "Tax is not collected at checkout."}</p>{groups.length > 1 && <p>Each seller handles their own shipping, tracking, and returns. Unchecked sellers stay in your cart.</p>}
-      <p>Order problem? Report damage or an inaccurate listing within {REFUND_REQUEST_DAYS_AFTER_DELIVERY} calendar days after recorded delivery. Change-of-mind returns follow each seller’s policy. <Link href="/protection">Protection deadlines</Link> · <Link href="/returns">Returns and return postage</Link></p>
+      <section className="checkout-carrier-groups" aria-labelledby="shipping-step"><h2 id="shipping-step" tabIndex={-1}>Shipping</h2><p className="cart-shipping-help">{fixedShipping ? "Fixed seller rates per order, confirmed before payment." : "Carrier rates calculate after delivery details are complete. Quotes can expire; final charges are confirmed before payment."}{groups.length > 1 && " Each seller ships separately."}</p>{!selected.length && <p>Select a seller to review shipping.</p>}{selected.map(shippingControls)}</section>
+    </div><aside className="cart-summary" aria-labelledby="order-summary-heading"><h2 id="order-summary-heading" tabIndex={-1}>Order summary</h2><p>{selected.length} seller{selected.length === 1 ? "" : "s"} selected · Payment is next</p>
+      <dl><div><dt>Item subtotal</dt><dd>{sameCurrency ? money(subtotal, currency) : "Select one currency"}</dd></div><div><dt>Shipping{fixedShipping && <small>Fixed seller rates</small>}</dt><dd>{shipping === null ? "Not yet confirmed" : shipping === 0 ? "Free" : money(shipping, currency)}</dd></div>{shipping !== null && <div className="total"><dt>{totalLabel}</dt><dd>{money(subtotal + shipping, currency)}</dd></div>}</dl>
+      <p>{automaticTax ? taxBehavior === "inclusive" ? "Tax is included. Review the breakdown at secure payment." : "Tax and the final total appear at secure payment, before you pay." : "Tax is not collected at checkout."}</p>
+      <p>Damage or inaccurate listing? Submit a platform request within {REFUND_REQUEST_DAYS_AFTER_DELIVERY} calendar days after recorded delivery. Change-of-mind returns follow the seller’s policy. <Link href="/protection">Protection deadlines</Link> · <Link href="/returns">Returns &amp; postage</Link></p>
       {selected.some((group) => group.items.some((item) => item.availabilityType === "preorder")) && <p className="checkout-preorder-notice">Upcoming releases must be reserved separately on their seller offer. Remove them from this cart; pay through My Orders once stock is inspected and allocated.</p>}
-      <label className="consent-check checkout-consent"><input type="checkbox" checked={acceptedPolicies} disabled={loading} onChange={(event) => setAcceptedPolicies(event.target.checked)}/><span>I am at least 18 years old and agree to the <Link href="/terms">Marketplace Terms</Link> and acknowledge the <Link href="/privacy">Privacy Policy</Link>, <Link href="/shipping">Shipping Policy</Link>, and <Link href="/returns">Returns &amp; Refunds Policy</Link>.</span></label>
-      {error && <p className="form-error" role="alert">{error}</p>}{requestError && <p className="form-error" role="alert">{requestError}</p>}{blockedReason && <p id="checkout-blocker" className="checkout-blocker" role="status">{blockedReason}</p>}<button className="button dark checkout-button" type="button" aria-describedby={blockedReason ? "checkout-blocker" : undefined} disabled={loading || working || requesting !== null || !addressComplete || !acceptedPolicies || !ready} onClick={checkout}>{loading ? "Starting secure checkout…" : "Continue to secure payment"}</button>
-      <p className="checkout-payment-note">Secure payment by Stripe. Confirmation and tracking are emailed to you.</p>
-      {!collector && <p className="checkout-guest-note">No account needed. <Link className="text-link" href="/sign-in?returnTo=/cart">Sign in (optional)</Link></p>}
+      <label className="consent-check checkout-consent"><input id="checkout-agreement" type="checkbox" checked={acceptedPolicies} disabled={loading} onChange={(event) => setAcceptedPolicies(event.target.checked)}/><span>I am at least 18 years old and agree to the <Link href="/terms">Marketplace Terms</Link> and acknowledge the <Link href="/privacy">Privacy Policy</Link>, <Link href="/shipping">Shipping Policy</Link>, and <Link href="/returns">Returns &amp; Refunds Policy</Link>.</span></label>
+      {error && <p className="form-error" role="alert">{error}</p>}{requestError && <p className="form-error" role="alert">{requestError}</p>}{blockedReason && <p id="checkout-blocker" className="checkout-blocker" role="status">{blockerTarget && !working && !requesting ? <a href={`#${blockerTarget}`} onClick={(event) => { event.preventDefault(); if (blockerTarget === "delivery-address-heading") enterDelivery(); else goToSection(blockerTarget); }}>{blockedReason}</a> : blockedReason}</p>}<button className="button dark checkout-button" type="button" aria-describedby={blockedReason ? "checkout-blocker" : undefined} disabled={loading || working || requesting !== null || !addressComplete || !acceptedPolicies || !ready} onClick={checkout}>{loading ? "Starting secure checkout…" : "Continue to secure payment"}</button>
+      <p className="checkout-payment-note">Secure payment by Stripe.{!collector && <> No account needed. <Link className="text-link" href="/sign-in?returnTo=/cart">Sign in</Link></>}</p>
     </aside></div>
+    <div className="cart-mobile-summary" role="region" aria-label="Cart total and next step"><div aria-live="polite" aria-atomic="true"><span>{!selected.length || !sameCurrency ? "Order total" : shipping === null ? "Item subtotal" : totalLabel}</span><strong>{selected.length && sameCurrency ? money(subtotal + (shipping ?? 0), currency) : "—"}</strong>{selected.length > 0 && sameCurrency && shipping === null && <small>+ shipping{automaticTax && taxBehavior === "exclusive" ? " & tax" : ""}</small>}</div><button type="button" className="button dark" disabled={loading || working || requesting !== null} onClick={nextStep}>{nextLabel}</button></div>
   </div>;
 }

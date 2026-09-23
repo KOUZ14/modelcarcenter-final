@@ -9,7 +9,7 @@ test("product cards add directly to the shared cart and respect purchase restric
   const root = fileURLToPath(new URL("../", import.meta.url));
   const scratch = await mkdtemp(join(root, ".product-card-test-"));
   const bundlePath = join(scratch, "card.mjs");
-  const states = [], cleanups = [], calls = [];
+  const states = [], cleanups = [], calls = [], removals = [];
   let stateIndex = 0, accept = true, productClicks = 0;
   const fixture = {
     state(initial) {
@@ -19,7 +19,7 @@ test("product cards add directly to the shared cart and respect purchase restric
     },
     effect(callback) { const cleanup = callback(); if (cleanup) cleanups.push(cleanup); },
     marketplace: {
-      authReady: false, cart: [], wishlistHas: () => false, toggleWishlist() {},
+      authReady: false, cart: [], wishlistHas: () => false, toggleWishlist(id) { removals.push(id); },
       addToCart(product) { calls.push(product); return accept; },
     },
   };
@@ -36,7 +36,7 @@ test("product cards add directly to the shared cart and respect purchase restric
     "./marketplace-provider": "export const useMarketplace=()=>globalThis.__productCardTest.marketplace;",
   };
   const result = await build({
-    entryPoints: [join(root, "components/product-card.tsx")], bundle: true, platform: "node", format: "esm", packages: "external", write: false,
+    stdin: { contents: "export { ProductCard } from './components/product-card.tsx'; export { SavedListingCard } from './components/saved-listing-card.tsx';", resolveDir: root }, bundle: true, platform: "node", format: "esm", packages: "external", write: false,
     plugins: [{ name: "card-test", setup(builder) {
       builder.onResolve({ filter: /.*/ }, ({ path }) => {
         if (mocks[path]) return { path, namespace: "card-mock" };
@@ -46,7 +46,7 @@ test("product cards add directly to the shared cart and respect purchase restric
     } }],
   });
   await writeFile(bundlePath, result.outputFiles[0].contents);
-  const { ProductCard } = await import(pathToFileURL(bundlePath).href);
+  const { ProductCard, SavedListingCard } = await import(pathToFileURL(bundlePath).href);
   const product = { id: "model", slug: "model", title: "Long model title", availableQuantity: 3, priceCents: 7500, currency: "usd", modelCondition: "new", availabilityType: "in_stock" };
   function render(overrides = {}) {
     stateIndex = 0;
@@ -106,4 +106,72 @@ test("product cards add directly to the shared cart and respect purchase restric
     assert.equal(link.props.children, label);
     assert.equal(link.props.href, "/products/model");
   }
+
+  await t.test("storefront cards add the selected seller's offer through the same stock checks", () => {
+    states.length = 0;
+    fixture.marketplace.cart = [];
+    accept = true;
+    const before = calls.length;
+    stateIndex = 0;
+    const storefrontProduct = { ...product, sellerId: "seller-a" };
+    const storefront = ProductCard({ product: storefrontProduct, storefront: true });
+    buy(storefront).props.onClick();
+    assert.deepEqual(calls[before], storefrontProduct);
+    assert.equal(productClicks, 0);
+    states.length = 0;
+    fixture.marketplace.cart = [{ productId: product.id, quantity: 3 }];
+    stateIndex = 0;
+    const full = ProductCard({ product: storefrontProduct, storefront: true });
+    assert.equal(buy(full).props.disabled, true);
+    buy(full).props.onClick();
+    assert.equal(calls.length, before + 1);
+  });
+
+  await t.test("saved listing rows keep cart restrictions and remove only the selected listing", () => {
+    states.length = 0;
+    calls.length = 0;
+    accept = true;
+    fixture.marketplace.cart = [];
+    fixture.marketplace.authReady = false;
+    const renderSaved = (overrides = {}) => {
+      stateIndex = 0;
+      return SavedListingCard({ product: { ...product, ...overrides } });
+    };
+    const action = (row) => find(row, (node) => node.props?.className?.includes("saved-listing-buy"));
+    let row = renderSaved();
+    assert.equal(action(row).props.disabled, true);
+    action(row).props.onClick();
+    assert.equal(calls.length, 0, "Do not add before the persisted cart loads");
+
+    fixture.marketplace.authReady = true;
+    action(renderSaved()).props.onClick();
+    assert.deepEqual(calls, [product], "Guests can add the specific seller's listing");
+    row = renderSaved();
+    assert.match(status(row), /added to cart/);
+    assert.equal(action(row).props.disabled, true);
+    action(row).props.onClick();
+    assert.equal(calls.length, 1, "Prevent repeated taps during feedback");
+
+    states.length = 0;
+    accept = false;
+    action(renderSaved()).props.onClick();
+    assert.equal(status(renderSaved()), "", "Do not report a rejected addition as successful");
+    const before = calls.length;
+    for (const [availableQuantity, quantity] of [[3, 3], [20, 10]]) {
+      fixture.marketplace.cart = [{ productId: product.id, quantity }];
+      row = renderSaved({ availableQuantity });
+      assert.equal(action(row).type, "link");
+      assert.equal(action(row).props.href, "/cart", "At the stock or quantity limit, offer the existing cart");
+    }
+    fixture.marketplace.cart = [];
+    for (const overrides of [{ availableQuantity: 0 }, { availabilityType: "preorder" }]) {
+      row = renderSaved(overrides);
+      assert.equal(action(row).type, "link");
+      assert.equal(action(row).props.href, "/products/model");
+    }
+    row = renderSaved();
+    find(row, (node) => node.props?.className === "saved-listing-remove").props.onClick();
+    assert.deepEqual(removals, [product.id]);
+    assert.equal(calls.length, before, "Unavailable items and removal do not add anything to the cart");
+  });
 });

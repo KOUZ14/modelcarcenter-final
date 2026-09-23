@@ -8,7 +8,7 @@ import { formatCondition, formatMoney } from "@/lib/format";
 import { useMarketplace } from "./marketplace-provider";
 import { Icon } from "./icons";
 
-export function ProductCard({ product, sponsored = false, onProductClick }: { product: ProductSummary; sponsored?: boolean; onProductClick?: () => void }) {
+export function ProductCard({ product, sponsored = false, storefront = false, onProductClick }: { product: ProductSummary; sponsored?: boolean; storefront?: boolean; onProductClick?: () => void }) {
   const { addToCart, authReady, cart, toggleWishlist, wishlistHas } = useMarketplace();
   const [added, setAdded] = useState(false);
   const saved = wishlistHas(product.id);
@@ -21,7 +21,7 @@ export function ProductCard({ product, sponsored = false, onProductClick }: { pr
     return () => clearTimeout(timer);
   }, [added]);
   return (
-    <article className="product-card">
+    <article className={storefront ? "product-card storefront-card" : "product-card"}>
       {sponsored && <span className="sponsored-label">Sponsored</span>}
       <div className="product-image-wrap">
         <Link
@@ -36,6 +36,7 @@ export function ProductCard({ product, sponsored = false, onProductClick }: { pr
               src={product.primaryImageUrl}
               alt={`${product.modelManufacturer} ${product.title} model car`}
               fill
+              style={{ objectFit: "contain" }}
               sizes="(max-width: 1100px) 50vw, 25vw"
               unoptimized
             />
@@ -64,28 +65,29 @@ export function ProductCard({ product, sponsored = false, onProductClick }: { pr
           <Icon name="heart" />
         </button>
       </div>
+      <h3>
+        <Link href={`/products/${product.slug}`} prefetch={sponsored ? false : undefined} onClick={onProductClick} onAuxClick={event => { if (event.button === 1) onProductClick?.(); }}>{product.title}</Link>
+      </h3>
       <div className="product-meta">
         <span>{product.scale}</span>
         <span>{product.modelManufacturer}</span>
         <span>{formatCondition(product.modelCondition)}</span>
       </div>
-      <h3>
-        <Link href={`/products/${product.slug}`} prefetch={sponsored ? false : undefined} onClick={onProductClick} onAuxClick={event => { if (event.button === 1) onProductClick?.(); }}>{product.title}</Link>
-      </h3>
       <p className="product-availability">{product.availabilityType === "preorder" ? "Upcoming release · Preorder" : product.availableQuantity > 0 ? `${product.availableQuantity} in stock` : "Currently unavailable"}</p>
-      {product.catalogProductId && (product.availableOfferCount ?? 0) > 1 && <Link className="product-offers-link" href={`/models/${product.catalogProductId}`}>Compare {product.availableOfferCount} available offers</Link>}
+      {!storefront && product.catalogProductId && (product.availableOfferCount ?? 0) > 1 && <Link className="product-offers-link" href={`/models/${product.catalogProductId}`}>Compare {product.availableOfferCount} available offers</Link>}
       <div className="product-buy">
         <div>
           <b>{product.availabilityType === "preorder" && !product.priceCents ? "Price to be announced" : formatMoney(product.priceCents, product.currency)}</b>
           {product.saleUnit && <p>per {product.saleUnit}{(product.unitsPerPack??1)>1 ? ` · ${product.unitsPerPack} models` : ""}</p>}
-          <Link href={`/sellers/${product.sellerSlug}`}>
+          {!storefront && <Link href={`/sellers/${product.sellerSlug}`}>
             {product.sellerType === "collector"
               ? "Collector seller"
               : "Professional seller"}{" "}
             · {product.sellerName}
-          </Link>
+          </Link>}
         </div>
       </div>
+      {!storefront && canBuy && <p className="product-shipping-note">Ships from this seller. <Link href="/shipping">Shipping cost shown before payment.</Link></p>}
       {canBuy ? (
         <button
           className="product-quick-add"
@@ -109,6 +111,7 @@ export function ProductCard({ product, sponsored = false, onProductClick }: { pr
           {product.availabilityType === "preorder" ? "View preorder" : "View details"}
         </Link>
       )}
+      {storefront && product.catalogProductId && (product.availableOfferCount ?? 0) > 1 && <Link className="product-offers-link" href={`/models/${product.catalogProductId}`} aria-label={`Compare ${product.availableOfferCount} offers for ${product.title}`}>Compare offers</Link>}
       <span className="sr-only" role="status">{added ? `${product.title} added to cart.` : ""}</span>
     </article>
   );

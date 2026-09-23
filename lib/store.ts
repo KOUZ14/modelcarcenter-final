@@ -10,6 +10,7 @@ import {
 } from "drizzle-orm";
 import { getDb } from "@/db";
 import { buildSellerSetup } from "./seller-setup";
+import { storeLogoUrl } from "./store-logo";
 import { createConnectedAccount, createAccountOnboardingLink, retrieveStripeAccount } from "./stripe";
 import { listingPreorderWrites } from "./listing-preorders";
 import { listingPayloadWithCatalog, persistCatalogListing, prepareListingCatalog } from "./catalog-products";
@@ -172,6 +173,7 @@ export async function getStoreDashboardData(userId: string) {
         trackingNumber: orders.trackingNumber,
         createdAt: orders.createdAt,
         paidAt: orders.paidAt,
+        isTestOrder: orders.isTestOrder,
         shipByAt: orders.shipByAt,
         shippedAt: orders.shippedAt,
         deliveredAt: orders.deliveredAt,
@@ -224,6 +226,7 @@ export async function getStoreDashboardData(userId: string) {
   const preorderBatches = inventory.some(p => p.availabilityType === "preorder") ? await db.select({batch:incomingBatches}).from(incomingBatches).innerJoin(products,eq(products.id,incomingBatches.listingId)).where(eq(products.sellerId,store.id)) : [];
   return {
     store,
+    asOf: now.toISOString(),
     fee: determineMarketplaceFee(store),
     setup: buildSellerSetup(store, inventory, Boolean(config.shippoApiKey)),
     inventory: inventory.map((item) => ({
@@ -474,8 +477,8 @@ export async function saveStoreProfile(
     if (packingApproach.length < 20) throw new ValidationError("Use at least 20 characters to explain how you protect models and boxes in transit.");
     const rawWebsite = cleanText(payload.websiteUrl, 1500);
     const rawLogo = cleanText(payload.logoUrl, 1500);
-    const websiteUrl = optionalHttpUrl(rawWebsite); const logoUrl = optionalHttpUrl(rawLogo);
-    if ((rawWebsite && !websiteUrl) || (rawLogo && !logoUrl)) throw new ValidationError("Website and logo links must start with http or https.");
+    const websiteUrl = optionalHttpUrl(rawWebsite); const logoUrl = storeLogoUrl(rawLogo, store.id);
+    if (rawWebsite && !websiteUrl) throw new ValidationError("Website links must start with http or https.");
     await getDb().update(sellers).set({ storeName: requiredString(payload.storeName, "store name", 120), contactName: requiredString(payload.contactName, "contact name", 120), description, specialty, packingApproach, websiteUrl, logoUrl, shippingOriginRegion: requiredString(payload.shippingOriginRegion, "public shipping state or region", 80), shippingOriginCountry: requiredString(payload.shippingOriginCountry, "shipping country", 2).toUpperCase(), updatedAt: new Date().toISOString() }).where(eq(sellers.id, store.id));
     return { saved: true };
   }
@@ -486,9 +489,7 @@ export async function saveStoreProfile(
   if (rawWebsite && !websiteUrl)
     throw new ValidationError("Website must be an http or https URL.");
   const rawLogo = cleanText(payload.logoUrl, 1_500);
-  const logoUrl = rawLogo ? optionalHttpUrl(rawLogo) : null;
-  if (rawLogo && !logoUrl)
-    throw new ValidationError("Logo must be an http or https URL.");
+  const logoUrl = storeLogoUrl(rawLogo, store.id);
   const parcel = parseParcel({
     length: payload.defaultPackageLength,
     width: payload.defaultPackageWidth,

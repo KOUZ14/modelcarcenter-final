@@ -143,6 +143,9 @@ test("promotion lifecycle, ledger and placements use real migrated SQLite with m
     const rotations=await Promise.all(Array.from({length:20},(_,n)=>api.getPromotionPlacements({},null,Date.now()+n*60000)));
     assert.ok(rotations.some(rows=>rows.some(p=>p.product.id==='p-2')),'A listing on the first organic page still receives paid placement');
     assert.equal((await api.getPromotionPlacements({ scale: "1:64" }, null)).length, 0);
+    assert.equal((await api.getPromotionPlacements({ minPrice: "100", maxPrice: "100" }, null)).length, 2);
+    assert.equal((await api.getPromotionPlacements({ maxPrice: "99.99" }, null)).length, 0);
+    assert.equal((await api.getPromotionPlacements({ minPrice: "100.01" }, null)).length, 0);
     assert.equal((await api.getPromotionPlacements({ page: 2 }, null)).length, 0);
     assert.equal((await api.getPromotionPlacements({ seller: "a" }, null)).length, 0);
     assert.equal((await api.getPromotionPlacements({ availability: "preorder" }, null)).length, 0);
