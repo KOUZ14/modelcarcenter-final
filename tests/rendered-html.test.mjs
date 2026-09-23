@@ -18,9 +18,9 @@ test("the built artifact contains the real marketplace and no starter preview ma
   const dist = fileURLToPath(new URL("../dist/", import.meta.url));
   const files = await collectJavaScript(dist);
   const source = (await Promise.all(files.map((file) => readFile(file, "utf8")))).join("\n");
-  assert.match(source, /Find and buy model cars from stores and collectors in one place/i);
+  assert.match(source, /Shop model cars from stores and collectors\./i);
   assert.match(source, /Find model cars from independent sellers in one place/i);
-  assert.match(source, /Browse model cars from stores and collectors\./i);
+  assert.match(source, /Browse every live model car listing from independent sellers and collectors\./i);
   assert.match(source, /\/marketplace/i);
   assert.match(source, /Verified marketplace record/i);
   assert.match(source, /Completed transactions/i);
