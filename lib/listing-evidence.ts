@@ -29,7 +29,7 @@ export function requiredPhotoViews(listing: EvidenceListing): PhotoView[] {
 }
 
 export function photoViewsFromAlt(alt = ""): PhotoView[] {
-  const labels = alt.split(" - ")[0].split(" · ");
+  const labels = alt.split(/ [\u2014-] /)[0].split(" · ");
   return photoViews.filter(view => labels.includes(view.label)).map(view => view.key);
 }
 

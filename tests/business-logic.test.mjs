@@ -16,7 +16,8 @@ import { assertCollectibleListingReady, parseCollectibleDetails, parseCsv, parse
 import { verifyStripeWebhook } from "../lib/stripe.ts";
 
 test("normalizes collector search and computes availability", () => {
-  assert.equal(normalizeSearch("  1:18  Porsche-911   AUTOart "), "1:18 porsche 911 autoart");
+  assert.equal(normalizeSearch("  1:18  Porsche\u2014911   AUTOart "), "1:18 porsche 911 autoart");
+  assert.equal(normalizeSearch("  1:18  Porsche-911   AUTOart "), "1:18 porsche-911 autoart");
   assert.equal(availableQuantity(5, 2), 3);
   assert.equal(availableQuantity(1, 3), 0);
 });
