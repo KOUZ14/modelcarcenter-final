@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { formatMoney } from "@/lib/format";
 import {
   protectionReasonLabel,
@@ -13,6 +13,15 @@ import { OrderProtectionSummary } from "./order-protection-summary";
 
 type ResolutionCase = ResolutionCenterData["cases"][number];
 type BuyerOrder = ResolutionCenterData["buyerOrders"][number];
+
+function isActiveCase(item: ResolutionCase) {
+  return !["resolved", "closed", "denied"].includes(item.status);
+}
+
+function focusPanel(panel: HTMLElement | null) {
+  panel?.focus({ preventScroll: true });
+  panel?.scrollIntoView({ block: "start" });
+}
 
 export function ResolutionCenter({
   data,
@@ -26,7 +35,7 @@ export function ResolutionCenter({
   const initialCase =
     data.cases.find((item) => item.id === initialCaseId) ??
     data.cases.find((item) => item.order.id === initialOrderId) ??
-    data.cases[0] ??
+    data.cases.find(isActiveCase) ?? data.cases[0] ??
     null;
   const shouldReport = Boolean(
     initialOrderId && !data.cases.some((item) => item.order.id === initialOrderId),
@@ -35,14 +44,40 @@ export function ResolutionCenter({
     shouldReport ? "report" : "cases",
   );
   const [selectedId, setSelectedId] = useState(initialCase?.id ?? "");
+  const [role, setRole] = useState<"all" | "buyer" | "seller">("all");
+  const workspaceRef = useRef<HTMLElement>(null);
+  const detailRef = useRef<HTMLDivElement>(null);
+  const pendingFocus = useRef<"workspace" | "detail" | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const visibleCases = data.cases
+    .filter((item) => role === "all" || item.viewerRole === role)
+    .sort((a, b) => Number(isActiveCase(b)) - Number(isActiveCase(a)));
   const selected =
-    data.cases.find((item) => item.id === selectedId) ?? data.cases[0] ?? null;
+    visibleCases.find((item) => item.id === selectedId) ?? visibleCases[0] ?? null;
+  const showRoleFilters = data.buyerCaseCount > 0 && data.sellerCaseCount > 0;
   const eligibleOrders = data.buyerOrders.filter(
     (order) => order.eligible && !order.caseId,
   );
+
+  useEffect(() => {
+    if (!pendingFocus.current) return;
+    focusPanel(pendingFocus.current === "workspace" ? workspaceRef.current : detailRef.current);
+    pendingFocus.current = null;
+  }, [mode, selectedId]);
+
+  function showMode(nextMode: "cases" | "report") {
+    if (nextMode === mode) focusPanel(workspaceRef.current);
+    else pendingFocus.current = "workspace";
+    setMode(nextMode);
+  }
+
+  function selectCase(id: string) {
+    if (id === selectedId) focusPanel(detailRef.current);
+    else pendingFocus.current = "detail";
+    setSelectedId(id);
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -62,12 +97,12 @@ export function ResolutionCenter({
         body = { error: text };
       }
       if (!response.ok)
-        throw new Error(body.error || "The case update could not be saved.");
-      setMessage("Case updated. Refreshing the shared timeline…");
+        throw new Error(body.error || "Your support request could not be saved.");
+      setMessage("Support request saved. Refreshing…");
       window.location.reload();
     } catch (caught) {
       setError(
-        caught instanceof Error ? caught.message : "The case update could not be saved.",
+        caught instanceof Error ? caught.message : "Your support request could not be saved.",
       );
       setBusy(false);
     }
@@ -76,45 +111,19 @@ export function ResolutionCenter({
   return (
     <>
       <section className="resolution-hero">
-        <div className="shell resolution-hero-grid">
-          <div>
-            <p className="eyebrow">Customer Support · Buyer &amp; seller protection</p>
-            <h1>Customer Support</h1>
-            <p>
-              Report a problem, keep evidence and replies together, authorize a
-              tracked return, and follow every deadline through resolution.
-            </p>
-          </div>
-          <div className="resolution-hero-steps" aria-label="Resolution process">
-            <article><span>01</span><b>Report</b><p>Choose the paid order and document the issue.</p></article>
-            <article><span>02</span><b>Respond</b><p>The seller has three calendar days to act.</p></article>
-            <article><span>03</span><b>Resolve</b><p>Return, refund, close, or escalate in one timeline.</p></article>
-          </div>
+        <div className="shell resolution-hero-content">
+          <h1>Get help with an order</h1>
+          <p className="resolution-intro">Report a problem or check the status of an existing support request.</p>
+          <button className="button resolution-primary" type="button" onClick={() => showMode("report")} aria-controls="support-workspace">Choose an order</button>
+          <p className="resolution-contact">Can&apos;t find your order or need help with something else? <Link href="/contact">Contact support</Link></p>
         </div>
       </section>
 
-      <section className="shell resolution-shell">
-        <div className="resolution-summary">
-          <article><span>Active cases</span><b>{data.activeCount}</b></article>
-          <article><span>As buyer</span><b>{data.buyerCaseCount}</b></article>
-          <article><span>As seller</span><b>{data.sellerCaseCount}</b></article>
-          <article className="resolution-policy-card">
-            <span>Protection standard</span>
-            <Link href="/protection">Read the rules →</Link>
-          </article>
-        </div>
-
+      <section className="shell resolution-shell" id="support-workspace" ref={workspaceRef} tabIndex={-1} aria-label="Order help and support requests">
         {message && <p className="admin-message" role="status">{message}</p>}
         {error && <p className="form-error" role="alert">{error}</p>}
 
-        <div className="resolution-tabs" role="tablist" aria-label="Customer Support views">
-          <button className={mode === "cases" ? "active" : ""} onClick={() => setMode("cases")} type="button">
-            Cases <span>{data.cases.length}</span>
-          </button>
-          <button className={mode === "report" ? "active" : ""} onClick={() => setMode("report")} type="button">
-            Report a problem
-          </button>
-        </div>
+        {mode === "report" && data.cases.length > 0 && <button className="resolution-back" type="button" onClick={() => showMode("cases")}>← View your support requests</button>}
 
         {mode === "report" ? (
           <ReportProblem
@@ -125,32 +134,50 @@ export function ResolutionCenter({
             submit={submit}
           />
         ) : data.cases.length ? (
+          <>
+          <div className="resolution-requests-heading">
+            <h2>Your support requests</h2>
+            {showRoleFilters && <div className="resolution-filters" role="group" aria-label="Filter support requests">
+              {([['all', 'All requests'], ['buyer', 'Purchases'], ['seller', 'Sales']] as const).map(([value, label]) => <button key={value} type="button" aria-pressed={role === value} onClick={() => setRole(value)}>{label}</button>)}
+            </div>}
+          </div>
           <div className="resolution-workspace">
-            <aside className="case-list" aria-label="Your resolution cases">
-              {data.cases.map((item) => (
+            <aside className="case-list" aria-label="Your support requests">
+              {visibleCases.map((item) => (
                 <button
                   type="button"
                   key={item.id}
                   className={selected?.id === item.id ? "active" : ""}
-                  onClick={() => setSelectedId(item.id)}
+                  aria-pressed={selected?.id === item.id}
+                  aria-controls="support-request-detail"
+                  onClick={() => selectCase(item.id)}
                 >
                   <span><b>{item.caseNumber}</b><em>{item.viewerRole}</em></span>
                   <strong>{protectionReasonLabel(item.reason)}</strong>
                   <small>{item.order.orderNumber} · Updated {shortDate(item.updatedAt)}</small>
                   <CaseStatus status={item.status} />
+                  {isActiveCase(item) && <CaseDeadline item={item} compact />}
                 </button>
               ))}
             </aside>
-            {selected && <CaseDetail item={selected} busy={busy} submit={submit} />}
+            {selected && <div id="support-request-detail" className="case-detail-container" ref={detailRef} tabIndex={-1}><CaseDetail item={selected} busy={busy} submit={submit} /></div>}
           </div>
+          </>
         ) : (
-          <div className="resolution-empty">
-            <p className="eyebrow">No cases</p>
-            <h2>No support cases</h2>
-            <p>Your order-level problem reports and seller cases will appear here with their deadlines and full history.</p>
-            <button className="button dark" type="button" onClick={() => setMode("report")}>Report an order problem</button>
-          </div>
+          <p className="resolution-empty-note">You have no support requests yet.</p>
         )}
+
+        <div className="resolution-help">
+          <details className="resolution-guide">
+            <summary>How support requests work</summary>
+            <ol>
+              <li><b>Report</b><p>Choose your order, tell us what went wrong, and add photos or documents that show the problem.</p></li>
+              <li><b>Respond</b><p>The seller replies to your request. You can check their response and your next steps here, with the exact deadlines shown on your request.</p></li>
+              <li><b>Resolve</b><p>Follow the instructions for a return or refund. If the problem is still unresolved, ask Model Car Center to review it.</p></li>
+            </ol>
+          </details>
+          <Link className="resolution-policy-link" href="/protection">How buyer and seller protection works</Link>
+        </div>
       </section>
     </>
   );
@@ -175,22 +202,19 @@ function ReportProblem({
     : eligibleOrders[0]?.id;
   const [selectedOrderId, setSelectedOrderId] = useState(defaultOrder);
   const selectedOrder = eligibleOrders.find(order => order.id === selectedOrderId);
-  if (!orders.length)
-    return (
-      <div className="resolution-empty">
-        <p className="eyebrow">Order-level reporting</p>
-        <h2>You do not have a paid order to report.</h2>
-        <p>Orders paid through Model Car Center appear here after you sign in with the checkout email.</p>
-        <Link className="button dark" href="/marketplace">Browse models</Link>
-      </div>
-    );
   if (!eligibleOrders.length)
     return (
       <div className="resolution-empty">
-        <p className="eyebrow">Reporting windows</p>
-        <h2>Every order already has a case or is outside its reporting window.</h2>
-        <p>Open an existing case from the Cases tab. Non-waivable legal rights are not limited by the marketplace window.</p>
-        <Link className="button outline" href="/protection">Review protection rules</Link>
+        <h2>We couldn&apos;t find an eligible order on this account.</h2>
+        <p>{orders.length ? "An order may already have a support request, be past its reporting deadline, or have no payment left to refund." : "Check your order confirmation, or ask support to help find your purchase."}</p>
+        <div className="resolution-recovery-actions">
+          <Link className="button dark" href="/account?view=orders">Find an order</Link>
+          <Link className="button outline" href="/contact">Contact support</Link>
+        </div>
+        <details className="resolution-checkout-help">
+          <summary>Used a different email or checked out as a guest?</summary>
+          <p>Sign in with your checkout email to find your order. You can also contact support with that email and your order number or purchase date. Guest orders receive support without creating an account.</p>
+        </details>
       </div>
     );
   return (
@@ -198,9 +222,8 @@ function ReportProblem({
       <form className="resolution-form" onSubmit={submit}>
         <input type="hidden" name="action" value="open_case" />
         <div>
-          <p className="eyebrow">Start a case</p>
           <h2>Report an order problem</h2>
-          <p>The report, evidence, seller response, and outcome stay attached to this order.</p>
+          <p>Choose your order and tell us what went wrong.</p>
         </div>
         <label>
           Order
@@ -212,7 +235,7 @@ function ReportProblem({
             ))}
           </select>
         </label>
-        {selectedOrder && <OrderProtectionSummary order={selectedOrder}/>}
+        {selectedOrder && <OrderProtectionSummary order={selectedOrder} compact/>}
         <label>
           Problem
           <select name="reason" required defaultValue="damaged">
@@ -226,7 +249,7 @@ function ReportProblem({
           </select>
         </label>
         <fieldset>
-          <legend>Requested resolution</legend>
+          <legend>How would you like this resolved?</legend>
           <label><input type="radio" name="requestedResolution" value="return_refund" checked={resolution === "return_refund"} onChange={() => setResolution("return_refund")} /> Return for a full refund</label>
           <label><input type="radio" name="requestedResolution" value="full_refund" checked={resolution === "full_refund"} onChange={() => setResolution("full_refund")} /> Full refund without return</label>
           <label><input type="radio" name="requestedResolution" value="partial_refund" checked={resolution === "partial_refund"} onChange={() => setResolution("partial_refund")} /> Keep item with a partial refund</label>
@@ -242,22 +265,22 @@ function ReportProblem({
           <textarea name="details" rows={7} minLength={30} maxLength={4000} placeholder="Describe the item received, the listing or delivery issue, packaging condition, and the outcome you are requesting." required />
         </label>
         <label className="resolution-file-input">
-          Evidence files
+          Photos or documents
           <input name="files" type="file" multiple accept="image/jpeg,image/png,image/webp,application/pdf" />
-          <span>JPG, PNG, WebP, or PDF · up to 5 files · 10 MB each. Evidence is required for damage, discrepancy, wrong/missing item, and authenticity claims.</span>
+          <span>JPG, PNG, WebP, or PDF · up to 5 files · 10 MB each. Add at least one file for damage, an item that differs from its listing, wrong or missing items, or authenticity concerns.</span>
         </label>
         <label className="resolution-attestation">
           <input type="checkbox" required />
           <span>I confirm this report is accurate, I will preserve the item and packaging, and I have reviewed the <Link href="/protection">protection rules</Link>.</span>
         </label>
-        <button className="button dark" disabled={busy}>{busy ? "Opening case…" : "Open case"}</button>
+        <button className="button dark" disabled={busy}>{busy ? "Sending request…" : "Send support request"}</button>
       </form>
       <aside className="resolution-rule-rail">
         <p className="eyebrow">What happens next</p>
         <ol>
-          <li><b>Evidence due in 5 days.</b><span>Add clear photos of the model, packaging, shipping label, and issue.</span></li>
-          <li><b>Seller response due in 3 days.</b><span>The seller can reply, authorize a prepaid return, or issue a refund.</span></li>
-          <li><b>Escalation stays available.</b><span>If the response window passes or the response does not resolve the problem, request platform review.</span></li>
+          <li><b>Add photos or documents within 5 calendar days.</b><span>Show the model, packaging, shipping label, and problem. Your request will show the exact deadline.</span></li>
+          <li><b>The seller has 3 calendar days to respond.</b><span>Check your request for their reply and any return or refund instructions.</span></li>
+          <li><b>Still need help?</b><span>If the seller misses their deadline or their reply does not resolve the problem, ask Model Car Center to review your request.</span></li>
         </ol>
       </aside>
     </div>
@@ -273,7 +296,7 @@ function CaseDetail({
   busy: boolean;
   submit(event: FormEvent<HTMLFormElement>): Promise<void>;
 }) {
-  const open = !["resolved", "closed", "denied"].includes(item.status);
+  const open = isActiveCase(item);
   const label = item.files.find((file) => file.kind === "return_label");
   const evidence = item.files.filter((file) => file.kind === "evidence");
   const refundable = Math.max(
@@ -290,6 +313,8 @@ function CaseDetail({
         </div>
         <CaseStatus status={item.status} />
       </header>
+
+      <CaseDeadline item={item} />
 
       <div className="case-order-strip">
         <div>
@@ -310,14 +335,19 @@ function CaseDetail({
         </div>
       </div>
 
-      <CaseDeadline item={item} />
-
-      {item.returnAuthorizationNumber && (
+      {open && item.returnAuthorizationNumber && (
         <section className="return-authorization">
-          <div><p className="eyebrow">Return authorized</p><h3>{item.returnAuthorizationNumber}</h3></div>
-          <p>Ship by <b>{longDate(item.buyerShipBy)}</b>. Keep a carrier receipt and add tracking here.</p>
+          <div><p className="eyebrow">Return reference</p><h3>{item.returnAuthorizationNumber}</h3></div>
+          <p>{item.status === "return_authorized" ? item.viewerRole === "buyer" ? <>Ship by <b>{longDate(item.buyerShipBy)}</b>. Keep a carrier receipt and add tracking here.</> : <>The buyer must ship by <b>{longDate(item.buyerShipBy)}</b>.</> : "Check the request history for return tracking and refund updates."}</p>
           {label && <a className="button dark small" href={`/api/resolution/files/${label.id}`}>Download return label</a>}
         </section>
+      )}
+
+      {open && item.viewerRole === "seller" && (
+        <SellerActions item={item} busy={busy} submit={submit} refundable={refundable} />
+      )}
+      {open && item.viewerRole === "buyer" && item.status !== "awaiting_seller" && (
+        <BuyerActions item={item} busy={busy} submit={submit} />
       )}
 
       <section className="case-section">
@@ -343,6 +373,10 @@ function CaseDetail({
         )}
       </section>
 
+      {open && item.viewerRole === "buyer" && item.status === "awaiting_seller" && (
+        <BuyerActions item={item} busy={busy} submit={submit} />
+      )}
+
       <section className="case-section">
         <div className="case-section-heading"><div><p className="eyebrow">Case history</p><h3>Shared timeline</h3></div></div>
         <ol className="case-timeline">
@@ -355,12 +389,6 @@ function CaseDetail({
         </ol>
       </section>
 
-      {open && item.viewerRole === "seller" && (
-        <SellerActions item={item} busy={busy} submit={submit} refundable={refundable} />
-      )}
-      {open && item.viewerRole === "buyer" && (
-        <BuyerActions item={item} busy={busy} submit={submit} />
-      )}
       {!open && item.resolutionSummary && (
         <section className="case-outcome"><p className="eyebrow">Outcome</p><h3>{item.resolutionSummary}</h3><p>Closed {longDate(item.resolvedAt)}</p></section>
       )}
@@ -371,27 +399,27 @@ function CaseDetail({
 function SellerActions({ item, busy, submit, refundable }: { item: ResolutionCase; busy: boolean; submit(event: FormEvent<HTMLFormElement>): Promise<void>; refundable: number }) {
   return (
     <section className="case-actions">
-      <div className="case-section-heading"><div><p className="eyebrow">Seller actions</p><h3>Respond by {longDate(item.sellerRespondBy)}</h3></div></div>
+      <div className="case-section-heading"><div><p className="eyebrow">Seller actions</p><h3>{item.status === "awaiting_seller" ? `Reply by ${longDate(item.sellerRespondBy)}` : "Respond to this request"}</h3></div></div>
       <div className="case-action-grid">
         <form onSubmit={submit}>
           <input type="hidden" name="action" value="seller_response" /><input type="hidden" name="caseId" value={item.id} />
-          <h4>Reply to the buyer</h4><p>Ask a focused question, explain your evidence, or propose a remedy.</p>
+          <h4>Reply to the buyer</h4><p>Ask for more information or explain how you can help.</p>
           <textarea name="message" rows={5} minLength={10} maxLength={3000} required />
           <button className="button outline small" disabled={busy}>Send response</button>
         </form>
         <form onSubmit={submit}>
           <input type="hidden" name="action" value="authorize_return" /><input type="hidden" name="caseId" value={item.id} />
-          <h4>Authorize a return</h4><p>An RMA is created and the buyer gets seven calendar days to ship.</p>
+          <h4>Approve a return</h4><p>Send a prepaid label and packing instructions. The buyer has seven calendar days to ship the return.</p>
           <textarea name="instructions" rows={3} maxLength={1500} placeholder="Packing and drop-off instructions" required />
           <label>Prepaid return label<input name="files" type="file" accept="application/pdf,image/jpeg,image/png,image/webp" required /></label>
-          <button className="button outline small" disabled={busy}>Issue RMA &amp; label</button>
+          <button className="button outline small" disabled={busy}>Approve return &amp; send label</button>
         </form>
         <form onSubmit={submit}>
           <input type="hidden" name="action" value="issue_refund" /><input type="hidden" name="caseId" value={item.id} />
           <h4>Issue a refund</h4><p>Refunds go to the original payment method. Remaining balance: {formatMoney(refundable, item.order.currency)}.</p>
           <select name="refundKind" required defaultValue="full"><option value="full">Full remaining refund</option><option value="partial">Partial refund</option></select>
           <input name="amount" inputMode="decimal" placeholder="Partial amount, e.g. 25.00" />
-          <label className="resolution-attestation"><input type="checkbox" required /><span>I authorize this Stripe refund and understand a full refund closes the case.</span></label>
+          <label className="resolution-attestation"><input type="checkbox" required /><span>I approve this refund and understand a full refund closes the support request.</span></label>
           <button className="button dark small" disabled={busy || refundable < 1}>Issue refund</button>
         </form>
       </div>
@@ -403,7 +431,7 @@ function BuyerActions({ item, busy, submit }: { item: ResolutionCase; busy: bool
   const mayEscalate = item.status !== "awaiting_seller" || item.sellerResponseOverdue;
   return (
     <section className="case-actions">
-      <div className="case-section-heading"><div><p className="eyebrow">Buyer actions</p><h3>Case actions</h3></div></div>
+      <div className="case-section-heading"><div><p className="eyebrow">Buyer actions</p><h3>Manage your request</h3></div></div>
       <div className="case-action-grid buyer-actions">
         {item.status === "return_authorized" && (
           <form onSubmit={submit}>
@@ -414,37 +442,47 @@ function BuyerActions({ item, busy, submit }: { item: ResolutionCase; busy: bool
             <button className="button dark small" disabled={busy || item.returnShipmentOverdue}>Mark return shipped</button>
           </form>
         )}
-        <form onSubmit={submit}>
+        {item.status !== "under_review" && <form onSubmit={submit}>
           <input type="hidden" name="action" value="escalate" /><input type="hidden" name="caseId" value={item.id} />
-          <h4>Request platform review</h4><p>{mayEscalate ? "Explain what remains unresolved. The timeline and private files go with your request." : `Available if the seller has not responded by ${longDate(item.sellerRespondBy)}.`}</p>
+          <h4>Ask Model Car Center to review</h4><p>{mayEscalate ? "Tell us what is still unresolved. We will review your messages and files." : `Available if the seller has not responded by ${longDate(item.sellerRespondBy)}.`}</p>
           <textarea name="message" rows={3} maxLength={1500} placeholder="Why review is needed" />
-          <button className="button outline small" disabled={busy || !mayEscalate}>Escalate case</button>
-        </form>
+          <button className="button outline small" disabled={busy || !mayEscalate}>Request a review</button>
+        </form>}
         <form onSubmit={submit}>
           <input type="hidden" name="action" value="close_case" /><input type="hidden" name="caseId" value={item.id} />
-          <h4>Close as resolved</h4><p>Use this only when the problem has been resolved. A closed case cannot be reopened.</p>
+          <h4>Close as resolved</h4><p>Use this only when the problem has been resolved. A closed request cannot be reopened.</p>
           <input name="message" maxLength={1000} placeholder="Optional closing note" />
-          <button className="button outline small" disabled={busy}>Close case</button>
+          <button className="button outline small" disabled={busy}>Close request</button>
         </form>
       </div>
     </section>
   );
 }
 
-function CaseDeadline({ item }: { item: ResolutionCase }) {
-  const deadline = useMemo(() => {
-    if (item.status === "awaiting_seller") return { label: "Seller response due", value: item.sellerRespondBy, overdue: item.sellerResponseOverdue };
-    if (item.status === "awaiting_buyer") return { label: "Buyer review / escalation due", value: item.buyerEscalateBy, overdue: false };
-    if (item.status === "return_authorized") return { label: "Buyer must ship return by", value: item.buyerShipBy, overdue: item.returnShipmentOverdue };
-    if (item.status === "return_in_transit") return { label: "Next step", value: null, note: "Seller confirms receipt and issues the approved refund." };
-    if (item.status === "under_review") return { label: "Platform review", value: null, note: "Model Car Center is reviewing the order record, evidence, and responses." };
-    return { label: "Case completed", value: item.resolvedAt, note: item.resolutionSummary || "No further action is required." };
-  }, [item]);
-  return <div className={`case-deadline ${deadline.overdue ? "overdue" : ""}`}><span>{deadline.label}</span><b>{deadline.value ? longDate(deadline.value) : deadline.note}</b>{deadline.overdue && <em>Deadline passed</em>}<small>Buyer evidence due {longDate(item.buyerEvidenceBy)} · Order reporting deadline {longDate(item.reportDeadline)}</small></div>;
+function CaseDeadline({ item, compact = false }: { item: ResolutionCase; compact?: boolean }) {
+  const buyer = item.viewerRole === "buyer";
+  const deadline = (() => {
+    if (item.status === "awaiting_seller") return { label: buyer ? "Seller response due" : "Reply to the buyer by", value: item.sellerRespondBy, overdue: item.sellerResponseOverdue, note: buyer ? item.sellerResponseOverdue ? "You can now ask Model Car Center to review your request." : "Check back for the seller’s reply. Add any photos or documents by the deadline below." : "Reply to the buyer, approve a return, or issue a refund." };
+    if (item.status === "awaiting_buyer") return { label: buyer ? "Review the seller’s reply by" : "Buyer response due", value: item.buyerEscalateBy, note: buyer ? "If the problem is still unresolved, ask Model Car Center to review it by this deadline." : "The buyer is reviewing your reply." };
+    if (item.status === "return_authorized") return { label: buyer ? "Ship your return and add tracking by" : "Buyer must ship the return by", value: item.buyerShipBy, overdue: item.returnShipmentOverdue, note: buyer ? item.returnShipmentOverdue ? "The return deadline has passed. Contact support if you need help." : "Use the return label and keep your carrier receipt." : "Wait for the buyer’s return tracking." };
+    if (item.status === "return_in_transit") return { label: buyer ? "Waiting for your return to arrive" : "Check the return delivery", value: null, note: buyer ? "The seller needs to receive your return and issue the agreed refund." : "Once the return arrives, check it and issue the agreed refund." };
+    if (item.status === "under_review") return { label: "Model Car Center is reviewing your request", value: null, note: "Check here for updates from support." };
+    return { label: "Request completed", value: item.resolvedAt, note: item.resolutionSummary || "No further action is required." };
+  })();
+  const showEvidenceDeadline = ["awaiting_seller", "awaiting_buyer", "under_review"].includes(item.status) && (!compact || buyer);
+  const Container = compact ? "span" : "div";
+  return <Container className={`case-deadline${compact ? " case-deadline-compact" : ""}${deadline.overdue ? " overdue" : ""}${!isActiveCase(item) ? " completed" : ""}`}>
+    <span className="case-deadline-label">{deadline.label}</span>
+    {deadline.value && <b><time dateTime={deadline.value}>{longDate(deadline.value)}</time></b>}
+    {deadline.overdue && <em>Deadline passed</em>}
+    {!compact && <span className="case-next-action">{deadline.note}</span>}
+    {showEvidenceDeadline && item.buyerEvidenceBy && <small>{buyer ? "Add photos or documents by " : "Buyer photos or documents due "}<time dateTime={item.buyerEvidenceBy}>{longDate(item.buyerEvidenceBy)}</time></small>}
+  </Container>;
 }
 
 function CaseStatus({ status }: { status: string }) {
-  return <span className={`status ${status}`}>{status.replaceAll("_", " ")}</span>;
+  const labels: Record<string, string> = { awaiting_seller: "Waiting for seller", awaiting_buyer: "Waiting for buyer", return_authorized: "Return approved", return_in_transit: "Return on its way", under_review: "In review", resolved: "Resolved", closed: "Closed", denied: "Declined" };
+  return <span className={`status ${status}`}>{labels[status] ?? status.replaceAll("_", " ")}</span>;
 }
 
 function roleLabel(role: string) {
@@ -457,12 +495,12 @@ function resolutionLabel(value: string) {
 
 function shortDate(value: string | null | undefined) {
   if (!value) return "Not set";
-  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(new Date(value));
+  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }).format(new Date(value));
 }
 
 function longDate(value: string | null | undefined) {
   if (!value) return "Not set";
-  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(value));
+  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC", timeZoneName: "short" }).format(new Date(value));
 }
 
 function formatBytes(bytes: number) {

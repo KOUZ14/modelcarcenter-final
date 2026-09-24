@@ -7,8 +7,8 @@ import { getResolutionCenterData } from "@/lib/resolution";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
-  title: "Customer Support",
-  description: "Report and resolve Model Car Center order problems.",
+  title: "Order help & support requests",
+  description: "Get help with an order, report a problem, or check the status of a support request.",
   robots: { index: false, follow: false },
 };
 

@@ -2,6 +2,15 @@
 
 September 18, 2026. This change extends the current site and preserves its existing branding, photographs, accounts, listings, guest checkout, collector tools and URLs. It includes existing working-tree improvements; those changes were retained rather than reset. **This is a code and automated-check handoff, not completion of the live usability study or browser acceptance checks.**
 
+## Order support follow-up - September 23, 2026
+
+- `/resolution` opens with “Get help with an order,” a Choose an order action, and a direct Contact support link for missing orders or other questions. The empty overview says only “You have no support requests yet.” Process guidance is collapsed, and the full protection policy has a secondary link.
+- Missing or ineligible orders offer Find an order and Contact support. Optional guidance explains using the checkout email and getting help with guest orders. Find an order opens My Orders; Contact support opens the existing guest-friendly contact page.
+- Active requests appear before completed requests. Purchases/Sales filters appear only when both roles have requests. Cards show the current status, next action and exact deadline in UTC; the selected request repeats its deadline before financial details and history. Seller response and return overdue warnings remain prominent. Selecting a request or opening the report flow moves keyboard focus and scrolls to the relevant panel.
+- Return, response and review copy uses customer language and the viewer's role. Buyers waiting for a seller see their evidence upload before optional review/closing actions; return tracking and seller actions appear at the relevant step. A request already under review does not offer a duplicate review action. Order eligibility, accepted protection terms and API enforcement are unchanged.
+
+Validation: 15 focused support-flow, protection and notification tests passed, along with TypeScript and focused ESLint. The production build and artifact validation passed. Local Chrome checks covered the real empty overview, recovery paths and expandable guidance, plus synthetic active, overdue-return, mixed-role and eligible-order fixtures using the real component and application CSS at 360px, 390px and 1280px. No horizontal overflow was found. Verified order selection, partial-refund fields, filter selection and focus/scroll behavior; no support requests, uploads, messages or refunds were submitted. Changes have not been deployed.
+
 ## CSV import follow-up - September 22, 2026
 
 - Import now follows three numbered steps: prepare the spreadsheet, choose a CSV, and review/save. Selecting a file checks it automatically and displays its filename. The template instructions explicitly say to replace the example, and previews flag the unchanged sample model.
