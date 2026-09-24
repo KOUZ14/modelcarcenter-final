@@ -44,6 +44,7 @@ export function CollectorListingForm({
   marketplaceFeeBps,
   collectionCatalog,
   collectionReturnTo,
+  paymentSetup,
 }: {
   initial: Initial;
   seller: Seller;
@@ -53,11 +54,13 @@ export function CollectorListingForm({
   marketplaceFeeBps: number;
   collectionCatalog?: Record<string, unknown>;
   collectionReturnTo?: string;
+  paymentSetup?: "returned" | "refresh" | "unavailable";
 }) {
   const product = initial?.product ?? collectionCatalog ?? {};
   const [catalogReady, setCatalogReady] = useState(Boolean(product.catalogProductId));
   const formRef = useRef<HTMLFormElement>(null);
   const addressRef = useRef<AddressFieldsHandle>(null);
+  const savingRef = useRef(false);
   const [productId, setProductId] = useState(String(product.id ?? ""));
   const [shipFromAddresses, setShipFromAddresses] = useState(
     initialShipFromAddresses,
@@ -77,27 +80,47 @@ export function CollectorListingForm({
     typeof product.primaryImageUrl === "string" ? product.primaryImageUrl : null,
   );
   const [files, setFiles] = useState<File[]>([]);
-  const [message, setMessage] = useState("");
+  const stripeReady = Boolean(
+    seller?.stripeChargesEnabled &&
+      seller?.stripePayoutsEnabled &&
+      seller?.status === "active",
+  );
+  const [message, setMessage] = useState(
+    paymentSetup === "unavailable"
+      ? "Your draft is saved. We could not check your payment connection. Reload this page to try again."
+      : paymentSetup && stripeReady
+        ? "Your draft and photos are saved. Your payment method is connected. You can submit your listing for review."
+        : paymentSetup
+          ? "Your draft and photos are saved. Connect your payment method again to finish setup."
+          : "",
+  );
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [acceptedSellerTerms, setAcceptedSellerTerms] = useState(false);
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!catalogReady) { setError("Choose a catalog model first."); return; }
-    setBusy(true);
-    setError("");
-    setMessage("");
     const submitter = (event.nativeEvent as SubmitEvent)
       .submitter as HTMLButtonElement | null;
-    const shouldSubmit = submitter?.value === "submit";
-    if (shouldSubmit && !acceptedSellerTerms) {
-      setError("Accept the current Seller Terms before submitting for review.");
-      setBusy(false);
+    await saveListing(event.currentTarget, submitter?.value === "submit" ? "submit" : "save");
+  }
+
+  async function saveListing(form: HTMLFormElement, action: "save" | "submit" | "connect") {
+    if (savingRef.current) return;
+    if (!catalogReady) { setError("Choose a catalog model first."); return; }
+    setError("");
+    setMessage("");
+    const shouldSubmit = action === "submit";
+    const shouldConnect = action === "connect";
+    if ((shouldSubmit || shouldConnect) && !acceptedSellerTerms) {
+      setError("Accept the current Seller Terms before connecting your payment method or submitting for review.");
       return;
     }
+    savingRef.current = true;
+    setBusy(true);
+    let draftSaved = false;
     try {
-      const payload = Object.fromEntries(new FormData(event.currentTarget));
+      const payload = Object.fromEntries(new FormData(form));
       const response = await fetch("/api/listings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -117,7 +140,12 @@ export function CollectorListingForm({
         if (body.fields) addressRef.current?.setErrors(body.fields);
         throw new Error(body.error || "The draft could not be saved.");
       }
+      draftSaved = true;
       setProductId(body.productId);
+      const query = new URLSearchParams(location.search);
+      query.set("id", body.productId);
+      query.delete("stripe");
+      history.replaceState(null, "", `/sell/model?${query}`);
       if (body.shipFromAddress) {
         const savedAddress = body.shipFromAddress;
         setShipFromAddresses((current) => {
@@ -148,12 +176,29 @@ export function CollectorListingForm({
           },
         });
       }
-      history.replaceState(
-        null,
-        "",
-        (() => { const query = new URLSearchParams(location.search); query.set("id", body.productId!); return `/sell/model?${query}`; })(),
-      );
-      if (shouldSubmit) {
+      if (shouldConnect) {
+        setMessage("Draft and photos saved. Opening secure payment setup…");
+        const connection = await fetch("/api/listings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "stripe_onboarding",
+            productId: body.productId,
+            sellerTermsVersion: POLICY_VERSION,
+            collectionItem: query.get("collectionItem"),
+            selling: query.get("selling"),
+            minimum: query.get("minimum"),
+          }),
+        });
+        const connectionBody = (await connection.json()) as {
+          onboardingUrl?: string;
+          error?: string;
+        };
+        if (!connection.ok || !connectionBody.onboardingUrl) {
+          throw new Error(connectionBody.error || "Payment setup could not be started. Your draft is saved; please try again.");
+        }
+        window.location.assign(connectionBody.onboardingUrl);
+      } else if (shouldSubmit) {
         const review = await fetch("/api/listings", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -178,12 +223,16 @@ export function CollectorListingForm({
         );
       }
     } catch (reason) {
+      setMessage(shouldConnect && draftSaved
+        ? "Your draft is saved. Fix the issue below, then try connecting your payment method again."
+        : "");
       setError(
         reason instanceof Error
           ? reason.message
           : "The listing could not be saved.",
       );
     } finally {
+      savingRef.current = false;
       setBusy(false);
     }
   }
@@ -250,36 +299,6 @@ export function CollectorListingForm({
     });
   }
 
-  async function startOnboarding() {
-    setBusy(true);
-    setError("");
-    try {
-      const response = await fetch("/api/listings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "stripe_onboarding",
-          sellerTermsVersion: POLICY_VERSION,
-        }),
-      });
-      const body = (await response.json()) as {
-        onboardingUrl?: string;
-        error?: string;
-      };
-      if (!response.ok || !body.onboardingUrl) {
-        throw new Error(body.error || "Stripe onboarding could not be started.");
-      }
-      window.location.assign(body.onboardingUrl);
-    } catch (reason) {
-      setError(
-        reason instanceof Error
-          ? reason.message
-          : "Stripe onboarding could not be started.",
-      );
-      setBusy(false);
-    }
-  }
-
   function fillCommonDisclosures() {
     const form = formRef.current;
     if (!form) return;
@@ -303,11 +322,6 @@ export function CollectorListingForm({
       });
   }
 
-  const stripeReady = Boolean(
-    seller?.stripeChargesEnabled &&
-      seller?.stripePayoutsEnabled &&
-      seller?.status === "active",
-  );
   const selectedShipFromAddress = shipFromAddresses.find(
     (address) => address.id === shipFromAddressId,
   );
@@ -331,7 +345,7 @@ export function CollectorListingForm({
 
       <form ref={formRef} className="listing-form" onSubmit={save} noValidate>
         <CatalogModelPicker initial={product} listingSaved={Boolean(productId)} initialQuery={[prefill.manufacturer, prefill.make, prefill.model, prefill.scale].filter(Boolean).join(" ")} disabled={busy} onReady={setCatalogReady} />
-        <fieldset className="catalog-listing-fields" hidden={!catalogReady} disabled={!catalogReady}>
+        <fieldset className="catalog-listing-fields" hidden={!catalogReady} disabled={!catalogReady || busy}>
         <div className="listing-section-controls">
           <p>Open the section you need. Your entries stay in place when a section is closed.</p>
           <div>
@@ -422,7 +436,7 @@ export function CollectorListingForm({
             <select name="shipFromAddressId" value={shipFromAddressId} onChange={(event) => setShipFromAddressId(event.target.value)}>
               {shipFromAddresses.map((address) => (
                 <option key={address.id} value={address.id}>
-                  {address.label}{address.isDefault ? " · Default" : ""} — {address.city}, {address.region || address.country}
+                  {address.label}{address.isDefault ? " · Default" : ""} - {address.city}, {address.region || address.country}
                 </option>
               ))}
               <option value="new">+ Add a new address</option>
@@ -477,7 +491,7 @@ export function CollectorListingForm({
           </div>
         </details>
 
-        <details className="listing-section">
+        <details className="listing-section" id="listing-review" open={Boolean(paymentSetup)}>
           <summary>
             <span>
               <span className="step-label">7 · Review</span>
@@ -486,12 +500,12 @@ export function CollectorListingForm({
           </summary>
           <div className="listing-section-content listing-submit">
           <div>
-            <p>{stripeReady ? "Stripe payouts are ready. Submitted listings are reviewed before going live." : "You can keep drafting now. Complete secure Stripe-hosted payout onboarding before submission."}</p>
+            <p>{stripeReady ? "Your payment method is connected. Submitted listings are reviewed before going live." : "Connect your payment method to receive money from your sales. We’ll save your draft and photos before opening secure setup with Stripe, then bring you back to this listing."}</p>
             <label className="consent-check">
               <input type="checkbox" checked={acceptedSellerTerms} onChange={(event) => setAcceptedSellerTerms(event.target.checked)} />
               <span>I agree to the current <Link href="/seller-terms">Seller Terms</Link>, including deductions for marketplace commission and actual payment processing, fulfillment rules, and return obligations.</span>
             </label>
-            {!stripeReady && <button className="button outline small" type="button" disabled={busy || !acceptedSellerTerms} onClick={() => void startOnboarding()}>Complete Stripe onboarding</button>}
+            {!stripeReady && <button className="button outline small" type="button" disabled={busy || !acceptedSellerTerms} onClick={() => { if (formRef.current) return saveListing(formRef.current, "connect"); }}>{busy ? "Saving draft…" : "Connect payment method"}</button>}
           </div>
           {message && <p className="admin-message" role="status">{message}</p>}
           {error && <p className="form-error" role="alert">{error}</p>}

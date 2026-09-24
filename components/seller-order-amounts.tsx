@@ -22,7 +22,7 @@ export function SellerOrderAmounts({ order }: { order: SellerFeeAmounts & {
       ? deduction == null ? "Awaiting actual Stripe fee" : `−${money(deduction)}`
       : `${money(0)} deducted from you`}</dd></div>
     <div><dt>Your proceeds {refunded ? "before refunds" : "before fulfillment costs"}</dt><dd>{order.sellerProceedsCents == null
-      ? sellerPays ? "Pending — waiting for Stripe fee" : "Not recorded for this order"
+      ? sellerPays ? "Pending - waiting for Stripe fee" : "Not recorded for this order"
       : money(order.sellerProceedsCents)}</dd></div>
     {refunded && <><div><dt>Customer refunds</dt><dd>{money(order.refundedAmountCents)}</dd></div><div><dt>Your proceeds after refunds, before fulfillment costs</dt><dd>{remaining == null ? "Pending" : money(remaining)}</dd></div></>}
   </dl>;

@@ -48,7 +48,7 @@ export default async function PiecePage({ params }: { params: Promise<{ id: stri
           <Link href={collectionHref}>{piece.availability === "previously_owned" ? "Previously owned by" : "Owned by"} {piece.displayName}</Link>
           <span className="availability">{pieceAvailabilityLabel(piece.availability)}</span>
         </div>
-        {owner && <p className="privacy-label">{piece.visibility === "private" ? "Private — only you" : "Public showcase"}</p>}
+        {owner && <p className="privacy-label">{piece.visibility === "private" ? "Private - only you" : "Public showcase"}</p>}
         {piece.story && <p className="piece-story">{piece.story}</p>}
         {piece.condition && <p><strong>Condition:</strong> {piece.condition}</p>}
         {shelves.length > 0 && <div className="piece-shelves">

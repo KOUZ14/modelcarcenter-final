@@ -712,8 +712,8 @@ export async function preparePaidOrder(session: StripeCheckoutSession, reservati
        selected_shipping_carrier, selected_shipping_service, selected_shipping_service_token,
        selected_shipping_estimated_days, marketplace_fee_bps, platform_fee_cents,
        processing_fee_payer, payment_processing_fee_cents, seller_proceeds_cents, tax_cents, total_cents,
-        payment_status, fulfillment_status, buyer_name, shipping_address, ship_from_address, paid_at, ship_by_at, checkout_group_id, checkout_reservation_id, protection_policy_version)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'paid', 'unfulfilled', ?, ?, ?, ?, ?, ?, ?, ?)`)
+        payment_status, fulfillment_status, buyer_name, shipping_address, ship_from_address, paid_at, ship_by_at, checkout_group_id, checkout_reservation_id, protection_policy_version, is_test_order, test_order_reason)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'paid', 'unfulfilled', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
       .bind(orderId, orderNumber, reservation.sellerId, reservation.buyerUserId, session.id, intent, charge,
         paymentFlow, transferGroup, paymentFlow === "separate" ? "pending" : "transferred", buyerEmail,
         session.currency ?? reservation.currency, reservation.subtotalCents, reservation.shippingCents,
@@ -724,7 +724,7 @@ export async function preparePaidOrder(session: StripeCheckoutSession, reservati
         settlement.processingFeePayer, settlement.paymentProcessingFeeCents, settlement.sellerProceedsCents,
         taxCents, totalCents, shipping.name ?? "", JSON.stringify(shipping),
         reservation.shipFromAddress,
-        paidAt.toISOString(), shipByAt.toISOString(), session.metadata?.checkout_group_id ?? null, reservationId, reservation.protectionPolicyVersion),
+        paidAt.toISOString(), shipByAt.toISOString(), session.metadata?.checkout_group_id ?? null, reservationId, reservation.protectionPolicyVersion, session.id.startsWith("cs_test_") ? 1 : 0, session.id.startsWith("cs_test_") ? "Stripe test-mode checkout; no live payment." : null),
   );
   for (const item of items) {
     statements.push(

@@ -30,6 +30,7 @@ export async function savePromotionSettings(payload: Record<string, unknown>, ac
   if (!Number.isSafeInteger(price) || price < 0 || price > 1_000_000) throw new ValidationError("Enter a price between 0 and 1,000,000 cents.");
   if (!["unconfigured", "none", "automatic"].includes(String(payload.taxMode))) throw new ValidationError("Select the promotion tax setting.");
   const sellerIds = String(payload.sellerIds ?? "").split(/[\s,]+/).filter(Boolean);
+  if (payload.audience === "selected" && sellerIds.length === 0) throw new ValidationError("Select at least one seller or explicitly choose all eligible sellers.");
   if (sellerIds.length > 100 || sellerIds.some(id => !/^[a-zA-Z0-9-]{1,100}$/.test(id))) throw new ValidationError("Use at most 100 valid seller IDs.");
   const settings: PromotionSettings = {
     purchasesEnabled: payload.purchasesEnabled === true, servingEnabled: payload.servingEnabled === true,
@@ -40,6 +41,7 @@ export async function savePromotionSettings(payload: Record<string, unknown>, ac
   if (settings.purchasesEnabled && (price < 50 || settings.taxMode === "unconfigured" || (settings.taxMode === "automatic" && !settings.taxCode))) throw new ValidationError("Set the price and tax treatment before enabling purchases.");
   if (settings.purchasesEnabled && !settings.servingEnabled) throw new ValidationError("Enable placements before enabling purchases.");
   const previous = await getPromotionSettings();
+  if (payload.expectedSettings && JSON.stringify(previous) !== payload.expectedSettings) throw new ValidationError("Settings changed since your preview. Reload and review the changes again.");
   const now = Date.now();
   await getD1().batch([
     getD1().prepare("INSERT INTO promotion_settings (id,settings,updated_at) VALUES ('main',?,?) ON CONFLICT(id) DO UPDATE SET settings=excluded.settings,updated_at=excluded.updated_at").bind(JSON.stringify(settings), now),
@@ -119,7 +121,7 @@ export async function getSellerPromotions(sellerId: string) {
 }
 
 export async function getAdminPromotions() {
-  const [campaigns, refunds, audit, totals, settings] = await Promise.all([
+  const [campaigns, refunds, audit, totals, settings, sellerOptions, impact] = await Promise.all([
     getD1().prepare(`${campaignSelect} ORDER BY c.created_at DESC LIMIT 200`).all<CampaignRow>(),
     getD1().prepare("SELECT * FROM promotion_refunds ORDER BY created_at DESC LIMIT 100").all(),
     getD1().prepare("SELECT * FROM promotion_audit ORDER BY created_at DESC LIMIT 100").all(),
@@ -127,6 +129,8 @@ export async function getAdminPromotions() {
       COALESCE(sum(fee_cents),0) AS recorded_fee_cents,COALESCE(sum(refunded_cents),0) AS refunded_cents,
       count(CASE WHEN fee_cents IS NULL THEN 1 END) AS unsettled_payments FROM promotion_payments WHERE status='paid'`).first(),
     getPromotionSettings(),
+    getD1().prepare("SELECT id, store_name, status FROM sellers ORDER BY store_name").all(),
+    getD1().prepare("SELECT count(*) campaigns, count(DISTINCT c.seller_id) sellers FROM promotion_campaigns c JOIN promotion_payments p ON p.campaign_id=c.id WHERE c.status='active' AND p.status='paid' AND c.ends_at > ?").bind(Date.now()).first(),
   ]);
-  return { campaigns: campaigns.results ?? [], refunds: refunds.results ?? [], audit: audit.results ?? [], totals, settings };
+  return { campaigns: campaigns.results ?? [], refunds: refunds.results ?? [], audit: audit.results ?? [], totals, settings, sellers: sellerOptions.results ?? [], impact };
 }

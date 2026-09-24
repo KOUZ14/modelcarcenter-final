@@ -252,7 +252,7 @@ test("cart preserves the full address, rejects late quotes, and refreshes after 
   assert.match(text(mobile()), /\$57\.95/, "Unselected sellers are excluded from the visible total");
   sellerCheckbox("other-store").props.onChange();
   render();
-  assert.match(text(mobile()), /Order total.*—.*Select sellers/);
+  assert.match(text(mobile()), /Order total.*-.*Select sellers/);
   assert.equal(fixture.marketplace.cart.length, 2, "Selection never removes items");
   sellerCheckbox("store").props.onChange();
   sellerCheckbox("other-store").props.onChange();
@@ -260,5 +260,5 @@ test("cart preserves the full address, rejects late quotes, and refreshes after 
   assert.match(text(mobile()), /Total \(tax included\)/, "Tax-inclusive stores must not label their price before tax");
   fixture.marketplace.cart[1].currency = "eur";
   render();
-  assert.match(text(mobile()), /Order total.*—.*Select sellers/, "Currencies are never added together");
+  assert.match(text(mobile()), /Order total.*-.*Select sellers/, "Currencies are never added together");
 });

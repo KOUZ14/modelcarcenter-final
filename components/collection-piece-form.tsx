@@ -125,7 +125,7 @@ export function CollectionPieceForm({ piece, shelves, visibility, seedCatalogId,
     <PhotoUpload value={photos} onChange={setPhotos}/>
     <label>Personal story<textarea name="story" defaultValue={piece?.story} maxLength={3000}/></label>
     <fieldset><legend>Shelves (optional)</legend>{unique.map(s => <label className="check-label" key={s.id}><input type="checkbox" name="shelves" value={s.id} defaultChecked={shelves.some(m => m.id === s.id && m.itemId === piece?.id)}/>{s.name}</label>)}{!unique.length && <p>Create a shelf after saving your first piece.</p>}</fieldset>
-    <label>Visibility<select value={visible} onChange={e => setVisible(e.target.value)}><option value="private">Private — only you</option><option value="public" disabled={!selling.published}>Public showcase{!selling.published ? " — publish your profile first" : ""}</option></select></label>
+    <label>Visibility<select value={visible} onChange={e => setVisible(e.target.value)}><option value="private">Private - only you</option><option value="public" disabled={!selling.published}>Public showcase{!selling.published ? " - publish your profile first" : ""}</option></select></label>
     {visible === "public" && saved?.visibility !== "public" && <label className="check-label"><input required type="checkbox" name="publishConfirmed"/>Publish this piece, its story and photos on my public profile. My private records remain private.</label>}
     <label className="check-label"><input type="checkbox" name="commentsEnabled" defaultChecked={piece ? Boolean(piece.commentsEnabled) : true}/>Allow new comments</label>
     <label className="check-label"><input type="checkbox" name="pinned" defaultChecked={Boolean(piece?.pinned)}/>Pin as a favorite</label>

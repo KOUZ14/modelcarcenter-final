@@ -127,11 +127,11 @@ export type EmailOrder = {
 };
 
 function orderItemsHtml(order: EmailOrder) {
-  return order.items.map((item) => `<li>${escapeHtml(item.title)} × ${item.quantity} — ${escapeHtml(money(item.unitPriceCents * item.quantity, order.currency))}${item.availabilityType === "preorder" && item.releaseDate ? `<br><strong>Preorder · Expected release ${escapeHtml(formatReleaseDate(item.releaseDate))}</strong>` : ""}</li>`).join("");
+  return order.items.map((item) => `<li>${escapeHtml(item.title)} × ${item.quantity} - ${escapeHtml(money(item.unitPriceCents * item.quantity, order.currency))}${item.availabilityType === "preorder" && item.releaseDate ? `<br><strong>Preorder · Expected release ${escapeHtml(formatReleaseDate(item.releaseDate))}</strong>` : ""}</li>`).join("");
 }
 
 function orderItemsText(order: EmailOrder) {
-  return order.items.map((item) => `${item.title} x ${item.quantity} — ${money(item.unitPriceCents * item.quantity, order.currency)}${item.availabilityType === "preorder" && item.releaseDate ? `\nPreorder · Expected release ${formatReleaseDate(item.releaseDate)}` : ""}`).join("\n");
+  return order.items.map((item) => `${item.title} x ${item.quantity} - ${money(item.unitPriceCents * item.quantity, order.currency)}${item.availabilityType === "preorder" && item.releaseDate ? `\nPreorder · Expected release ${formatReleaseDate(item.releaseDate)}` : ""}`).join("\n");
 }
 
 function formatReleaseDate(value: string) {

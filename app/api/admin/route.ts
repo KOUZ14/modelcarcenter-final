@@ -24,6 +24,7 @@ import {
   isCollectorListingAwaitingReview,
 } from "@/lib/account-rules";
 import { commitInventoryCsv, previewInventoryCsv } from "@/lib/csv-import";
+import { orderItemProblem } from "@/lib/admin-order-rules";
 import { config } from "@/lib/config";
 import { productionReadiness } from "@/lib/production-readiness";
 import {
@@ -106,7 +107,11 @@ export async function POST(request: Request) {
   try {
     const payload = await readJsonObject(request);
     const action = requiredString(payload.action, "action", 60);
+    if (["approve_application", "reject_application"].includes(action)) requiredString(payload.note, "decision note", 2000);
     const result = await runAdminAction(action, payload, identity.email);
+    if (["approve_application", "reject_application", "commit_import", "refresh_stripe", "link_hunt", "notify_hunt"].includes(action)) {
+      await getD1().prepare("INSERT INTO admin_activity (id, action, record_id, actor, detail) VALUES (?, ?, ?, ?, ?)").bind(crypto.randomUUID(), action, String(payload.applicationId || payload.sellerId || payload.huntId || ""), identity.email, JSON.stringify({ note: cleanText(payload.note, 2000), productId: payload.productId, ...result })).run();
+    }
     return Response.json({ ok: true, ...result });
   } catch (error) {
     return routeError(error, "The admin action could not be completed.");
@@ -118,7 +123,7 @@ async function loadAdminSection(section: string) {
     const report = productionReadiness(config);
     const adminConfigured = Boolean(process.env.ADMIN_EMAILS?.split(",").some((email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) && !email.includes("example.com")));
     const bypassDisabled = process.env.ADMIN_DEV_BYPASS !== "true";
-    return { section, configurationReady: report.configurationReady && adminConfigured && bypassDisabled, checks: [...report.checks,
+    return { section, checkedAt: new Date().toISOString(), configurationReady: report.configurationReady && adminConfigured && bypassDisabled, checks: [...report.checks,
       { id: "admin_allowlist", label: "Founder admin email is configured", passed: adminConfigured },
       { id: "admin_bypass", label: "Development admin bypass is disabled", passed: bypassDisabled },
     ] };
@@ -142,13 +147,20 @@ async function loadAdminSection(section: string) {
       count(
         orders,
         and(
-          eq(orders.paymentStatus, "paid"),
-          eq(orders.fulfillmentStatus, "unfulfilled"),
+          sql`${orders.paymentStatus} IN ('paid', 'partially_refunded')`,
+          sql`${orders.fulfillmentStatus} IN ('unfulfilled', 'processing')`,
         )!,
       ),
       count(communitySubscribers),
       count(sellerApplications, eq(sellerApplications.status, "pending")),
       count(products, eq(products.status, "pending_review")),
+    ]);
+    const [overdueShipments, urgentDisputes, paymentExceptions, missingOrderItems, failedNotices] = await Promise.all([
+      count(orders, sql`${orders.paymentStatus} IN ('paid', 'partially_refunded') AND ${orders.fulfillmentStatus} IN ('unfulfilled', 'processing') AND julianday(${orders.shipByAt}) < julianday('now')`),
+      count(disputes, sql`${disputes.closedAt} IS NULL AND ${disputes.status} NOT IN ('won', 'lost', 'prevented', 'warning_closed') AND julianday(${disputes.evidenceDueBy}) <= julianday('now', '+3 days')`),
+      count(orders, sql`${orders.paymentStatus} = 'failed' OR ${orders.sellerTransferStatus} = 'failed' OR EXISTS (SELECT 1 FROM seller_alerts a WHERE a.seller_id = ${orders.sellerId} AND a.acknowledged = 0)`),
+      count(orders, sql`NOT EXISTS (SELECT 1 FROM order_items i WHERE i.order_id = ${orders.id})`),
+      getD1().prepare("SELECT COUNT(*) count FROM preorder_events WHERE recipient IS NOT NULL AND delivery_status != 'sent' AND attempts > 0").first<{ count: number }>(),
     ]);
     const [scaleDemand, makeDemand, manufacturerDemand] = await Promise.all([
       db
@@ -190,6 +202,7 @@ async function loadAdminSection(section: string) {
     return {
       section,
       counts: {
+        overdueShipments, urgentDisputes, paymentExceptions, missingOrderItems, failedNotifications: failedNotices?.count ?? 0,
         activeProducts,
         activeSellers,
         openHunts,
@@ -207,26 +220,34 @@ async function loadAdminSection(section: string) {
     };
   }
   if (section === "sellers") {
-    const [sellerRows, applications] = await Promise.all([
+    const [sellerRows, applications, activity, unresolved] = await Promise.all([
       db.select().from(sellers).orderBy(desc(sellers.createdAt)),
       db
         .select()
         .from(sellerApplications)
         .orderBy(desc(sellerApplications.createdAt)),
+      getD1().prepare("SELECT * FROM admin_activity WHERE action IN ('approve_application', 'reject_application', 'refresh_stripe') ORDER BY created_at DESC LIMIT 200").all(),
+      db.select({ sellerId: orders.sellerId, count: sql<number>`count(*)` }).from(orders).where(sql`${orders.paymentStatus} IN ('paid', 'partially_refunded') AND ${orders.fulfillmentStatus} IN ('unfulfilled', 'processing')`).groupBy(orders.sellerId),
     ]);
     return {
       section,
       sellers: sellerRows.map((seller) => ({
         ...seller,
         ...determineMarketplaceFee(seller),
+        unresolvedOrders: unresolved.find(row => row.sellerId === seller.id)?.count ?? 0,
+        stripeRequirementsDue: (activity.results as Array<{ action: string; record_id: string; detail: string }>).filter(row => row.action === "refresh_stripe" && row.record_id === seller.id).slice(0, 1).map(row => (JSON.parse(row.detail).requirementsDue || []).map((value: string) => value.replaceAll("_", " ").replaceAll(".", " / ")).join(", "))[0],
+        stripeVerifiedAt: (activity.results as Array<{ action: string; record_id: string; created_at: string }>).find(row => row.action === "refresh_stripe" && row.record_id === seller.id)?.created_at ?? null,
       })),
       applications,
+      activity: activity.results,
     };
   }
   if (section === "products") {
     const productRows = await db
       .select({
         id: products.id,
+        catalogProductId: products.catalogProductId,
+        conditionNotes: products.conditionNotes,
         sellerId: products.sellerId,
         sellerName: sellers.storeName,
         slug: products.slug,
@@ -292,6 +313,7 @@ async function loadAdminSection(section: string) {
         images: images.filter((image) => image.productId === product.id),
       })),
       sellers: sellerRows,
+      importHistory: (await getD1().prepare("SELECT a.*, s.store_name FROM admin_activity a LEFT JOIN sellers s ON s.id = a.record_id WHERE a.action = 'commit_import' ORDER BY a.created_at DESC LIMIT 30").all()).results,
     };
   }
   if (section === "hunts") {
@@ -317,7 +339,7 @@ async function loadAdminSection(section: string) {
       .innerJoin(sellers, eq(products.sellerId, sellers.id))
       .where(and(eq(products.status, "active"), eq(sellers.status, "active")))
       .limit(500);
-    return { section, hunts, candidateProducts };
+    return { section, hunts, candidateProducts, history: (await getD1().prepare("SELECT * FROM admin_activity WHERE action IN ('link_hunt', 'notify_hunt') ORDER BY created_at DESC LIMIT 200").all()).results };
   }
   if (section === "community") {
     const subscribers = await db
@@ -352,6 +374,9 @@ async function loadAdminSection(section: string) {
           fulfillmentStatus: orders.fulfillmentStatus,
           carrier: orders.carrier,
           trackingNumber: orders.trackingNumber,
+          shipByAt: orders.shipByAt,
+          refundedAmountCents: orders.refundedAmountCents,
+          sellerTransferStatus: orders.sellerTransferStatus,
           createdAt: orders.createdAt,
           paidAt: orders.paidAt,
           shippedAt: orders.shippedAt,
@@ -565,6 +590,7 @@ async function runAdminAction(
     const slug = `${makeSlug(application[0].storeName)}-${sellerId.slice(0, 5)}`;
     const d1 = getD1();
     await d1.batch([
+      d1.prepare("UPDATE seller_applications SET status = CASE WHEN status = 'pending' THEN 'approved' ELSE NULL END, updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(applicationId),
       d1
         .prepare(
           `INSERT INTO sellers
@@ -602,10 +628,8 @@ async function runAdminAction(
       "applicationId",
       100,
     );
-    await db
-      .update(sellerApplications)
-      .set({ status: "rejected", updatedAt: new Date().toISOString() })
-      .where(eq(sellerApplications.id, applicationId));
+    const changed = await getD1().prepare("UPDATE seller_applications SET status='rejected', updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='pending'").bind(applicationId).run();
+    if (!changed.meta.changes) throw new ValidationError("Pending application not found. Refresh to see the latest decision.");
     return {};
   }
   if (action === "save_seller") return saveSeller(payload);
@@ -948,6 +972,8 @@ async function refreshStripe(sellerId: string) {
   return {
     chargesEnabled: account.charges_enabled,
     payoutsEnabled: account.payouts_enabled,
+    requirementsDue: account.requirements?.currently_due ?? [],
+    disabledReason: account.requirements?.disabled_reason ?? null,
     status,
   };
 }
@@ -1124,8 +1150,12 @@ async function shipOrder(payload: Record<string, unknown>) {
     .where(eq(orders.id, orderId))
     .limit(1);
   const order = rows[0];
-  if (!order || order.paymentStatus !== "paid")
-    throw new ValidationError("Only paid orders can be marked shipped.");
+  if (!order || !["paid", "partially_refunded"].includes(order.paymentStatus))
+    throw new ValidationError("Only paid or partially refunded orders can be marked shipped.");
+  if (!["unfulfilled", "processing", "shipped"].includes(order.fulfillmentStatus)) throw new ValidationError("This order is no longer awaiting shipment.");
+  const items = await db.select().from(orderItems).where(eq(orderItems.orderId, orderId));
+  const itemProblem = orderItemProblem({ ...order, items });
+  if (itemProblem) throw new ValidationError(itemProblem);
   if (!config.shippoApiKey)
     throw new ValidationError(
       "Carrier tracking is unavailable. Configure Shippo before shipping.",
@@ -1173,6 +1203,11 @@ async function refundOrder(payload: Record<string, unknown>) {
     throw new ValidationError(
       "Only a paid, unrefunded Stripe order can be refunded.",
     );
+  if (restock) {
+    const items = await db.select().from(orderItems).where(eq(orderItems.orderId, orderId));
+    const itemProblem = orderItemProblem({ ...order, items });
+    if (itemProblem) throw new ValidationError(itemProblem);
+  }
   const refund = await createFullRefund({
     orderId,
     paymentIntentId: order.stripePaymentIntentId,
@@ -1778,6 +1813,7 @@ async function count(
     | typeof products
     | typeof sellers
     | typeof wantedRequests
+    | typeof disputes
     | typeof orders
     | typeof communitySubscribers
     | typeof sellerApplications,

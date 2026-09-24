@@ -1,4 +1,4 @@
-# Protection window decision — proposal only
+# Protection window decision - proposal only
 
 Prepared September 18, 2026. **The active delivered-order claim window remains three calendar days. No longer window has been activated.**
 

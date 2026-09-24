@@ -10,6 +10,7 @@ import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
 import { formatCondition, formatMoney, formatUtcDate } from "@/lib/format";
 import { orderDeliveryLabel, orderTrackingHref, type SavedListingPreview } from "@/lib/account-presentation";
+import { POLICY_VERSION } from "@/lib/legal";
 import "./account-dashboard.css";
 import {
   ShipmentTimeline,
@@ -444,11 +445,11 @@ function VerifiedFeedbackForm({
             value={rating}
             onChange={(event) => setRating(Number(event.target.value))}
           >
-            <option value={5}>5 — Excellent</option>
-            <option value={4}>4 — Good</option>
-            <option value={3}>3 — Fair</option>
-            <option value={2}>2 — Poor</option>
-            <option value={1}>1 — Very poor</option>
+            <option value={5}>5 - Excellent</option>
+            <option value={4}>4 - Good</option>
+            <option value={3}>3 - Fair</option>
+            <option value={2}>2 - Poor</option>
+            <option value={1}>1 - Very poor</option>
           </select>
         </label>
         <label>
@@ -481,6 +482,8 @@ function Listings({
   action(payload: Record<string, unknown>): Promise<unknown>;
 }) {
   const [busy, setBusy] = useState(false);
+  const [acceptedSellerTerms, setAcceptedSellerTerms] = useState(false);
+  const [paymentError, setPaymentError] = useState("");
   if (seller?.sellerType === "professional")
     return (
       <div className="garage-section">
@@ -495,20 +498,24 @@ function Listings({
         </Link>
       </div>
     );
-  async function onboarding() {
+  async function connectPayments() {
+    if (busy || !acceptedSellerTerms) return;
     setBusy(true);
+    setPaymentError("");
     try {
       const response = await fetch("/api/listings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "stripe_onboarding" }),
+        body: JSON.stringify({ action: "stripe_onboarding", sellerTermsVersion: POLICY_VERSION }),
       });
       const body = (await response.json()) as {
         onboardingUrl?: string;
         error?: string;
       };
-      if (!response.ok || !body.onboardingUrl) throw new Error(body.error);
+      if (!response.ok || !body.onboardingUrl) throw new Error(body.error || "Payment setup could not be started.");
       window.location.assign(body.onboardingUrl);
+    } catch (reason) {
+      setPaymentError(reason instanceof Error ? reason.message : "Payment setup could not be started.");
     } finally {
       setBusy(false);
     }
@@ -527,18 +534,23 @@ function Listings({
       {seller &&
         (!seller.stripeChargesEnabled || !seller.stripePayoutsEnabled) && (
           <div className="account-callout">
-            <b>Complete payout setup before submitting a listing.</b>
+            <b>Connect your payment method before submitting a listing.</b>
             <p>
-              Stripe securely collects identity and bank information on its
-              hosted site.
+              Receive money from your sales. Stripe securely collects identity
+              and bank information on its hosted site.
             </p>
+            <label className="consent-check">
+              <input type="checkbox" checked={acceptedSellerTerms} onChange={event => setAcceptedSellerTerms(event.target.checked)} />
+              <span>I agree to the current <Link href="/seller-terms">Seller Terms</Link>.</span>
+            </label>
             <button
               className="button outline small"
-              disabled={busy}
-              onClick={() => void onboarding()}
+              disabled={busy || !acceptedSellerTerms}
+              onClick={() => void connectPayments()}
             >
-              {busy ? "Opening Stripe…" : "Complete Stripe onboarding"}
+              {busy ? "Opening payment setup…" : "Connect payment method"}
             </button>
+            {paymentError && <p className="form-error" role="alert">{paymentError}</p>}
           </div>
         )}
       {rows.length ? (
@@ -845,7 +857,7 @@ function collectorPayoutLabel(sale: GarageData["sales"][number]) {
   if (sale.sellerTransferStatus === "failed") return "Release will be retried";
   if (sale.sellerTransferStatus === "cancelled") return "Cancelled";
   if (sale.sellerTransferStatus === "reversed") return "Reversed for refund";
-  if (sale.processingFeePayer === "seller" && sale.paymentProcessingFeeCents == null) return "Held — awaiting actual Stripe processing fee";
+  if (sale.processingFeePayer === "seller" && sale.paymentProcessingFeeCents == null) return "Held - awaiting actual Stripe processing fee";
   return sale.payoutEligibleAt
     ? `Held through ${date(String(sale.payoutEligibleAt))}`
     : "Held until the protection deadline after delivery";

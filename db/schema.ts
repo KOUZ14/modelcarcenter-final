@@ -1846,3 +1846,13 @@ export const checkoutReservationItems = sqliteTable(
     check("checkout_reservation_quantity_positive", sql`${table.quantity} > 0`),
   ],
 );
+
+// Founder decision and import history; uploaded CSV content is never retained here.
+export const adminActivity = sqliteTable("admin_activity", {
+  id: text("id").primaryKey(),
+  action: text("action").notNull(),
+  recordId: text("record_id"),
+  actor: text("actor").notNull(),
+  detail: text("detail").notNull().default("{}"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, table => [index("admin_activity_record_idx").on(table.action, table.recordId, table.createdAt)]);

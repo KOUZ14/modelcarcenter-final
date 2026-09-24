@@ -1,3 +1,4 @@
+import { previewPreorderMaintenance } from "@/lib/preorder-preview";
 import { requireCollectorApi } from "@/lib/collector-auth";
 import { requireAdminApi } from "@/lib/admin-auth";
 import { readJsonObject, routeError } from "@/lib/http";
@@ -27,7 +28,7 @@ export async function GET(request:Request) {
         db.prepare("SELECT id,kind,delivery_status,attempts,created_at FROM preorder_events WHERE recipient IS NOT NULL AND delivery_status != 'sent' ORDER BY created_at LIMIT 100").all(),
         db.prepare("SELECT id,store_name,status FROM sellers WHERE seller_type='professional' ORDER BY store_name").all(),
       ]);
-      return Response.json({batches:batches.results,policies:policies.results,access:access.results,exceptions:exceptions.results,notices:notices.results,sellers:sellerOptions.results,...await preorderOperations()});
+      return Response.json({maintenance:await previewPreorderMaintenance(),batches:batches.results,policies:policies.results,access:access.results,exceptions:exceptions.results,notices:notices.results,sellers:sellerOptions.results,...await preorderOperations()});
     }
     const account=await requireCollectorApi(request); if(account instanceof Response) return account;
     return Response.json(query.get("view")==="seller"?await sellerPreorders(account.user.id):{reservations:await buyerPreorders(account.user.id),waitlist:await buyerWaitlist(account.user.id)});
@@ -41,7 +42,13 @@ export async function POST(request:Request) {
       if(action==="maintenance") {
         const reason=required(input.reason,"maintenance reason");
         await eventStatement({actor:admin.email,kind:"maintenance_requested",detail:{reason}}).run();
-        await processPreorders();
+        try {
+          const result = await processPreorders(admin.email);
+          return Response.json({ok:true,result});
+        } catch (error) {
+          await eventStatement({actor:admin.email,kind:"maintenance_failed",detail:{reason,error:error instanceof Error ? error.message : "Maintenance failed"}}).run();
+          throw error;
+        }
       }
       else await adminPreorderAction(admin.email,input);
       return Response.json({ok:true});

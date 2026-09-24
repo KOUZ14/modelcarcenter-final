@@ -27,6 +27,6 @@ Copy this observation row for each task:
 
 | Participant | Task | Result | Seconds | Assistance | Observed confusion | Proposed change | Retest |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Pending | Pending | Not run | — | — | — | — | — |
+| Pending | Pending | Not run | - | - | - | - | - |
 
 After the sessions, group repeated problems, prioritize tasks people could not finish, implement the most consequential changes and retest with the affected participants. Optional 30–60 second task videos should use the final interface and remain supplemental to written help.

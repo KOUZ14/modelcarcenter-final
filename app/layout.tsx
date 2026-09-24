@@ -19,7 +19,7 @@ export const metadata: Metadata = {
     title: "Model Car Center | Model Car Marketplace",
     description: "Find model cars from independent sellers in one place.",
     siteName: "Model Car Center",
-    images: [{ url: "/og.png", width: 1536, height: 1024, alt: "Model Car Center — Every seller. One search." }],
+    images: [{ url: "/og.png", width: 1536, height: 1024, alt: "Model Car Center - Every seller. One search." }],
   },
   twitter: { card: "summary_large_image", title: "Model Car Center", description: "Buy and sell model cars from independent sellers.", images: ["/og.png"] },
   icons: {

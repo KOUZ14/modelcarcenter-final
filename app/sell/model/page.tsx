@@ -12,6 +12,7 @@ import { notFound } from "next/navigation";
 import { config } from "@/lib/config";
 import { getPiece } from "@/lib/community";
 import { getCatalogProduct } from "@/lib/catalog-products";
+import { refreshCollectorStripe } from "@/lib/listings";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Sell a Model", robots: { index: false, follow: false } };
@@ -26,6 +27,15 @@ export default async function SellModelPage({ searchParams }: { searchParams: Pr
   const collectionReturnTo = piece ? `/collection?${new URLSearchParams({edit:piece.id,selling:query.selling === 'open_to_offers' ? 'open_to_offers' : 'for_sale',minimum:String(Math.max(0,Number(query.minimum)||0))})}` : undefined;
   const initial = query.id ? await getOwnedProduct(collector.user.id, query.id) : null;
   if (query.id && !initial) notFound();
+  let paymentSetup: "returned" | "refresh" | "unavailable" | undefined =
+    query.stripe === "returned" || query.stripe === "refresh" ? query.stripe : undefined;
+  if (initial && paymentSetup) {
+    try {
+      await refreshCollectorStripe(collector.user.id);
+    } catch {
+      paymentSetup = "unavailable";
+    }
+  }
   const [garage, shipFromAddresses] = await Promise.all([
     getGarageData(collector.user.id),
     getCollectorShipFromAddresses(collector.user.id),
@@ -36,5 +46,5 @@ export default async function SellModelPage({ searchParams }: { searchParams: Pr
     scale: String(query.scale ?? "").slice(0, 30),
     manufacturer: String(query.manufacturer ?? "").slice(0, 100),
   };
-  return <main><SiteHeader/><div id="main-content" tabIndex={-1} className="inner-page shell"><CollectorListingForm initial={initial ? { product: initial.product, images: initial.images } : null} seller={garage.seller} shipFromAddresses={shipFromAddresses} displayName={collector.profile.displayName} prefill={prefill} marketplaceFeeBps={config.collectorMarketplaceFeeBps} collectionCatalog={collectionCatalog} collectionReturnTo={collectionReturnTo}/></div><SiteFooter/></main>;
+  return <main><SiteHeader/><div id="main-content" tabIndex={-1} className="inner-page shell"><CollectorListingForm initial={initial ? { product: initial.product, images: initial.images } : null} seller={garage.seller} shipFromAddresses={shipFromAddresses} displayName={collector.profile.displayName} prefill={prefill} marketplaceFeeBps={config.collectorMarketplaceFeeBps} collectionCatalog={collectionCatalog} collectionReturnTo={collectionReturnTo} paymentSetup={initial ? paymentSetup : undefined}/></div><SiteFooter/></main>;
 }

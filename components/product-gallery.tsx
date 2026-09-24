@@ -18,6 +18,7 @@ type GalleryImage = {
 };
 
 type Point = { x: number; y: number };
+type View = { zoom: number; pan: Point };
 
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 4;
@@ -34,19 +35,16 @@ export function ProductGallery({
 }) {
   const [activeIndex, setActiveIndex] = useState(0);
   const [viewerOpen, setViewerOpen] = useState(false);
-  const [zoom, setZoom] = useState(MIN_ZOOM);
-  const [pan, setPan] = useState<Point>({ x: 0, y: 0 });
+  const [view, setView] = useState<View>({
+    zoom: MIN_ZOOM,
+    pan: { x: 0, y: 0 },
+  });
+  const { zoom, pan } = view;
+  const viewRef = useRef(view);
   const stageRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const openerRef = useRef<HTMLButtonElement>(null);
-  const dragRef = useRef<
-    | {
-        pointerId: number;
-        origin: Point;
-        pan: Point;
-      }
-    | undefined
-  >(undefined);
+  const pointersRef = useRef(new Map<number, Point>());
 
   const count = images.length;
   const activeImage = images[activeIndex];
@@ -54,11 +52,22 @@ export function ProductGallery({
     activeImage?.alt || `${productName}, photo ${activeIndex + 1}`;
   const viewLabel = context === "listing" ? photoViewsFromAlt(activeImage?.alt).map(key => photoViews.find(view => view.key === key)?.label).join(" · ") : "";
 
-  const resetView = useCallback(() => {
-    setZoom(MIN_ZOOM);
-    setPan({ x: 0, y: 0 });
-    dragRef.current = undefined;
+  const updateView = useCallback((next: View) => {
+    // Pointer events can arrive before React renders the previous movement.
+    viewRef.current = next;
+    setView(next);
   }, []);
+
+  const resetView = useCallback(() => {
+    updateView({ zoom: MIN_ZOOM, pan: { x: 0, y: 0 } });
+    const pointerIds = Array.from(pointersRef.current.keys());
+    pointersRef.current.clear();
+    for (const pointerId of pointerIds) {
+      if (stageRef.current?.hasPointerCapture(pointerId)) {
+        stageRef.current.releasePointerCapture(pointerId);
+      }
+    }
+  }, [updateView]);
 
   const selectImage = useCallback(
     (index: number) => {
@@ -94,10 +103,12 @@ export function ProductGallery({
   const changeZoom = useCallback(
     (next: number) => {
       const normalized = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, next));
-      setZoom(normalized);
-      setPan((current) => clampPan(current, normalized));
+      updateView({
+        zoom: normalized,
+        pan: clampPan(viewRef.current.pan, normalized),
+      });
     },
-    [clampPan],
+    [clampPan, updateView],
   );
 
   useEffect(() => {
@@ -164,32 +175,64 @@ export function ProductGallery({
   ]);
 
   function onPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
-    if (zoom <= MIN_ZOOM) return;
+    if (event.button !== 0) return;
+    pointersRef.current.set(event.pointerId, {
+      x: event.clientX,
+      y: event.clientY,
+    });
     event.currentTarget.setPointerCapture(event.pointerId);
-    dragRef.current = {
-      pointerId: event.pointerId,
-      origin: { x: event.clientX, y: event.clientY },
-      pan,
-    };
   }
 
   function onPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
-    const drag = dragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
-    setPan(
-      clampPan(
-        {
-          x: drag.pan.x + event.clientX - drag.origin.x,
-          y: drag.pan.y + event.clientY - drag.origin.y,
-        },
-        zoom,
-      ),
+    const pointers = pointersRef.current;
+    const previous = pointers.get(event.pointerId);
+    if (!previous) return;
+    const [previousFirst, previousSecond] = pointers.values();
+    pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    const current = viewRef.current;
+
+    if (!previousSecond) {
+      updateView({
+        zoom: current.zoom,
+        pan: clampPan({
+          x: current.pan.x + event.clientX - previous.x,
+          y: current.pan.y + event.clientY - previous.y,
+        }, current.zoom),
+      });
+      return;
+    }
+
+    const [first, second] = pointers.values();
+    const previousDistance = Math.hypot(
+      previousSecond.x - previousFirst.x,
+      previousSecond.y - previousFirst.y,
     );
+    if (previousDistance < 1) return;
+    const distance = Math.hypot(second.x - first.x, second.y - first.y);
+    const nextZoom = Math.min(MAX_ZOOM, Math.max(
+      MIN_ZOOM, current.zoom * distance / previousDistance,
+    ));
+    const ratio = nextZoom / current.zoom;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const center = {
+      x: bounds.left + bounds.width / 2,
+      y: bounds.top + bounds.height / 2,
+    };
+
+    // Keep the image detail between the fingers anchored as they zoom and move.
+    updateView({
+      zoom: nextZoom,
+      pan: clampPan({
+        x: (first.x + second.x) / 2 - center.x
+          - ((previousFirst.x + previousSecond.x) / 2 - center.x - current.pan.x) * ratio,
+        y: (first.y + second.y) / 2 - center.y
+          - ((previousFirst.y + previousSecond.y) / 2 - center.y - current.pan.y) * ratio,
+      }, nextZoom),
+    });
   }
 
   function onPointerUp(event: ReactPointerEvent<HTMLDivElement>) {
-    if (dragRef.current?.pointerId !== event.pointerId) return;
-    dragRef.current = undefined;
+    if (!pointersRef.current.delete(event.pointerId)) return;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
@@ -342,6 +385,7 @@ export function ProductGallery({
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
             onPointerCancel={onPointerUp}
+            onLostPointerCapture={onPointerUp}
             onWheel={onWheel}
             onDoubleClick={() => changeZoom(zoom === MIN_ZOOM ? 2.5 : MIN_ZOOM)}
           >
@@ -383,7 +427,7 @@ export function ProductGallery({
           )}
 
           <p className="inspection-help">
-            100% fits the full image. Scroll or use + / &minus; to zoom. Drag to inspect.
+            100% fits the full image. Pinch, scroll or use + / &minus; to zoom. Drag to inspect.
           </p>
         </div>
       )}

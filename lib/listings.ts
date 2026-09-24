@@ -353,9 +353,18 @@ export async function startCollectorStripeOnboarding(
   user: VerifiedCollectorUser,
   profile: CollectorProfile,
   sellerTermsVersion: string,
+  listing?: {
+    productId: string;
+    collectionItem?: string;
+    selling?: string;
+    minimum?: string;
+  },
 ) {
   if (!isCurrentPolicyVersion(sellerTermsVersion)) {
-    throw new ValidationError("Accept the current Seller Terms before onboarding.");
+    throw new ValidationError("Accept the current Seller Terms before connecting your payment method.");
+  }
+  if (listing && !await getOwnedProduct(user.id, listing.productId)) {
+    throw new ValidationError("Listing not found.");
   }
   const seller = await getOrCreateCollectorSeller(user, profile);
   if (seller.status === "suspended")
@@ -385,10 +394,17 @@ export async function startCollectorStripeOnboarding(
       })
       .where(eq(sellers.id, seller.id));
   }
-  const link = await createAccountOnboardingLink(
-    accountId,
-    "/account?view=listings&stripe=returned",
-    "/account?view=listings&stripe=refresh",
+  const query = new URLSearchParams(listing ? { id: listing.productId } : { view: "listings" });
+  if (listing?.collectionItem) {
+    query.set("collectionItem", listing.collectionItem);
+    query.set("selling", listing.selling === "open_to_offers" ? "open_to_offers" : "for_sale");
+    query.set("minimum", String(Math.max(0, Number(listing.minimum) || 0)));
+  }
+  const destination = listing ? "/sell/model" : "/account";
+  const anchor = listing ? "#listing-review" : "";
+  const link = await createAccountOnboardingLink(accountId,
+    `${destination}?${query}&stripe=returned${anchor}`,
+    `${destination}?${query}&stripe=refresh${anchor}`,
   );
   return { onboardingUrl: link.url };
 }
@@ -401,7 +417,7 @@ export async function refreshCollectorStripe(userId: string) {
     .limit(1);
   const seller = rows[0];
   if (!seller?.stripeAccountId)
-    throw new ValidationError("Stripe onboarding has not started.");
+    throw new ValidationError("Your payment method is not connected yet.");
   const account = await retrieveStripeAccount(seller.stripeAccountId);
   const ready = account.charges_enabled && account.payouts_enabled;
   const status =

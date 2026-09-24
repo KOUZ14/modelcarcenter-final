@@ -56,7 +56,7 @@ export function ProfileEditor({ profile, settings, returnTo, commentSetup = fals
   const dirty = JSON.stringify(values) !== JSON.stringify(savedValues);
   const uploading = uploads.avatar || uploads.cover;
   const needsConsent = values.published && !savedValues.published;
-  const busyLabel = busy ? "Saving…" : uploading ? "Uploading image…" : "Save profile";
+  const busyLabel = busy ? "Saving…" : uploading ? "Finish editing photo…" : "Save profile";
 
   useEffect(() => {
     if (!dirty && !uploading) return;
@@ -126,14 +126,14 @@ export function ProfileEditor({ profile, settings, returnTo, commentSetup = fals
       </fieldset>
       <footer className="profile-editor-save">
         {error && <p className="form-error" ref={errorRef} role="alert" tabIndex={-1}>{error}</p>}
-        <p className="profile-save-status" role="status">{message || (uploading ? "Wait for the image upload to finish before saving." : dirty ? "You have unsaved changes." : "Your profile is up to date.")}</p>
+        <p className="profile-save-status" role="status">{message || (uploading ? "Finish editing your photo before saving your profile." : dirty ? "You have unsaved changes." : "Your profile is up to date.")}</p>
         <button type="submit" className="button dark" disabled={!dirty || busy || uploading}>{busyLabel}</button>
         {dirty && <button type="button" className="button outline" disabled={busy || uploading} onClick={() => { setValues(savedValues); setPublishConfirmed(false); setError(""); setMessage(""); }}>Discard changes</button>}
         {returnTo && <Link className="profile-return" href={returnTo}>{commentSetup ? "Return to comment draft" : "Return to your piece"}</Link>}
         <Link href="/account">Account, orders &amp; transaction settings</Link>
       </footer>
     </form>
-    {(dirty || uploading || recentlySaved) && <div className="profile-save-bar" aria-label="Profile save controls"><span>{recentlySaved && !dirty ? "Profile saved" : uploading ? "Uploading image…" : "Unsaved changes"}</span><button className="button dark" type="submit" form="collector-profile-form" disabled={!dirty || busy || uploading}>{recentlySaved && !dirty ? "Saved" : busyLabel}</button></div>}
+    {(dirty || uploading || recentlySaved) && <div className="profile-save-bar" aria-label="Profile save controls"><span>{recentlySaved && !dirty ? "Profile saved" : uploading ? "Editing photo…" : "Unsaved changes"}</span><button className="button dark" type="submit" form="collector-profile-form" disabled={!dirty || busy || uploading}>{recentlySaved && !dirty ? "Saved" : busyLabel}</button></div>}
     {preview && <ProfilePreview values={values} pieces={previewPieces} onClose={() => setPreview(false)}/>}
   </div>;
 }

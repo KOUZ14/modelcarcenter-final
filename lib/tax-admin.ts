@@ -267,31 +267,31 @@ export function taxReadiness(
     {
       id: "seller-permit",
       label: "California seller’s permit",
-      detail: "The owner has confirmed an active California seller’s permit for Model Car Center. This is an admin record, not a live CDTFA verification.",
+      detail: profile.sellerPermitStatus === "active" ? "Active - owner confirmation recorded. Evidence: owner record, not a live CDTFA check." : "Not confirmed - check the permit status in CDTFA and record the result. Evidence: owner confirmation required.",
       ready: profile.sellerPermitStatus === "active",
     },
     {
       id: "marketplace-facilitator",
       label: "CDTFA marketplace status",
-      detail: "CDTFA has confirmed the marketplace-facilitator treatment for the account.",
+      detail: profile.marketplaceFacilitatorStatus === "confirmed" ? "Confirmed by owner - marketplace treatment confirmation recorded. Evidence: owner record." : "Not confirmed - record CDTFA marketplace status confirmation. Evidence: owner confirmation required.",
       ready: profile.marketplaceFacilitatorStatus === "confirmed",
     },
     {
       id: "stripe-registration",
       label: "Stripe California registration",
-      detail: "California is active in the platform Stripe Tax registration settings.",
+      detail: profile.stripeCaliforniaRegistrationStatus === "active" ? "Active per owner record - verify against Stripe Tax registration. Evidence: owner record." : "Not checked - review California registration in Stripe and record its state. Evidence: owner confirmation required.",
       ready: profile.stripeCaliforniaRegistrationStatus === "active",
     },
     {
       id: "stripe-liability",
       label: "Platform tax liability",
-      detail: "Checkout assigns automatic-tax liability to the Model Car Center platform.",
+      detail: "Configured in checkout code - liability is assigned to the platform. Evidence: code configuration; live collection is not verified here.",
       ready: true,
     },
     {
       id: "automatic-tax",
       label: "Automatic tax enabled",
-      detail: "The hosted STRIPE_AUTOMATIC_TAX setting is enabled after registration is active.",
+      detail: automaticTaxEnabled ? "Enabled in this environment. Evidence: configuration only; verify collection with a completed payment." : "Disabled in this environment - complete registration checks before enabling. Evidence: current configuration.",
       ready: automaticTaxEnabled,
     },
     {
@@ -299,7 +299,7 @@ export function taxReadiness(
       label: "Sales-tax filing calendar",
       detail: profile.nextSalesTaxDueAt && profile.nextSalesTaxDueAt < today
         ? "The recorded CDTFA due date has passed. Review the filing and record the next confirmed due date."
-        : "CDTFA filing frequency and a current next due date are recorded.",
+        : profile.nextSalesTaxDueAt ? "Review the recorded filing frequency and next due date against CDTFA. Evidence: owner record." : "No next due date recorded - confirm filing frequency and due date in CDTFA. Evidence: owner record required.",
       ready:
         ["monthly", "quarterly", "annual"].includes(profile.salesTaxFilingFrequency) &&
         Boolean(profile.nextSalesTaxDueAt && isTaxDate(profile.nextSalesTaxDueAt) && profile.nextSalesTaxDueAt >= today),
@@ -307,19 +307,19 @@ export function taxReadiness(
     {
       id: "seller-documentation",
       label: "Seller documentation",
-      detail: "Sellers receive written notice that the marketplace collects California tax.",
+      detail: profile.sellerDocumentationIssued ? "Issued per owner record. Evidence: owner confirmation; retain copies of seller notices." : "Not confirmed - record when seller notices have been issued. Evidence: owner confirmation required.",
       ready: profile.sellerDocumentationIssued,
     },
     {
       id: "w9",
       label: "Seller W-9 process",
-      detail: "Stripe Connect or an approved process collects seller tax identity information.",
+      detail: profile.w9CollectionReady ? "Process confirmed by owner. Evidence: owner record; individual seller documents are checked separately." : "Process not confirmed - review tax identity collection and record the outcome. Evidence: owner confirmation required.",
       ready: profile.w9CollectionReady,
     },
     {
       id: "tax-reporting",
       label: "Stripe seller tax reporting",
-      detail: "Connect tax reporting and delivery responsibilities have been reviewed.",
+      detail: profile.stripeTaxReportingReady ? "Review recorded by owner. Evidence: owner confirmation." : "Not reviewed - confirm tax reporting and delivery responsibilities. Evidence: owner confirmation required.",
       ready: profile.stripeTaxReportingReady,
     },
   ];
@@ -376,7 +376,7 @@ export function soleProprietorPlanningCalendar(
     ...federalDates.map(([dueAt, label, start, end]) => ({
       calendarKey: `${year}-federal-estimate-${label.toLowerCase()}`,
       kind: "federal_estimated_tax" as const,
-      title: `${year} federal estimated tax — ${label}`,
+      title: `${year} federal estimated tax - ${label}`,
       jurisdiction: "Federal",
       dueAt: planningDueDate(dueAt),
       periodStart: start,
@@ -386,7 +386,7 @@ export function soleProprietorPlanningCalendar(
     ...californiaDates.map(([dueAt, label], index) => ({
       calendarKey: `${year}-ca-estimate-${index + 1}`,
       kind: "ca_estimated_tax" as const,
-      title: `${year} California estimated tax — ${label}`,
+      title: `${year} California estimated tax - ${label}`,
       jurisdiction: "California FTB",
       dueAt: planningDueDate(dueAt),
       periodStart,

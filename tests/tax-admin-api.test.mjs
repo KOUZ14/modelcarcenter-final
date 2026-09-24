@@ -283,8 +283,8 @@ test("admin tax API persists and reloads profiles, deadlines, ledger, seller sta
       loader: { ".css": "empty", ".module.css": "empty" },
       bundle: true, platform: "node", format: "esm", packages: "external", write: false,
       plugins: [{ name: "next-view-boundary", setup(builder) {
-        builder.onResolve({ filter: /^next\/(link|image)$/ }, ({ path }) => ({ path, namespace: "next-view" }));
-        builder.onLoad({ filter: /.*/, namespace: "next-view" }, () => ({ contents: "export default function UnusedNextComponent() { return null; }" }));
+        builder.onResolve({ filter: /^next\/(link|image|navigation)$/ }, ({ path }) => ({ path, namespace: "next-view" }));
+        builder.onLoad({ filter: /.*/, namespace: "next-view" }, ({ path }) => ({ contents: path === "next/navigation" ? "export const useSearchParams = () => new URLSearchParams(); export const usePathname = () => '/admin';" : "export default function UnusedNextComponent() { return null; }" }));
       } }],
     });
     await writeFile(viewPath, viewBuild.outputFiles[0].contents);
@@ -292,7 +292,7 @@ test("admin tax API persists and reloads profiles, deadlines, ledger, seller sta
     const html = renderToStaticMarkup(createElement(TaxCenter, { data: await get(), action: async () => ({ ok: true }) }));
     assert.match(html, /Business start date/);
     assert.match(html, /value="2026-05-22"/);
-    assert.match(html, /Before business start — review/);
+    assert.match(html, /Before business start - review/);
     assert.match(html, /Add \/ refresh 2026 calendar/);
     assert.match(html, /Download orders CSV/);
     assert.match(html, /value="25"/);
@@ -306,9 +306,9 @@ test("admin tax API persists and reloads profiles, deadlines, ledger, seller sta
     prelaunch.profile = { ...prelaunch.profile, businessLaunchStatus: "prelaunch", businessStartedAt: null };
     const beforeLaunchHtml = renderToStaticMarkup(createElement(TaxCenter, { data: prelaunch, action: async () => ({ ok: true }) }));
     assert.match(beforeLaunchHtml, /Not launched \(owner reported\)/);
-    assert.match(beforeLaunchHtml, /Prelaunch — review/);
+    assert.match(beforeLaunchHtml, /Prelaunch - review/);
     assert.match(beforeLaunchHtml, /assigned returns even with no sales/);
-    assert.doesNotMatch(beforeLaunchHtml, /Before business start — review/);
+    assert.doesNotMatch(beforeLaunchHtml, /Before business start - review/);
     const noSalesHtml = renderToStaticMarkup(createElement(TaxCenter, { data: { ...prelaunch, reports: [] }, action: async () => ({ ok: true }) }));
     assert.match(noSalesHtml, /No reportable paid orders for 2026/);
     assert.match(noSalesHtml, /1 test order excluded for 2026/);

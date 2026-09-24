@@ -2,6 +2,14 @@
 
 September 18, 2026. This change extends the current site and preserves its existing branding, photographs, accounts, listings, guest checkout, collector tools and URLs. It includes existing working-tree improvements; those changes were retained rather than reset. **This is a code and automated-check handoff, not completion of the live usability study or browser acceptance checks.**
 
+## CSV import follow-up - September 22, 2026
+
+- Import now follows three numbered steps: prepare the spreadsheet, choose a CSV, and review/save. Selecting a file checks it automatically and displays its filename. The template instructions explicitly say to replace the example, and previews flag the unchanged sample model.
+- Dedicated preview styles separate model/SKU, price, stock and create/update results. Phone previews become labeled cards. Separate counts show new drafts, existing listings to update and rows to fix. Update guidance explains replacement quantities, blank optional fields, retained photos and restocking behavior.
+- A collapsed column guide lists required fields and accepted condition values. Raw CSV editing is optional; edits invalidate the preview. Invalid replacement files clear old previews, corrected files can reuse the same filename, and concurrent submissions are blocked. Errors identify rows and prevent saving until all rows are valid.
+
+Validation: 33 focused import, business-logic and seller-dashboard tests passed, along with TypeScript, focused ESLint, production build and artifact validation. The local Seller Hub's initial flow was checked in Chrome. Desktop preview, 390px cards, 360px errors, expanded field guidance and success layouts were checked using static fixtures rendered from the real component and production CSS, with no horizontal overflow. Browser file selection was blocked by the extension's file-access setting; upload/preview/save transitions were verified by controlled component tests. No inventory was saved during browser checks. Viewport restored; changes have not been deployed.
+
 ## Seller dashboard follow-up - September 22, 2026
 
 - Storefront-link correction: View storefront now follows the public route's active-store/current-terms eligibility. Apex Miniatures (Demo) had no current terms acceptance, so the unconditional link reached the intentional public 404. The menu now explains Storefront not live and links to Seller Terms; other blocked states link to the relevant setup/support action. Public eligibility is unchanged. Verified the live menu-to-terms route, 31 targeted checks, TypeScript and focused ESLint; no terms were accepted and no account records changed.
@@ -20,7 +28,7 @@ The demo order gap remains a data-repair concern: normal order-item snapshots an
 
 Validation: 84 targeted seller, catalog, messaging, preorder and usability checks passed. After the inbox time-zone fix, all 17 seller-dashboard/messaging checks passed, including a new cross-time-zone rendering regression. TypeScript and focused ESLint passed; the existing collector-inbox image warning remains. The final production build and artifact validation passed, with the existing duplicate discovery CSS and experimental-loader warnings. A fresh inbox load shows stable dates without new browser errors. The review tab was closed and viewport restored. Changes have not been deployed.
 
-## Sell page follow-up — September 22, 2026
+## Sell page follow-up - September 22, 2026
 
 - The introduction leads directly to “Sell from my collection” and “Apply as a store.” These two compact cards compare the configured collector/store rates, with requirements expandable for each route. Seller Dashboard remains a quieter link. At 360×640, the actions start around 338px and 520px; both finish above the bottom navigation.
 - The store action opens and focuses an application directly below the choices. Existing `#professional-application` links open it after reload, and collapsing/reopening preserves unsent fields. Store-specific content stays collapsed until requested.
@@ -37,7 +45,7 @@ Local Chrome checks covered 360×640, 390×844 and 1280×900 without horizontal 
 
 Validation: 21 targeted seller-hub, demand, processing and usability tests passed. TypeScript, focused ESLint, production build and artifact validation passed. Existing duplicate discovery CSS and experimental-loader build warnings remain. These changes have not been deployed.
 
-## Mobile notifications follow-up — September 22, 2026
+## Mobile notifications follow-up - September 22, 2026
 
 - The page title is 34px bold on phones and 42px on desktop; populated category headings are 18px semibold. Preferences is a bordered settings control with a 44px target and opens the Messages & notifications section of profile settings. Mark all read has its own spacing and underlined treatment.
 - An empty inbox shows one “You’re all caught up” panel explaining that order updates, replies and new followers appear here. Empty categories are omitted from populated inboxes. Mark all read appears only when unread notifications exist; its count includes updates older than the latest 100 displayed items and excludes blocked actors.
@@ -47,7 +55,7 @@ Local Chrome checks covered the empty inbox at 360×640, 390×844 and 1280×900,
 
 Validation: 19 targeted tests, TypeScript, focused ESLint, production build and artifact validation passed. The browser reported no errors, and the viewport was restored after testing. Notification changes have not been deployed.
 
-## Mobile account follow-up — September 22, 2026
+## Mobile account follow-up - September 22, 2026
 
 - My Garage uses a compact identity header and labeled section selector on phones; desktop keeps a lighter sidebar with the current section marked. Account sections use normal URL-backed navigation, including Back, refresh and direct links. The phone header keeps search accessible through its icon.
 - The overview leads with the latest purchased model, seller, payment/delivery status, total and estimated delivery when supplied, followed by two recent saved listings. The server scopes saved previews to the signed-in account and publicly viewable listings; unavailable saves retain a route to the full wishlist.
@@ -59,7 +67,7 @@ Local Chrome checks used the actual dashboard, shared header and styles with iso
 
 Validation: 22 focused account/protection checks passed; the six account checks passed again after adding the stale-carrier regression case. TypeScript and focused ESLint passed without errors. Production build and artifact validation passed with the existing duplicate discovery CSS and experimental-loader warnings. These changes have not been deployed.
 
-## Mobile profile editor follow-up — September 22, 2026
+## Mobile profile editor follow-up - September 22, 2026
 
 - The editor has a 28–40px page heading, section links, and distinct Profile details, Privacy, and Messages & notifications groups. Handle guidance includes the allowed format and resulting profile address; Bio has a live 500-character counter, and interests explicitly use commas.
 - Avatar and cover photo each have a single-image selector, preview, replace/remove controls, and crop guidance. Inputs accept one JPG, PNG or WebP up to 10 MB. Images are re-encoded before upload, location metadata is removed, and failed replacements preserve the current image. Removing or replacing a photo stays a draft until Save profile.
@@ -71,7 +79,7 @@ Local Chrome checks used the actual editor, shared header and styles with an iso
 
 Validation: 46 targeted tests passed, including upload conversion/failures, privacy projection, publication consent, atomic saves, retry behavior and profile/comment return paths. The 12 profile/collection checks passed again after the final save-confirmation adjustment. TypeScript and focused ESLint passed with image-optimization warnings. Production build and artifact validation passed with the existing duplicate discovery CSS and experimental-loader warnings. These changes have not been deployed.
 
-## Mobile collection piece follow-up — September 22, 2026
+## Mobile collection piece follow-up - September 22, 2026
 
 - Availability labels now come from shared server-safe code, fixing the empty badge caused by reading a client-module export from the server page. All five supported states have text; an unknown legacy value says “Availability not specified.” Historical pieces say “Previously owned by.”
 - Wishlist is a full-width button with account-backed saved/removal state and retryable errors. Its explanation identifies “Models I’m looking for.” One secondary “View model details & offers” link replaces the two release links. Messaging remains an underlined link with a 48px tap area and preserves the owner/piece context. Owner editing and commerce restrictions remain intact.
@@ -83,7 +91,7 @@ Local Chrome checks covered 360×640, 390×844 and 1280×900 with no horizontal 
 
 Validation: 41 targeted tests passed, including server-rendered availability, missing model/photo data, contextual links, wishlist failures and duplicate taps, profile return paths, draft recovery and viewer focus. TypeScript passed; focused ESLint reported no errors, with eight existing image/navigation warnings. Production build and artifact validation passed with the existing duplicate discovery CSS and experimental-loader warnings.
 
-## Mobile community feed follow-up — September 22, 2026
+## Mobile community feed follow-up - September 22, 2026
 
 - The phone header omits marketplace search on the community route, followed by a compact title and Create post action. Topic search and chips are collapsed behind Filters; an active topic remains visible beside Clear filter. Empty results name the selected topic and preserve the For you, Following or Saved context when clearing it.
 - The weekly-theme block and its public-feed query were removed. Collector suggestions appear once after the first three posts on phone/tablet, or after the available posts in a shorter feed. Desktop retains collector discovery beside the feed.
@@ -95,7 +103,7 @@ Validation: 21 targeted community tests passed, including filter recovery, optio
 
 Local Chrome checks covered 360×640, 390×844 and 1280×900 with no horizontal overflow. The first post starts around 272px down the mobile page, with its photo on the opening screen. All four community destinations fit; More opens the remaining links and closes with Escape. Checked JDM empty results and Clear filter recovery, collector suggestions after the third post, 56px post-action targets, direct Comment navigation with the discussion field visible and focused, and comment reporting inside an expandable menu. The initial composer measures about 440px tall at 390px, with optional values retained across collapse/reopen. Desktop retains search and sidebar discovery. A fresh page load has no browser errors. The temporary draft was discarded and the viewport restored; publishing and upload behavior were tested with controlled fixtures, without posting live content.
 
-## Mobile community post detail follow-up — September 22, 2026
+## Mobile community post detail follow-up - September 22, 2026
 
 - Comments use compact rows with 32px avatars or initials, relative timestamps with full date/time tooltips, and Reply controls. Reply adds the collector's @handle to the existing draft and focuses the composer; discussion remains chronological. Report is inside each comment's keyboard-accessible options menu. Post dates use an explicit locale and UTC so server/browser time zones cannot cause a hydration mismatch.
 - The composer appears above existing comments. On the detail page, Comment focuses it without navigating. Feed Comment links open the same composer. Like, Comment, Save and the new visible Share action have matching 56px touch targets. Share uses native sharing when available, with clipboard confirmation and a selectable-link fallback.
@@ -106,7 +114,7 @@ Local Chrome checks covered 360×640, 390×844 and 1280×900 with no horizontal 
 
 Validation: 32 targeted tests passed; TypeScript passed; focused ESLint reported no errors and eight image/navigation warnings. Production build and artifact validation passed. These changes have not been deployed.
 
-## Mobile cart follow-up — September 21, 2026
+## Mobile cart follow-up - September 21, 2026
 
 - A persistent mobile bar shows the selected total before tax and the next action. It replaces the bottom navigation while the cart has items. Missing carrier quotes show an item subtotal plus pending shipping instead of a misleading total; tax-inclusive configurations retain their explicit label.
 - One compact three-column navigation links Delivery, Shipping and Order summary. Payment remains on the next screen. The seller-selection explanation appears immediately above the checkboxes, and unchecked items stay in the cart.
@@ -118,7 +126,7 @@ Local Chrome checks covered 360×640, 390×844 and 1280×900, with no horizontal
 
 Validation: 40 targeted tests passed; TypeScript and focused ESLint passed; production build and artifact validation passed. Existing duplicate discovery CSS and experimental-loader build warnings remain.
 
-## Mobile seller storefront follow-up — September 21, 2026
+## Mobile seller storefront follow-up - September 21, 2026
 
 - The introduction now shows the seller name, short bio, shipping origin, “Shop this seller” and “Message seller.” Tenure and verified-purchase feedback appear in a compact summary. Full profile and marketplace-history details are expandable, with one explanation separating approval from item guarantees and buyer reputation. Empty optional values and exact field-name placeholders such as `specialty` and `packing_approach` are omitted; real descriptions are preserved.
 - Shared shipping facts appear above the inventory: the Apex fixture shows “$6.95 per order · dispatch within 1 business day.” Expanded shipping and returns retain the seller's policy and distinguish seller contact requirements from MCC's existing platform deadlines.
@@ -130,7 +138,7 @@ Local Chrome checks covered 360×640, 390×844 and 1280×900. The Apex inventory
 
 Validation: 41 targeted tests passed; TypeScript passed; focused ESLint reported no errors and one existing unused-variable warning; production build and artifact validation passed. Existing duplicate discovery CSS and experimental-loader warnings remain.
 
-## Mobile wishlist follow-up — September 21, 2026
+## Mobile wishlist follow-up - September 21, 2026
 
 - “Your wishlist” now includes an item count and a compact device/account sync line. Populated wishlists retain an “Add more models” link. The empty state has “No saved models yet,” one browsing button and a collapsed “Add a wanted model” action.
 - “Saved listings” explains that these are specific sellers' offers. Full-width mobile rows place an uncropped photo beside the name, 13px specifications and price, with seller/shipping information and accessible cart/removal controls below. Cart actions respect stock and quantity limits. Removed or unavailable listings remain removable, and batch loading supports more than 100 saved IDs.
@@ -140,7 +148,7 @@ Local Chrome checks covered 360×640, 390×844 and 1280×900. At 360px, the Niss
 
 Validation: 30 targeted tests passed; TypeScript passed; focused ESLint reported no errors and six existing warnings in community code/tests; production build and artifact validation passed. Existing duplicate CSS asset and experimental-loader warnings remain.
 
-## Mobile product listing follow-up — September 21, 2026
+## Mobile product listing follow-up - September 21, 2026
 
 - The purchase summary now puts price, shipping and a short condition summary directly below the title. The main cart action fills the row beside a small listing-save control. Once it scrolls above the viewport, a mobile price/cart bar replaces the bottom navigation and retains a Shop link. Both cart controls share stock limits and saved cart state.
 - The gallery has one enlargement control and explicitly fits complete images. Short specifications use a compact list; condition disclosures, photo coverage and shipping have full-width space. Missing disclosures are explicitly unknown, and unspecified optional details are grouped.
@@ -183,7 +191,7 @@ The seller dashboard existed already. This work changes its task organization an
 
 Final regression result: **262 tests passed, 0 failed, 0 skipped**. This includes guest/multiple-seller checkout calculations, the saved reservation/order policy versions, repeated delivery events preserving deadlines, late transit updates retaining delivered status, repeated CSV uploads, reservation-safe stock updates, and measurement consent/purchase deduplication. Test integrations use controlled responses. Source whitespace validation also passed with the repository's Windows line-ending conventions.
 
-## Browser checks and screenshots — outstanding
+## Browser checks and screenshots - outstanding
 
 The supplied browser runtime returned no available browser. No desktop/mobile screenshots were captured, and no generated illustration was substituted for a real dashboard screenshot. The development preview attempt also found the existing local preview port occupied; the existing process was left running.
 

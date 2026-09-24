@@ -3,8 +3,10 @@
 import Link from "next/link";
 import { CatalogModelPicker } from "@/components/catalog-model-picker";
 import Image from "next/image";
-import { BrandLogo } from "@/components/brand-logo";
+import { useSearchParams } from "next/navigation";
+import { adminSections } from "@/components/admin-frame";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { adminTimestamp, awaitingShipment, overdueShipment, orderItemProblem } from "@/lib/admin-order-rules";
 import { modelHuntMatches } from "@/lib/business";
 import { formatMoney as money } from "@/lib/format";
 import { taxDate, taxTaskTiming } from "@/lib/tax-admin";
@@ -34,8 +36,10 @@ const tabs = [
   "production",
 ] as const;
 
-export function AdminDashboard({ adminEmail }: { adminEmail: string }) {
-  const [tab, setTab] = useState<(typeof tabs)[number]>("overview");
+export function AdminDashboard() {
+  const params = useSearchParams();
+  const requestedTab = params.get("section") || "overview";
+  const tab = tabs.includes(requestedTab as (typeof tabs)[number]) ? requestedTab as (typeof tabs)[number] : "overview";
   const [data, setData] = useState<AdminData>({});
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
@@ -68,7 +72,7 @@ export function AdminDashboard({ adminEmail }: { adminEmail: string }) {
   }, [apiSection]);
   useEffect(() => {
     activeSection.current = apiSection;
-    queueMicrotask(() => void load());
+    queueMicrotask(() => { setMessage(""); setError(""); setActionLink(""); void load(); });
     return () => { loadSequence.current += 1; };
   }, [apiSection, load]);
   async function action(payload: Record<string, unknown>) {
@@ -92,7 +96,13 @@ export function AdminDashboard({ adminEmail }: { adminEmail: string }) {
             : "Onboarding link created, but email is not configured. Send the link manually."
           : payload.action === "seed_tax_calendar"
             ? `Calendar saved: ${body.created ?? 0} added, ${body.updated ?? 0} refreshed.`
-            : "Saved successfully.",
+            : payload.action === "preview_import"
+              ? "Validation complete. Review the preview; no inventory has changed."
+              : body.pending === true
+                ? "Refund request submitted. Processing is still pending; refresh the order to verify completion."
+                : body.emailSent === false
+                  ? "Saved, but the notification was not sent. Check email configuration before retrying delivery."
+                  : "Saved successfully.",
       );
       if (typeof body.onboardingUrl === "string")
         setActionLink(body.onboardingUrl);
@@ -107,47 +117,7 @@ export function AdminDashboard({ adminEmail }: { adminEmail: string }) {
     }
   }
   return (
-    <div className="admin-shell">
-      <header className="admin-header">
-        <div>
-          <Link className="brand" href="/" aria-label="Model Car Center home">
-            <BrandLogo priority/>
-          </Link>
-          <span>Founder admin</span>
-        </div>
-        <div>
-          <span>{adminEmail}</span>
-          <a href="/signout-with-chatgpt?return_to=/">Sign out</a>
-        </div>
-      </header>
-      <nav className="admin-tabs" aria-label="Admin sections">
-        <Link href="/admin/preorders">Preorder operations</Link>
-        <Link href="/admin/promotions">Promoted listings</Link>
-        {tabs.map((item) => (
-          <button
-            key={item}
-            className={tab === item ? "active" : ""}
-            onClick={() => {
-              if (item === tab) {
-                void load();
-                return;
-              }
-              setLoading((item === "import" ? "products" : item) !== apiSection);
-              setTab(item);
-              setMessage("");
-              setError("");
-              setActionLink("");
-            }}
-          >
-            {item === "hunts"
-              ? "Model Hunts"
-              : item === "tax"
-                ? "Tax & compliance"
-                : item}
-          </button>
-        ))}
-      </nav>
-      <main id="main-content" tabIndex={-1} className="admin-main">
+    <>
         <div className="admin-title">
           <p className="eyebrow">Founder-operated V1</p>
           <h1>
@@ -155,7 +125,7 @@ export function AdminDashboard({ adminEmail }: { adminEmail: string }) {
               ? "Model Hunts"
               : tab === "tax"
                 ? "Tax & compliance"
-              : tab[0].toUpperCase() + tab.slice(1)}
+              : adminSections.find(([id]) => id === tab)?.[1] || tab}
           </h1>
         </div>
         {message && (
@@ -179,10 +149,9 @@ export function AdminDashboard({ adminEmail }: { adminEmail: string }) {
         {loading || data.section !== apiSection ? (
           <div className="catalog-status">{error ? <button className="button outline small" onClick={() => void load()}>Retry loading</button> : "Loading…"}</div>
         ) : (
-          <AdminSection tab={tab} data={data} action={action} />
+          <AdminSection key={`${tab}:${params.get("filter") || ""}:${params.get("q") || ""}`} tab={tab} data={data} action={action} />
         )}
-      </main>
-    </div>
+    </>
   );
 }
 
@@ -196,7 +165,7 @@ function AdminSection({
   action(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
 }) {
   if (tab === "overview") return <Overview data={data} />;
-  if (tab === "production") return <ProductionReadiness checks={(data.checks as ReadinessCheck[]) ?? []} configurationReady={data.configurationReady === true} />;
+  if (tab === "production") return <ProductionReadiness checks={(data.checks as ReadinessCheck[]) ?? []} configurationReady={data.configurationReady === true} checkedAt={String(data.checkedAt || "")} />;
   if (tab === "sellers") return <Sellers data={data} action={action} />;
   if (tab === "products") return <Products data={data} action={action} />;
   if (tab === "import") return <Importer data={data} action={action} />;
@@ -214,16 +183,24 @@ function Overview({ data }: { data: AdminData }) {
       string,
       Array<{ label: string | null; count: number }>
     >) ?? {};
+  const attention = [
+    ["applications", "Pending applications", "sellers&filter=pending"],
+    ["unfulfilledOrders", "Awaiting shipment", "orders&filter=awaiting"],
+    ["overdueShipments", "Overdue shipments", "orders&filter=overdue"],
+    ["urgentDisputes", "Disputes due within 3 days", "orders&filter=disputes"],
+    ["paymentExceptions", "Payment exceptions", "orders&filter=exceptions"],
+    ["missingOrderItems", "Orders missing items", "orders&filter=missing_items"],
+    ["failedNotifications", "Preorder notifications needing retry", "preorders"],
+    ["collectorListingsAwaitingReview", "Listings awaiting review", "products&filter=pending_review"],
+  ];
   return (
     <>
-      <div className="metric-grid">
-        {Object.entries(counts).map(([key, value]) => (
-          <article key={key}>
-            <span>{key.replace(/([A-Z])/g, " $1")}</span>
-            <b>{value}</b>
-          </article>
-        ))}
-      </div>
+      <h2>Needs your attention</h2>
+      <p className="admin-muted">Current open work across all records, including clearly marked test orders.</p>
+      <div className="admin-attention-grid">{attention.map(([key, label, destination]) => <Link key={key} href={destination === "preorders" ? "/admin/preorders" : `/admin?section=${destination}`}><span>{label}</span><strong>{counts[key] ?? 0}</strong><small>Open queue</small></Link>)}</div>
+      <h2>Marketplace activity</h2>
+      <p className="admin-muted">Paid orders and subscribers are lifetime totals. Demand below includes open Model Hunts.</p>
+      <div className="metric-grid">{[["activeProducts", "Active listings"], ["activeSellers", "Active sellers"], ["paidOrders", "Paid orders - all time"], ["signups", "Subscribers - all time"]].map(([key, label]) => <article key={key}><span>{label}</span><b>{counts[key] ?? 0}</b></article>)}</div>
       <div className="demand-grid">
         {Object.entries(demand).map(([key, rows]) => (
           <section key={key}>
@@ -255,6 +232,9 @@ type Seller = {
   slug: string;
   status: string;
   stripeAccountId?: string | null;
+  stripeRequirementsDue?: string;
+  stripeVerifiedAt?: string | null;
+  unresolvedOrders?: number;
   stripeChargesEnabled: boolean;
   stripePayoutsEnabled: boolean;
   defaultShippingCents: number;
@@ -282,14 +262,26 @@ function Sellers({
 }) {
   const applications =
     (data.applications as Array<Record<string, string | number>>) ?? [];
-  const sellerRows = (data.sellers as Seller[]) ?? [];
+  const params = useSearchParams();
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [applicationFilter, setApplicationFilter] = useState(params.get("filter") || "pending");
+  const sellerRows = ((data.sellers as Seller[]) ?? []).filter(seller => (!statusFilter || seller.status === statusFilter) && `${seller.storeName} ${seller.contactEmail}`.toLowerCase().includes(query.toLowerCase()));
   const [editing, setEditing] = useState<Seller | null>(null);
   return (
     <div className="admin-stack">
+      {editing && (
+        <SellerEditor key={editing.id || "new"}
+          seller={editing}
+          onClose={() => setEditing(null)}
+          action={action}
+        />
+      )}
       <section className="admin-panel">
         <h2>Seller applications</h2>
+        <div className="admin-queue-filters"><label>Application status<select value={applicationFilter} onChange={e => setApplicationFilter(e.target.value)}><option value="">All applications</option><option value="pending">Pending review</option><option value="approved">Approved</option><option value="rejected">Rejected</option></select></label></div>
         {applications.length ? (
-          <div className="admin-table-wrap">
+          <div className="admin-table-wrap admin-mobile-records" role="region" aria-label="Scrollable records" tabIndex={0}>
             <table>
               <thead>
                 <tr>
@@ -301,7 +293,7 @@ function Sellers({
                 </tr>
               </thead>
               <tbody>
-                {applications.map((app) => (
+                {applications.filter(app => !applicationFilter || app.status === applicationFilter).map((app) => (
                   <tr key={String(app.id)}>
                     <td>
                       <b>{app.storeName}</b>
@@ -324,30 +316,7 @@ function Sellers({
                     </td>
                     <td>{app.status}</td>
                     <td>
-                      {app.status === "pending" && (
-                        <div className="row-actions">
-                          <button
-                            onClick={() =>
-                              void action({
-                                action: "approve_application",
-                                applicationId: app.id,
-                              })
-                            }
-                          >
-                            Approve
-                          </button>
-                          <button
-                            onClick={() =>
-                              void action({
-                                action: "reject_application",
-                                applicationId: app.id,
-                              })
-                            }
-                          >
-                            Reject
-                          </button>
-                        </div>
-                      )}
+                      <ApplicationReview application={app} activity={(data.activity as AdminActivity[]) ?? []} action={action} />
                     </td>
                   </tr>
                 ))}
@@ -368,7 +337,8 @@ function Sellers({
             Create seller
           </button>
         </div>
-        <div className="admin-table-wrap">
+        <div className="admin-queue-filters"><label>Search sellers<input value={query} onChange={e => setQuery(e.target.value)} placeholder="Store or email" /></label><label>Status<select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}><option value="">All statuses</option>{["active", "approved", "onboarding", "suspended"].map(status => <option key={status}>{status}</option>)}</select></label></div>
+        <div className="admin-table-wrap admin-mobile-records" role="region" aria-label="Scrollable records" tabIndex={0}>
           <table>
             <thead>
               <tr>
@@ -442,10 +412,10 @@ function Sellers({
                     )}
                   </td>
                   <td>
-                    {seller.stripeAccountId || "Not created"}
-                    <br />
-                    Charges {seller.stripeChargesEnabled ? "✓" : "—"} · Payouts{" "}
-                    {seller.stripePayoutsEnabled ? "✓" : "—"}
+                    <b>{seller.stripeChargesEnabled && seller.stripePayoutsEnabled ? "Payments ready" : seller.stripeAccountId ? "Setup needs attention" : "Not connected"}</b>
+                    <p>Charges: {seller.stripeChargesEnabled ? "enabled" : "disabled"} · Payouts: {seller.stripePayoutsEnabled ? "enabled" : "disabled"}</p>
+                    <details><summary>Account details</summary><p>{seller.stripeAccountId || "No account ID"}</p><p>Requirements: {seller.stripeRequirementsDue || (seller.stripeVerifiedAt ? "None recorded at the last admin verification" : "Not checked - refresh Stripe to retrieve requirements")}.</p><p>Last admin verification: {seller.stripeVerifiedAt ? shortDateTime(seller.stripeVerifiedAt) : "Not recorded"}</p></details>
+                    <Link href={`/admin?section=orders&filter=awaiting&q=${encodeURIComponent(seller.storeName)}`}>{seller.unresolvedOrders ?? 0} orders awaiting shipment</Link>
                   </td>
                   <td>{money(seller.defaultShippingCents)}</td>
                   <td>
@@ -511,16 +481,20 @@ function Sellers({
           </table>
         </div>
       </section>
-      {editing && (
-        <SellerEditor
-          seller={editing}
-          onClose={() => setEditing(null)}
-          action={action}
-        />
-      )}
+
     </div>
   );
 }
+type AdminActivity = { id: string; action: string; record_id: string; actor: string; detail: string; created_at: string };
+function ApplicationReview({ application, activity, action }: { application: Record<string, string | number>; activity: AdminActivity[]; action(payload: Record<string, unknown>): Promise<Record<string, unknown>> }) {
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState("");
+  const history = activity.filter(row => row.record_id === application.id);
+  return <details><summary>Review application</summary><p>Submitted {shortDateTime(String(application.createdAt))}</p><p>{application.storeName} · {application.contactName} · {application.email}</p><p>{application.currentSellingChannels} · {application.approximateInventorySize} models</p><p>{application.message || "No applicant note."}</p><p>Terms accepted: {application.sellerTermsAcceptedAt ? shortDateTime(String(application.sellerTermsAcceptedAt)) : "Not recorded"}</p><h3>Review history</h3>{history.length ? history.map(row => <p key={row.id}>{shortDateTime(row.created_at)} · {row.actor} · {row.action.replaceAll("_", " ")}<br/>{JSON.parse(row.detail).note}</p>) : <p>No decision notes recorded. Current status: {application.status}. Last updated {shortDateTime(String(application.updatedAt))}.</p>}
+    {application.status === "pending" && <form className="admin-form" onSubmit={async event => { event.preventDefault(); const form = new FormData(event.currentTarget); setBusy(true); try { await action({ action: form.get("decision"), applicationId: application.id, note }); } catch { /* Error is shown by the dashboard. */ } finally { setBusy(false); } }}><label>Decision notes<textarea required minLength={3} maxLength={2000} value={note} onChange={e => setNote(e.target.value)} /></label><label>Decision<select name="decision"><option value="approve_application">Approve</option><option value="reject_application">Reject</option></select></label><button className="button dark small" disabled={busy}>Record decision</button></form>}
+  </details>;
+}
+
 function emptySeller(): Seller {
   return {
     id: "",
@@ -553,17 +527,23 @@ function SellerEditor({
   onClose(): void;
   action(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
 }) {
+  const [saving, setSaving] = useState(false);
+  const editorRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { editorRef.current?.focus(); editorRef.current?.scrollIntoView({ block: "start" }); }, []);
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    await action({
-      action: "save_seller",
-      ...Object.fromEntries(new FormData(event.currentTarget).entries()),
-      id: seller.id,
-    });
-    onClose();
+    if (saving) return;
+    const form = new FormData(event.currentTarget);
+    setSaving(true);
+    try {
+      const result = await action({ action: "save_seller", ...Object.fromEntries(form.entries()), defaultShippingCents: dollarsToCents(String(form.get("defaultShipping"))), id: seller.id });
+      if (result.ok) onClose();
+    } catch { /* The dashboard displays the error and retains this form. */ }
+    finally { setSaving(false); }
+
   }
   return (
-    <div className="admin-panel">
+    <div className="admin-panel admin-focus-panel" ref={editorRef} tabIndex={-1}>
       <h2>{seller.id ? "Edit" : "Create"} seller</h2>
       <form className="admin-form" onSubmit={submit}>
         <div className="form-row">
@@ -619,13 +599,14 @@ function SellerEditor({
         </label>
         <div className="form-row">
           <label>
-            Default shipping, cents
+            Default shipping (USD)
             <input
-              name="defaultShippingCents"
+              name="defaultShipping"
+              step="0.01"
               type="number"
               min="0"
               required
-              defaultValue={seller.defaultShippingCents}
+              defaultValue={(seller.defaultShippingCents / 100).toFixed(2)}
             />
           </label>
           <label>
@@ -655,7 +636,7 @@ function SellerEditor({
           />
         </label>
         <div className="row-actions">
-          <button className="button dark small">Save seller</button>
+          <button className="button dark small" disabled={saving}>{saving ? "Saving..." : "Save seller"}</button>
           <button type="button" onClick={onClose}>
             Cancel
           </button>
@@ -725,7 +706,10 @@ function Products({
 }) {
   const sellerRows =
     (data.sellers as Array<{ id: string; name: string }>) ?? [];
-  const [query, setQuery] = useState("");
+  const params = useSearchParams();
+  const [query, setQuery] = useState(params.get("q") || "");
+  const [statusFilter, setStatusFilter] = useState(params.get("filter") || "");
+  const [sort, setSort] = useState("updated");
   const [sellerFilter, setSellerFilter] = useState("");
   const [editing, setEditing] = useState<AdminProduct | null>(null);
   const visible = useMemo(
@@ -733,11 +717,12 @@ function Products({
       ((data.products as AdminProduct[]) ?? []).filter(
         (product) =>
           (!sellerFilter || product.sellerId === sellerFilter) &&
+          (!statusFilter || (statusFilter === "missing_photo" ? !product.primaryImageUrl && !product.images?.length : product.status === statusFilter)) &&
           `${product.title} ${product.sellerSku} ${product.vehicleMake} ${product.vehicleModel}`
             .toLowerCase()
             .includes(query.toLowerCase()),
-      ),
-    [data.products, query, sellerFilter],
+      ).sort((a, b) => sort === "title" ? a.title.localeCompare(b.title) : sort === "price" ? a.priceCents - b.priceCents : sort === "stock" ? a.inventoryQuantity - b.inventoryQuantity : 0),
+    [data.products, query, sellerFilter, statusFilter, sort],
   );
   const awaitingReview = visible.filter(
     (product) => product.sellerType === "collector" && product.status === "pending_review",
@@ -748,6 +733,14 @@ function Products({
   }
   return (
     <div className="admin-stack">
+      {editing && (
+        <ProductEditor key={editing.id || "new"}
+          product={editing}
+          sellers={sellerRows}
+          action={action}
+          onClose={() => setEditing(null)}
+        />
+      )}
       <section className="admin-panel">
         <div className="panel-heading">
           <div>
@@ -795,9 +788,11 @@ function Products({
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search products"
+            aria-label="Search products by title or SKU"
+            placeholder="Search products or SKU"
           />
           <select
+            aria-label="Filter products by seller"
             value={sellerFilter}
             onChange={(e) => setSellerFilter(e.target.value)}
           >
@@ -809,7 +804,9 @@ function Products({
             ))}
           </select>
         </div>
-        <div className="admin-table-wrap">
+        <div className="admin-queue-filters"><label>Listing status<select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}><option value="">All statuses</option>{["active", "draft", "inactive", "sold_out", "pending_review"].map(value => <option key={value} value={value}>{value.replaceAll("_", " ")}</option>)}<option value="missing_photo">Missing photos</option></select></label><label>Sort by<select value={sort} onChange={e => setSort(e.target.value)}><option value="updated">Recently updated</option><option value="title">Product name</option><option value="price">Price: low to high</option><option value="stock">Stock: low to high</option></select></label></div>
+        <p className="admin-muted">{visible.length} listings shown - Latest 250 listings loaded</p>
+        <div className="admin-table-wrap admin-mobile-records" role="region" aria-label="Scrollable records" tabIndex={0}>
           <table>
             <thead>
               <tr>
@@ -825,21 +822,23 @@ function Products({
               {visible.map((product) => (
                 <tr key={product.id}>
                   <td>
+                    {(product.primaryImageUrl || product.images?.[0]?.url) && <Image className="admin-product-thumbnail" src={product.primaryImageUrl || product.images![0].url} width={64} height={52} alt="" unoptimized />}
                     <b>{product.title}</b>
                     <br />
                     {product.sellerSku} · {product.scale} ·{" "}
                     {product.modelManufacturer}
                   </td>
-                  <td>{product.sellerName}</td>
-                  <td>{money(product.priceCents)}</td>
+                  <td data-label="Seller">{product.sellerName}</td>
+                  <td data-label="Price">{money(product.priceCents)}</td>
                   <td>
                     {product.inventoryQuantity} total /{" "}
                     {product.reservedQuantity} reserved
                   </td>
                   <td>
                     <span className={`status ${product.status}`}>
-                      {product.status}
+                      {product.status.replaceAll("_", " ")}
                     </span>
+                    {!product.primaryImageUrl && !product.images?.length && <p className="admin-warning">Missing photos</p>}
                   </td>
                   <td>
                     <div className="row-actions">
@@ -877,14 +876,7 @@ function Products({
           </table>
         </div>
       </section>
-      {editing && (
-        <ProductEditor
-          product={editing}
-          sellers={sellerRows}
-          action={action}
-          onClose={() => setEditing(null)}
-        />
-      )}
+
     </div>
   );
 }
@@ -935,7 +927,9 @@ function ProductEditor({
   action(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
   onClose(): void;
 }) {
-  const [catalogReady, setCatalogReady] = useState(Boolean(product.catalogProductId));
+  const editorRef = useRef<HTMLElement>(null);
+  useEffect(() => { editorRef.current?.focus(); editorRef.current?.scrollIntoView({ block: "start" }); }, []);
+  const [catalogReady, setCatalogReady] = useState(Boolean(product.id || product.catalogProductId));
   const [busy, setBusy] = useState(false);
   const [productId, setProductId] = useState(product.id);
   const [files, setFiles] = useState<File[]>([]);
@@ -960,6 +954,7 @@ function ProductEditor({
         action: "save_product",
         ...Object.fromEntries(form.entries()),
         id: productId,
+        priceCents: dollarsToCents(String(form.get("price"))),
       });
       const savedProductId = String(result.productId ?? "");
       setProductId(savedProductId);
@@ -1056,11 +1051,12 @@ function ProductEditor({
     });
   }
   return (
-    <section className="admin-panel">
+    <section className="admin-panel admin-focus-panel" ref={editorRef} tabIndex={-1}>
       <h2>{product.id ? "Edit" : "Create"} product</h2>
+      {product.availabilityType === "preorder" && <p className="admin-warning">Preorder stock and release changes are managed in <Link href="/admin/preorders">Preorder operations</Link>.</p>}
       <form className="admin-form" onSubmit={submit}>
-          <CatalogModelPicker initial={product} listingSaved={Boolean(productId)} disabled={busy} onReady={setCatalogReady} />
-          <fieldset className="catalog-listing-fields" hidden={!catalogReady} disabled={!catalogReady}>
+          {product.id && !product.catalogProductId ? <div className="admin-warning"><b>{product.title}</b><p>Catalog association is missing. Listing details are shown below; resolve the catalog record before saving.</p></div> : <CatalogModelPicker initial={product} listingSaved={Boolean(productId)} disabled={busy} onReady={setCatalogReady} />}
+          <fieldset className="catalog-listing-fields" hidden={!catalogReady} disabled={!catalogReady || busy}>
         <div className="form-row">
           <label>
             Seller
@@ -1092,13 +1088,14 @@ function ProductEditor({
         <CollectibleListingFields product={product} includeIdentity={false} />
         <div className="form-row">
           <label>
-            Price, cents
+            Price (USD)
             <input
-              name="priceCents"
+              name="price"
+              step="0.01"
               type="number"
               min="0"
               required
-              defaultValue={product.priceCents}
+              defaultValue={(product.priceCents / 100).toFixed(2)}
             />
           </label>
         </div>
@@ -1127,7 +1124,7 @@ function ProductEditor({
                 }
               >
                 <option value="in_stock">In stock</option>
-
+                {product.availabilityType === "preorder" && <option value="preorder">Preorder</option>}
               </select>
             </label>
             <label>
@@ -1159,7 +1156,7 @@ function ProductEditor({
         </label>
         {imageError && <p className="form-error" role="alert">{imageError}</p>}
         <div className="row-actions">
-          <button className="button dark small" disabled={busy}>
+          <button className="button dark small" disabled={busy || product.availabilityType === "preorder" || Boolean(product.id && !product.catalogProductId)}>
             {busy
               ? "Saving…"
               : `Save as ${product.status === "active" ? "current status" : "draft"}`}
@@ -1184,6 +1181,7 @@ function Importer({
   const sellers = (data.sellers as Array<{ id: string; name: string }>) ?? [];
   const [sellerId, setSellerId] = useState("");
   const [csv, setCsv] = useState("");
+  const [fileError, setFileError] = useState("");
   const [preview, setPreview] = useState<{
     valid: Array<Record<string, unknown>>;
     errors: Array<{ row: number; errors: string[] }>;
@@ -1191,6 +1189,8 @@ function Importer({
   } | null>(null);
   async function readFile(file?: File) {
     if (!file) return;
+    setFileError("");
+    if (file.size > 5_000_000) { setCsv(""); setPreview(null); setFileError("Choose a CSV no larger than 5 MB."); return; }
     setCsv(await file.text());
     setPreview(null);
   }
@@ -1215,6 +1215,8 @@ function Importer({
           Download template
         </a>
       </div>
+      <details open><summary>Before importing</summary><p>CSV only, up to 5 MB and 5,000 rows. Prices use USD dollars, for example 249.95. New listings become drafts.</p><p>Required columns: seller_sku, title, scale, model_manufacturer, vehicle_make, vehicle_model, model_condition, packaging_condition, original_box, missing_parts, defects, restoration_customization, material, coa, accessories, price, inventory_quantity.</p><p>Matching seller SKUs update listing descriptions, condition, price, quantity and other imported fields. Blank optional cells clear those values; blanks do not mean &quot;keep existing.&quot; Shared catalog identity stays linked to the existing model. Photos and reserved stock are retained. Existing listing status is retained; restocked sold-out listings can become active.</p><p>Use product editing for a small change. Upload photos after importing; image URLs are not accepted.</p></details>
+      {fileError && <p role="alert" className="form-error">{fileError}</p>}
       <label>
         Seller
         <select
@@ -1257,6 +1259,7 @@ function Importer({
             {preview.validCount} valid rows · {preview.errors.length} rows with
             errors
           </h3>
+          {preview.errors.length > 0 && <a className="button outline small" download="inventory-validation-errors.csv" href={`data:text/csv;charset=utf-8,${encodeURIComponent("row,errors\n" + preview.errors.map(item => `${item.row},"${item.errors.join("; ").replaceAll('"', '""')}"`).join("\n"))}`}>Download validation errors</a>}
           {preview.errors.length > 0 && (
             <ul className="error-list">
               {preview.errors.map((item) => (
@@ -1267,7 +1270,7 @@ function Importer({
             </ul>
           )}
           {preview.valid.length > 0 && (
-            <div className="admin-table-wrap">
+            <div className="admin-table-wrap" role="region" aria-label="Scrollable records" tabIndex={0}>
               <table>
                 <thead>
                   <tr>
@@ -1306,7 +1309,8 @@ function Importer({
             Commit {preview.validCount} rows
           </button>
         </div>
-      )}
+      )}      <details><summary>Recent imports</summary>{((data.importHistory as Array<{ id: string; created_at: string; store_name: string; actor: string; detail: string }>) ?? []).length ? (data.importHistory as Array<{ id: string; created_at: string; store_name: string; actor: string; detail: string }>).map(row => <p key={row.id}>{shortDateTime(row.created_at)} · {row.store_name} · {row.actor}<br/>{row.detail}</p>) : <p>No imports recorded since activity tracking was enabled.</p>}</details>
+
     </section>
   );
 }
@@ -1321,6 +1325,12 @@ type Hunt = {
   collectorEmail: string;
   status: string;
   matchedProductId?: string | null;
+  color?: string | null;
+  conditionPreference?: string | null;
+  maxBudgetCents?: number | null;
+  notes?: string;
+  matchedAt?: string | null;
+  notifiedAt?: string | null;
   createdAt: string;
 };
 type Candidate = {
@@ -1353,7 +1363,7 @@ function Hunts({
         <select value={filter} onChange={(e) => setFilter(e.target.value)}>
           <option value="">All statuses</option>
           <option>open</option>
-          <option>possible_match</option>
+          <option value="possible_match">Possible match</option>
           <option>matched</option>
           <option>closed</option>
         </select>
@@ -1366,7 +1376,7 @@ function Hunts({
           return (
             <article key={hunt.id}>
               <div>
-                <span className={`status ${hunt.status}`}>{hunt.status}</span>
+                <span className={`status ${hunt.status}`}>{hunt.status.replaceAll("_", " ")}</span>
                 <b>{hunt.referenceCode}</b>
               </div>
               <h3>
@@ -1376,6 +1386,8 @@ function Hunts({
                 {hunt.modelManufacturer || "Any manufacturer"} ·{" "}
                 {hunt.collectorEmail}
               </p>
+              <p>Requested {shortDateTime(hunt.createdAt)}</p>
+              <details><summary>Preferences and resolution history</summary><p>Color: {hunt.color || "Any"}. Condition: {hunt.conditionPreference || "Any"}. Budget: {hunt.maxBudgetCents ? money(hunt.maxBudgetCents) : "Not specified"}.</p><p>{hunt.notes || "No additional preferences."}</p><p>Matched: {hunt.matchedAt ? shortDateTime(hunt.matchedAt) : "Not yet"}. Collector notified: {hunt.notifiedAt ? shortDateTime(hunt.notifiedAt) : "Not yet"}.</p>{((data.history as AdminActivity[]) ?? []).filter(row => row.record_id === hunt.id).map(row => <p key={row.id}>{shortDateTime(row.created_at)} - {row.action === "link_hunt" ? "Candidate linked" : "Collector notified"} by {row.actor}</p>)}</details>
               {matches.length > 0 ? (
                 <label>
                   Probable matches
@@ -1393,14 +1405,14 @@ function Hunts({
                     <option value="">Select a confirmed match</option>
                     {matches.map((product) => (
                       <option key={product.id} value={product.id}>
-                        {product.title} — {product.sellerName} —{" "}
+                        {product.title} - {product.sellerName} -{" "}
                         {money(product.priceCents, product.currency)}
                       </option>
                     ))}
                   </select>
                 </label>
               ) : (
-                <p>No normalized make/model/scale match yet.</p>
+                <p>No matching make, model and scale in active inventory yet. <Link href={`/admin?section=products&q=${encodeURIComponent(hunt.vehicleMake + " " + hunt.vehicleModel)}`}>Search inventory</Link></p>
               )}
               {hunt.matchedProductId && (
                 <button
@@ -1473,7 +1485,7 @@ function Community({ data }: { data: AdminData }) {
         </span>
       </div>
       {visible.length ? (
-        <div className="admin-table-wrap">
+        <div className="admin-table-wrap" role="region" aria-label="Scrollable records" tabIndex={0}>
           <table>
             <thead>
               <tr>
@@ -1570,7 +1582,7 @@ function ResolutionCases({
     <div className="order-admin-list">
       {rows.length ? rows.map((item) => (
         <AdminCasePanel item={item} action={action} key={item.id} />
-      )) : <div className="admin-panel">No resolution cases yet.</div>}
+      )) : <div className="admin-panel">No resolution cases yet. Cases appear when a buyer requests help with an eligible order. Use order lookup to review payment, shipment, and refund records. <Link href="/admin?section=orders">Look up an order</Link> | <Link href="/protection">Buyer protection guidance</Link></div>}
     </div>
   );
 }
@@ -1771,6 +1783,9 @@ function TaxCenter({
   data: AdminData;
   action(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
 }) {
+  const params = useSearchParams();
+  const taxViews = ["readiness", "reporting", "setup", "calendar", "bookkeeping", "sellers", "activity"];
+  const view = taxViews.includes(params.get("view") || "") ? params.get("view")! : "readiness";
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   async function action(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -1852,6 +1867,8 @@ function TaxCenter({
   return (
     <fieldset className="tax-center tax-controls" disabled={saving} aria-busy={saving}>
       <legend className="sr-only">Tax and compliance controls</legend>
+      <nav className="admin-tax-nav" aria-label="Tax sections">{taxViews.map(item => <Link key={item} href={`/admin?section=tax&view=${item}`} aria-current={view === item ? "page" : undefined}>{item === "sellers" ? "Seller documentation" : item[0].toUpperCase() + item.slice(1)}</Link>)}</nav>
+      <div hidden={view !== "readiness"}>
       <section className="tax-command-bar">
         <div>
           <p className="eyebrow">California sole proprietor</p>
@@ -1872,16 +1889,21 @@ function TaxCenter({
 
       {profile?.businessLaunchStatus === "prelaunch" && <div className="tax-warning" role="note"><b>Before launch.</b> Estimated-tax calendar items are planning reminders for review, not confirmed unpaid bills. Your personal income and withholding still matter. A California seller’s permit also requires assigned returns even with no sales; confirm your filing frequency and due dates in CDTFA. Order reports retain any recorded payments and refunds.</div>}
 
+      <p className="admin-muted">{reports.reduce((sum, report) => sum + report.totals.orderCount, 0)} reportable paid orders - {excludedTestOrders.length} test orders excluded. <Link href="/admin?section=tax&view=reporting">Review reporting evidence</Link></p>
       <section className="tax-readiness-grid" aria-label="Tax readiness checklist">
         {readiness.map((item) => (
           <article key={item.id} className={item.ready ? "ready" : "attention"}>
             <span>{item.ready ? "Ready" : "Action needed"}</span>
             <h3>{item.label}</h3>
             <p>{item.detail}</p>
+            <p className="admin-muted">{["automatic-tax", "stripe-liability"].includes(item.id) ? "Evidence checked when this page loaded; no live verification recorded." : `Last account verification: ${profile?.caAccountVerifiedAt ? shortDate(profile.caAccountVerifiedAt) : "Not recorded"}`}</p>
+            {!item.ready && <Link href="/admin?section=tax&view=setup">Record confirmation or update setup</Link>}
           </article>
         ))}
       </section>
 
+      </div>
+      <div hidden={view !== "reporting"}>
       <section className="tax-section-heading">
         <div>
           <p className="eyebrow">Order-derived reporting</p>
@@ -1933,7 +1955,7 @@ function TaxCenter({
             ))}</ul>
           </div>
         )}
-        <div className="admin-table-wrap">
+        <div className="admin-table-wrap" role="region" aria-label="Scrollable records" tabIndex={0}>
           <table>
             <thead><tr><th>Month</th><th>Orders</th><th>CA merchandise</th><th>CA shipping</th><th>CA tax collected</th><th>After full refunds</th><th>All refunds</th></tr></thead>
             <tbody>
@@ -1945,12 +1967,12 @@ function TaxCenter({
         </div>
       </section>
 
-      <TaxProfileForm key={profile?.updatedAt ?? "new"} profile={profile} automaticTaxEnabled={Boolean(data.automaticTaxEnabled)} action={action} />
-      <TaxTaskManager tasks={tasks} year={year} businessStartedAt={profile?.businessStartedAt} launchStatus={profile?.businessLaunchStatus} action={action} />
-      <LedgerManager entries={ledger} year={year} action={action} />
-      <SellerTaxReadiness sellers={(data.sellers as SellerTaxRow[]) ?? []} action={action} />
-      <TaxActivity rows={(data.activity as TaxActivityRow[]) ?? []} />
-      <TaxReferencePanel />
+      </div>
+      <div hidden={view !== "setup"}><TaxProfileForm key={profile?.updatedAt ?? "new"} profile={profile} automaticTaxEnabled={Boolean(data.automaticTaxEnabled)} action={action} /><TaxReferencePanel /></div>
+      <div hidden={view !== "calendar"}><TaxTaskManager tasks={tasks} year={year} businessStartedAt={profile?.businessStartedAt} launchStatus={profile?.businessLaunchStatus} action={action} /></div>
+      <div hidden={view !== "bookkeeping"}><label>Bookkeeping year<select value={year} onChange={e => setYear(Number(e.target.value))}>{yearOptions.map(option => <option key={option}>{option}</option>)}</select></label><LedgerManager entries={ledger} year={year} action={action} /></div>
+      <div hidden={view !== "sellers"}><SellerTaxReadiness sellers={(data.sellers as SellerTaxRow[]) ?? []} action={action} /></div>
+      <div hidden={view !== "activity"}><TaxActivity rows={(data.activity as TaxActivityRow[]) ?? []} /></div>
     </fieldset>
   );
 }
@@ -2103,7 +2125,7 @@ function TaxTaskRow({
   const [notes, setNotes] = useState(task.notes);
   const timing = taxTaskTiming(task, businessStartedAt, undefined, launchStatus);
   const overdue = timing === "overdue";
-  const timingLabel = timing === "prelaunch_review" ? "Prelaunch — review" : timing === "before_start" ? "Before business start — review" : timing === "due_today" ? "Due today" : overdue ? "Overdue — review" : task.status.replaceAll("_", " ");
+  const timingLabel = timing === "prelaunch_review" ? "Prelaunch - review" : timing === "before_start" ? "Before business start - review" : timing === "due_today" ? "Due today" : overdue ? "Overdue - review" : task.status.replaceAll("_", " ");
   return (
     <article className={`tax-task ${overdue ? "overdue" : ""}`}>
       <div className="tax-task-summary">
@@ -2180,12 +2202,12 @@ function LedgerManager({
         <label className="tax-ledger-notes">Notes<input maxLength={2000} value={form.notes} onChange={(event) => field("notes", event.target.value)} /></label>
         <button className="button dark small">Record entry</button>
       </form>
-      <div className="admin-table-wrap">
+      <div className="admin-table-wrap" role="region" aria-label="Scrollable records" tabIndex={0}>
         <table>
           <thead><tr><th>Date</th><th>Type</th><th>Description</th><th>Category</th><th>Vendor</th><th>Amount</th><th>Reference</th><th /></tr></thead>
           <tbody>
             {entries.length ? entries.map((entry) => (
-              <tr key={entry.id} className={entry.status === "voided" ? "voided" : ""}><td>{shortDate(entry.occurredAt)}</td><td>{entry.entryType.replaceAll("_", " ")}</td><td><b>{entry.description}</b>{entry.notes && <small>{entry.notes}</small>}</td><td>{entry.category}</td><td>{entry.vendor || "—"}</td><td>{money(entry.amountCents, "usd")}</td><td>{entry.reference || "—"}</td><td>{entry.status === "active" ? <button onClick={() => void action({ action: "void_ledger_entry", entryId: entry.id })}>Void</button> : "Voided"}</td></tr>
+              <tr key={entry.id} className={entry.status === "voided" ? "voided" : ""}><td>{shortDate(entry.occurredAt)}</td><td>{entry.entryType.replaceAll("_", " ")}</td><td><b>{entry.description}</b>{entry.notes && <small>{entry.notes}</small>}</td><td>{entry.category}</td><td>{entry.vendor || "-"}</td><td>{money(entry.amountCents, "usd")}</td><td>{entry.reference || "-"}</td><td>{entry.status === "active" ? <button onClick={() => void action({ action: "void_ledger_entry", entryId: entry.id })}>Void</button> : "Voided"}</td></tr>
             )) : <tr><td colSpan={8}>No manual bookkeeping entries for {year}.</td></tr>}
           </tbody>
         </table>
@@ -2204,7 +2226,7 @@ function SellerTaxReadiness({
   return (
     <section className="admin-panel tax-seller-panel">
       <div className="panel-heading"><div><p className="eyebrow">Information reporting</p><h2>Seller tax readiness</h2></div><small>Track status only. TINs and W-9 documents stay in Stripe or your approved secure process.</small></div>
-      <div className="admin-table-wrap">
+      <div className="admin-table-wrap" role="region" aria-label="Scrollable records" tabIndex={0}>
         <table>
           <thead><tr><th>Seller</th><th>Marketplace status</th><th>Stripe</th><th>Terms</th><th>Tax information</th><th>Last verified</th></tr></thead>
           <tbody>
@@ -2225,7 +2247,7 @@ function SellerTaxRowEditor({ seller, action }: { seller: SellerTaxRow; action(p
       <td>{seller.stripeAccountId && seller.stripeChargesEnabled && seller.stripePayoutsEnabled ? "Connected and enabled" : seller.stripeAccountId ? "Onboarding incomplete" : "Not connected"}</td>
       <td>{seller.sellerTermsAcceptedAt ? shortDate(seller.sellerTermsAcceptedAt) : "Not accepted"}</td>
       <td><div className="tax-seller-status"><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="not_checked">Not checked</option><option value="collecting">Collecting</option><option value="ready">Ready</option><option value="needs_attention">Needs attention</option></select><button onClick={() => void action({ action: "seller_tax_status", sellerId: seller.id, status })}>Save</button></div></td>
-      <td>{seller.taxInfoVerifiedAt ? shortDate(seller.taxInfoVerifiedAt) : "—"}</td>
+      <td>{seller.taxInfoVerifiedAt ? shortDate(seller.taxInfoVerifiedAt) : "-"}</td>
     </tr>
   );
 }
@@ -2288,9 +2310,16 @@ type AdminOrder = {
   carrier?: string | null;
   trackingNumber?: string | null;
   createdAt: string;
+  paidAt?: string | null;
+  shippedAt?: string | null;
+  shipByAt?: string | null;
+  refundedAmountCents: number;
+  sellerTransferStatus: string;
   items: Array<{
     id: string;
     productTitleSnapshot: string;
+    sellerSkuSnapshot: string;
+    imageUrlSnapshot?: string | null;
     quantity: number;
     unitPriceCents: number;
     availabilityTypeSnapshot: "in_stock" | "preorder";
@@ -2335,24 +2364,45 @@ function Orders({
   const rows = (data.orders as AdminOrder[]) ?? [];
   const disputeRows = (data.disputes as AdminDispute[]) ?? [];
   const sellerAlertRows = (data.sellerAlerts as AdminSellerAlert[]) ?? [];
-  return (
-    <div className="admin-stack">
-      <StripeRiskPanels
-        disputes={disputeRows}
-        sellerAlerts={sellerAlertRows}
-        action={action}
-      />
-      <div className="order-admin-list">
-        {rows.length ? (
-          rows.map((order) => (
-            <OrderPanel key={order.id} order={order} action={action} />
-          ))
-        ) : (
-          <div className="admin-panel">No orders yet.</div>
-        )}
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 60_000); return () => clearInterval(timer); }, []);
+  const params = useSearchParams();
+  const [query, setQuery] = useState(params.get("q") || "");
+  const [filter, setFilter] = useState(params.get("filter") || "all");
+  const [payment, setPayment] = useState("");
+  const [recordType, setRecordType] = useState("all");
+  const [sort, setSort] = useState("newest");
+  const visible = rows.filter(order => {
+    if (recordType === "live" && order.isTestOrder || recordType === "test" && !order.isTestOrder) return false;
+    if (payment && order.paymentStatus !== payment) return false;
+    if (filter === "awaiting" && !awaitingShipment(order) || filter === "overdue" && !overdueShipment(order, now) || filter === "missing_items" && !orderItemProblem(order)) return false;
+    if (filter === "exceptions" && order.paymentStatus !== "failed" && order.sellerTransferStatus !== "failed" && !sellerAlertRows.some(alert => alert.sellerName === order.sellerName && !alert.acknowledged)) return false;
+    if (filter === "disputes" && !disputeRows.some(dispute => dispute.orderId === order.id && !dispute.closedAt && !["won", "lost", "prevented", "warning_closed"].includes(dispute.status))) return false;
+    if (["shipped", "delivered", "cancelled"].includes(filter) && order.fulfillmentStatus !== filter) return false;
+    return `${order.orderNumber} ${order.sellerName} ${order.buyerEmail} ${order.buyerName} ${order.items.map(item => `${item.productTitleSnapshot} ${item.sellerSkuSnapshot}`).join(" ")}`.toLowerCase().includes(query.toLowerCase());
+  }).sort((a, b) => sort === "oldest" ? a.createdAt.localeCompare(b.createdAt) : sort === "deadline" ? (a.shipByAt || "9999").localeCompare(b.shipByAt || "9999") : b.createdAt.localeCompare(a.createdAt));
+  return <div className="admin-stack">
+    <section className="admin-panel">
+      <h2>Order queue</h2>
+      <p>{rows.filter(awaitingShipment).length} awaiting shipment - {rows.filter(order => overdueShipment(order, now)).length} overdue - {rows.filter(order => orderItemProblem(order)).length} need item reconciliation</p>
+      <div className="admin-queue-filters">
+        <label>Search orders<input value={query} onChange={e => setQuery(e.target.value)} placeholder="Order, SKU, item, seller or buyer" /></label>
+        <label>Queue<select value={filter} onChange={e => setFilter(e.target.value)}>{[["all", "All orders"], ["awaiting", "Awaiting shipment"], ["overdue", "Overdue shipments"], ["missing_items", "Item reconciliation"], ["exceptions", "Payment exceptions"], ["disputes", "Open disputes"], ["shipped", "Shipped"], ["delivered", "Delivered"], ["cancelled", "Cancelled"]].map(([value,label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+        <label>Payment<select value={payment} onChange={e => setPayment(e.target.value)}><option value="">All payment states</option>{["pending", "paid", "failed", "partially_refunded", "refunded"].map(value => <option key={value} value={value}>{value.replaceAll("_", " ")}</option>)}</select></label>
+        <label>Records<select value={recordType} onChange={e => setRecordType(e.target.value)}><option value="all">Live and test</option><option value="live">Live only</option><option value="test">Test only</option></select></label>
+        <label>Sort<select value={sort} onChange={e => setSort(e.target.value)}><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="deadline">Shipment deadline</option></select></label>
       </div>
-    </div>
-  );
+      <p className="admin-muted">{visible.length} orders shown - Latest 250 orders loaded. Dates use your local time.</p>
+    </section>
+    <div className="admin-records">{visible.length ? visible.map(order => <details key={order.id} open={params.get("order") === order.id || undefined}>
+      <summary><span className="admin-record-summary"><strong>{order.orderNumber}{order.isTestOrder ? " - TEST" : ""}</strong><b>{money(order.totalCents, order.currency)}</b></span>
+        <span>{order.items.length ? order.items.map(item => `${item.productTitleSnapshot} x ${item.quantity} (${item.sellerSkuSnapshot})`).join("; ") : "Item records missing"}</span>
+        <span className="admin-record-meta"><span>{order.sellerName}</span><span>Ordered {shortDateTime(order.createdAt)} · {Math.max(0, Math.floor((now - (adminTimestamp(order.createdAt)?.getTime() || now)) / 86400000))} days old</span><span>Ship by {order.shipByAt ? shortDateTime(order.shipByAt) : "Not recorded"}</span></span>
+        <span className="admin-record-meta"><span>Payment: {order.paymentStatus.replaceAll("_", " ")}</span><span>Fulfillment: {awaitingShipment(order) ? "Awaiting shipment" : order.fulfillmentStatus}</span>{overdueShipment(order, now) && <strong className="admin-warning">Overdue</strong>}</span>
+      </summary><OrderPanel order={order} action={action} />
+    </details>) : <div className="admin-panel">No orders match these filters.</div>}</div>
+    <details className="admin-panel" open={["disputes", "exceptions"].includes(filter) || undefined}><summary>Payment alerts - {disputeRows.filter(row => !row.closedAt && !["won", "lost", "prevented", "warning_closed"].includes(row.status)).length} open disputes - {sellerAlertRows.filter(row => !row.acknowledged).length} unacknowledged seller alerts</summary><StripeRiskPanels disputes={disputeRows} sellerAlerts={sellerAlertRows} action={action} /></details>
+  </div>;
 }
 
 function StripeRiskPanels({
@@ -2365,7 +2415,7 @@ function StripeRiskPanels({
   action(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
 }) {
   const openDisputes = disputes.filter(
-    (row) => !["won", "prevented", "warning_closed"].includes(row.status),
+    (row) => !row.closedAt && !["won", "lost", "prevented", "warning_closed"].includes(row.status),
   );
   const openAlerts = sellerAlerts.filter((row) => !row.acknowledged);
   return (
@@ -2381,7 +2431,7 @@ function StripeRiskPanels({
           </span>
         </div>
         {disputes.length ? (
-          <div className="admin-table-wrap">
+          <div className="admin-table-wrap" role="region" aria-label="Scrollable records" tabIndex={0}>
             <table>
               <thead>
                 <tr>
@@ -2401,7 +2451,7 @@ function StripeRiskPanels({
                     <td><span className={`status ${["won", "prevented", "warning_closed"].includes(row.status) ? "paid" : "failed"}`}>{row.status.replaceAll("_", " ")}</span></td>
                     <td>{row.reason.replaceAll("_", " ") || "Not provided"}</td>
                     <td>{money(row.amountCents, row.currency)}</td>
-                    <td>{row.evidenceDueBy ? shortDateTime(row.evidenceDueBy) : "—"}</td>
+                    <td>{row.evidenceDueBy ? shortDateTime(row.evidenceDueBy) : "-"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -2423,7 +2473,7 @@ function StripeRiskPanels({
           </span>
         </div>
         {sellerAlerts.length ? (
-          <div className="admin-table-wrap">
+          <div className="admin-table-wrap" role="region" aria-label="Scrollable records" tabIndex={0}>
             <table>
               <thead>
                 <tr>
@@ -2477,7 +2527,7 @@ function OrderPanel({
             {order.fulfillmentStatus}
           </span>
           <h2>{order.orderNumber}</h2>
-          {order.isTestOrder && <p><b>Test order — excluded from tax reports.</b>{order.testOrderReason ? ` ${order.testOrderReason}` : ""}</p>}
+          {order.isTestOrder && <p><b>Test order - excluded from tax reports.</b>{order.testOrderReason ? ` ${order.testOrderReason}` : ""}</p>}
           <p>
             {order.sellerName} · {order.buyerName} · {order.buyerEmail}
           </p>
@@ -2487,13 +2537,9 @@ function OrderPanel({
       <div className="order-admin-body">
         <div>
           <h3>Items</h3>
-          {order.items.map((item) => (
-            <p key={item.id}>
-              {item.productTitleSnapshot} × {item.quantity} —{" "}
-              {money(item.unitPriceCents * item.quantity, order.currency)}
-              {item.availabilityTypeSnapshot === "preorder" && item.releaseDateSnapshot ? ` · Preorder releases ${shortDate(item.releaseDateSnapshot)}` : ""}
-            </p>
-          ))}
+          {orderItemProblem(order) && <p className="admin-warning" role="alert">{orderItemProblem(order)}</p>}
+          {order.items.map(item => <div className="admin-item" key={item.id}>{item.imageUrlSnapshot && <Image src={item.imageUrlSnapshot} alt="" width={64} height={52} unoptimized />}<div><b>{item.productTitleSnapshot}</b><p>SKU {item.sellerSkuSnapshot} · Quantity {item.quantity} · {money(item.unitPriceCents * item.quantity, order.currency)}</p>{item.availabilityTypeSnapshot === "preorder" && <small>Preorder - Expected release {shortDate(item.releaseDateSnapshot)}</small>}</div></div>)}
+          <h3>Financial record</h3><p>Paid: {order.paidAt ? shortDateTime(order.paidAt) : "Not recorded"}<br/>Merchandise {money(order.subtotalCents, order.currency)} · Shipping {money(order.shippingCents, order.currency)} · Tax {money(order.taxCents, order.currency)}<br/>Refunded {money(order.refundedAmountCents, order.currency)} · Seller transfer: {order.sellerTransferStatus.replaceAll("_", " ")}</p>
           <p>
             Model Car Center fee ({feePercent(order.marketplaceFeeBps)}):{" "}
             <b>{money(order.platformFeeCents, order.currency)}</b>
@@ -2512,22 +2558,23 @@ function OrderPanel({
           <pre>{formatAddress(order.shippingAddress)}</pre>
         </div>
       </div>
-      {order.paymentStatus === "paid" &&
-        order.fulfillmentStatus !== "shipped" && (
+      {awaitingShipment(order) && (
           <div className="fulfillment-controls">
             <input
               value={carrier}
               onChange={(e) => setCarrier(e.target.value)}
+              aria-label="Carrier"
               placeholder="Carrier"
             />
             <input
               value={tracking}
               onChange={(e) => setTracking(e.target.value)}
+              aria-label="Tracking number"
               placeholder="Tracking number"
             />
             <button
               className="button dark small"
-              disabled={!carrier || !tracking}
+              disabled={!carrier || !tracking || Boolean(orderItemProblem(order))}
               onClick={() =>
                 void action({
                   action: "ship_order",
@@ -2552,6 +2599,7 @@ function OrderPanel({
             <input
               type="checkbox"
               checked={restock}
+              disabled={Boolean(orderItemProblem(order))}
               onChange={(e) => setRestock(e.target.checked)}
             />{" "}
             Restock inventory after Stripe confirms the refund

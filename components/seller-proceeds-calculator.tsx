@@ -23,9 +23,9 @@ export function SellerProceedsCalculator({ rates }: { rates: { collector: number
     </div>
     <div className="seller-calculator-primary">
       <label>Seller type<select value={type} onChange={event => setType(event.target.value as keyof typeof rates)}>
-        <option value="collector">Collector — {rates.collector / 100}%</option>
-        <option value="professional">Store — {rates.professional / 100}%</option>
-        <option value="founding">Eligible founding store — {rates.founding / 100}%</option>
+        <option value="collector">Collector - {rates.collector / 100}%</option>
+        <option value="professional">Store - {rates.professional / 100}%</option>
+        <option value="founding">Eligible founding store - {rates.founding / 100}%</option>
       </select></label>
       {type === "founding" && <p className="seller-calculator-note">This rate applies only during a store’s assigned founding offer.</p>}
       <div className="seller-calculator-fields">

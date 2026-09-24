@@ -7,7 +7,7 @@ import {
   startCollectorStripeOnboarding,
   submitCollectorListing,
 } from "@/lib/listings";
-import { requiredString, ValidationError } from "@/lib/validation";
+import { cleanText, requiredString, ValidationError } from "@/lib/validation";
 import { isCurrentPolicyVersion } from "@/lib/legal";
 
 export const dynamic = "force-dynamic";
@@ -42,9 +42,19 @@ export async function POST(request: Request) {
     }
     if (action === "stripe_onboarding") {
       if (!isCurrentPolicyVersion(payload.sellerTermsVersion)) {
-        throw new ValidationError("Accept the current Seller Terms before onboarding.");
+        throw new ValidationError("Accept the current Seller Terms before connecting your payment method.");
       }
-      return Response.json({ ok: true, ...await startCollectorStripeOnboarding(collector.user, collector.profile, requiredString(payload.sellerTermsVersion, "sellerTermsVersion", 40)) });
+      return Response.json({ ok: true, ...await startCollectorStripeOnboarding(
+        collector.user,
+        collector.profile,
+        requiredString(payload.sellerTermsVersion, "sellerTermsVersion", 40),
+        payload.productId ? {
+          productId: requiredString(payload.productId, "productId", 100),
+          collectionItem: cleanText(payload.collectionItem, 100),
+          selling: cleanText(payload.selling, 40),
+          minimum: cleanText(payload.minimum, 40),
+        } : undefined,
+      ) });
     }
     if (action === "refresh_stripe") {
       return Response.json({ ok: true, ...await refreshCollectorStripe(collector.user.id) });

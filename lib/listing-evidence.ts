@@ -29,13 +29,13 @@ export function requiredPhotoViews(listing: EvidenceListing): PhotoView[] {
 }
 
 export function photoViewsFromAlt(alt = ""): PhotoView[] {
-  const labels = alt.split(" — ")[0].split(" · ");
+  const labels = alt.split(" - ")[0].split(" · ");
   return photoViews.filter(view => labels.includes(view.label)).map(view => view.key);
 }
 
 export function photoAltForViews(views: readonly string[], description: string) {
   const labels = photoViews.filter(view => views.includes(view.key)).map(view => view.label);
-  return labels.length ? `${labels.join(" · ")} — ${description}` : description;
+  return labels.length ? `${labels.join(" · ")} - ${description}` : description;
 }
 
 export function listingPhotoEvidence(listing: EvidenceListing, images: EvidenceImage[] = []) {

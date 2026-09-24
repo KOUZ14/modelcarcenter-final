@@ -45,8 +45,8 @@ export async function startConsolidatedCheckout(
   let sessionId: string | null = null;
   try {
     const items: CheckoutSessionInput["items"] = resolved.flatMap(({ cart, shipping, reservation }) => [
-      ...cart.items.map((item) => ({ title: `${item.title} — ${cart.seller.sellerName}`, description: item.availabilityType === "preorder" ? `Preorder. Expected release ${item.releaseDate}. ${item.description}` : item.description, imageUrl: item.imageUrl, priceCents: item.priceCents, currency: item.currency, quantity: item.quantity, reservationId: reservation.reservationId })),
-      ...(shipping.amountCents > 0 ? [{ title: `Shipping — ${cart.seller.sellerName}`, description: shipping.service ?? "Seller shipping", imageUrl: null, priceCents: shipping.amountCents, currency: cart.currency, quantity: 1, reservationId: reservation.reservationId, shipping: true }] : []),
+      ...cart.items.map((item) => ({ title: `${item.title} - ${cart.seller.sellerName}`, description: item.availabilityType === "preorder" ? `Preorder. Expected release ${item.releaseDate}. ${item.description}` : item.description, imageUrl: item.imageUrl, priceCents: item.priceCents, currency: item.currency, quantity: item.quantity, reservationId: reservation.reservationId })),
+      ...(shipping.amountCents > 0 ? [{ title: `Shipping - ${cart.seller.sellerName}`, description: shipping.service ?? "Seller shipping", imageUrl: null, priceCents: shipping.amountCents, currency: cart.currency, quantity: 1, reservationId: reservation.reservationId, shipping: true }] : []),
     ]);
     const returnToken = crypto.randomUUID();
     const session = await createCheckoutSession({
