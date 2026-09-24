@@ -30,12 +30,19 @@ test("preview projections exclude private pieces and records; image payloads pre
 test("profile editor previews drafts, preserves failures, and saves only after uploads and consent", async t => {
   const root = fileURLToPath(new URL("../", import.meta.url));
   const scratch = await mkdtemp(join(root, ".sites-runtime/profile-test-")), bundle = join(scratch, "profile.mjs");
-  const originals = Object.fromEntries(["fetch", "window", "document", "createImageBitmap"].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  const originals = Object.fromEntries(["fetch", "window", "document", "createImageBitmap", "FileReader"].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
   const writes = [], busyChanges = [], draws = [];
+  const fetchPreview = globalThis.fetch;
   let status = 200, refreshes = 0, consentFocus = 0, bitmapClosed = 0;
   globalThis.window = { requestAnimationFrame: callback => callback(), addEventListener() {}, removeEventListener() {} };
   globalThis.document = { createElement: () => ({ width: 0, height: 0, getContext: () => ({ fillRect() {}, drawImage: (...args) => draws.push(args) }), toBlob: callback => callback(new Blob(["clean jpeg"], { type: "image/jpeg" })) }), body: { style: { overflow: "auto" } }, activeElement: { focus() {} } };
   globalThis.createImageBitmap = async () => ({ width: 4000, height: 2000, close() { bitmapClosed++; } });
+  globalThis.FileReader = class {
+    async readAsDataURL(blob) {
+      this.result = `data:${blob.type};base64,${Buffer.from(await blob.arrayBuffer()).toString("base64")}`;
+      this.onload();
+    }
+  };
   let photoRead = null;
   globalThis.fetch = async (url, options) => {
     if (url.includes("?original=1")) {
@@ -66,7 +73,7 @@ test("profile editor previews drafts, preserves failures, and saves only after u
     } }],
   });
   await writeFile(bundle, output.outputFiles[0].contents);
-  const { ProfileEditor, ProfilePreview, ProfileImageSelector, ProfilePhotoCropper } = await import(pathToFileURL(bundle).href);
+  const { ProfileEditor, ProfilePreview, ProfileImageSelector, ProfilePhotoCropper, prepareProfilePhoto } = await import(pathToFileURL(bundle).href);
   t.after(async () => { for (const [key, descriptor] of Object.entries(originals)) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete globalThis[key]; } delete globalThis.__profileTest; await unlink(bundle); await rmdir(scratch); });
   function renderer(Component, props) {
     const state = [], effects = []; let index = 0;
@@ -120,6 +127,8 @@ test("profile editor previews drafts, preserves failures, and saves only after u
     assert.equal(writes.length, beforeSelection, "Selecting a photo only opens the crop editor");
     assert.equal(props.value.id, "old"); assert.equal(busyChanges.at(-1), true);
     assert.equal(bitmapClosed, 1); assert.deepEqual(draws[0].slice(1), [0, 0, 1600, 800]);
+    assert.match(cropper().props.source.url, /^data:image\/jpeg;base64,/);
+    assert.equal(await (await fetchPreview(cropper().props.source.url)).text(), "clean jpeg");
     const crop = { x: 1, y: 0, zoom: 2 };
     await Promise.all([cropper().props.onApply(crop), cropper().props.onApply(crop)]); tree = selector.render();
     assert.equal(props.value.id, "new-image"); assert.equal(node.value, ""); assert.deepEqual(busyChanges.slice(-2), [true, false]);
@@ -142,6 +151,22 @@ test("profile editor previews drafts, preserves failures, and saves only after u
     await input().props.onChange({ currentTarget: node }); tree = selector.render(); assert.equal(writes.length, before);
     find(tree, node => node.props?.className === "profile-image-remove").props.onClick();
     assert.equal(props.value, null); assert.equal(writes.length, before);
+  });
+  await t.test("repositioning preserves the sanitized source and uses a preview allowed by the image policy", async () => {
+    const bitmap = globalThis.createImageBitmap;
+    const before = draws.length;
+    globalThis.createImageBitmap = async () => ({ width: 1200, height: 800, close() {} });
+    try {
+      const original = new Blob(["saved sanitized jpeg"], { type: "image/jpeg" });
+      const crop = { x: 0.8, y: 0.2, zoom: 2 };
+      const source = await prepareProfilePhoto(original, crop, true);
+      assert.equal(source.blob, original);
+      assert.equal(source.width, 1200); assert.equal(source.height, 800);
+      assert.deepEqual(source.crop, crop);
+      assert.match(source.url, /^data:image\/jpeg;base64,/);
+      assert.equal(await (await fetchPreview(source.url)).text(), "saved sanitized jpeg");
+      assert.equal(draws.length, before, "Reopening an existing original does not recompress it");
+    } finally { globalThis.createImageBitmap = bitmap; }
   });
   await t.test("crop controls support drag, keyboard sliders, reset, cancel and modal focus", () => {
     let applied, canceled = 0, restored = 0, shown = 0;

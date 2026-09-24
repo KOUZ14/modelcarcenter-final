@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import type { ProfileImage } from "@/lib/profile-editor";
 import { defaultPhotoCrop, parsePhotoCrop, type PhotoCrop } from "@/lib/profile-photo";
 import { cropProfilePhoto, prepareProfilePhoto, ProfilePhotoCropper, type ProfilePhotoSource } from "./profile-photo-cropper";
@@ -15,8 +15,6 @@ export function ProfileImageSelector({ kind, value, disabled, onChange, onBusyCh
   const [opener, setOpener] = useState<HTMLElement | null>(null);
   const label = kind === "avatar" ? "Avatar" : "Cover photo";
   const fieldId = `profile-${kind}`;
-
-  useEffect(() => () => { if (source) URL.revokeObjectURL(source.url); }, [source]);
 
   async function openCrop(file?: File) {
     if (pending.current || disabled || source) return;

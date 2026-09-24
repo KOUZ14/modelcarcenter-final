@@ -9,13 +9,25 @@ export async function encodePhoto(canvas: HTMLCanvasElement) {
   return new Promise<Blob>((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error("Could not read this image. Please choose another photo.")), "image/jpeg", 0.9));
 }
 
+function photoPreviewUrl(blob: Blob) {
+  // Data URLs are allowed by the site's image policy; blob URLs are not.
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    const fail = () => reject(new Error("Could not read this image. Please choose another photo."));
+    reader.onload = () => typeof reader.result === "string" ? resolve(reader.result) : fail();
+    reader.onerror = fail;
+    reader.onabort = fail;
+    reader.readAsDataURL(blob);
+  });
+}
+
 export async function prepareProfilePhoto(blob: Blob, crop: PhotoCrop = defaultPhotoCrop, preserveSource = false): Promise<ProfilePhotoSource> {
   const bitmap = await createImageBitmap(blob);
   // Reusing our sanitized original avoids recompressing it on every reposition.
   if (preserveSource && blob.type === "image/jpeg" && Math.max(bitmap.width, bitmap.height) <= 1600) {
     const { width, height } = bitmap;
     bitmap.close();
-    return { blob, url: URL.createObjectURL(blob), width, height, crop };
+    return { blob, url: await photoPreviewUrl(blob), width, height, crop };
   }
   const ratio = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height));
   const canvas = document.createElement("canvas");
@@ -29,7 +41,7 @@ export async function prepareProfilePhoto(blob: Blob, crop: PhotoCrop = defaultP
     context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
   } finally { bitmap.close(); }
   const photo = await encodePhoto(canvas);
-  return { blob: photo, url: URL.createObjectURL(photo), width: canvas.width, height: canvas.height, crop };
+  return { blob: photo, url: await photoPreviewUrl(photo), width: canvas.width, height: canvas.height, crop };
 }
 
 export async function cropProfilePhoto(source: ProfilePhotoSource, kind: ProfilePhotoKind, crop: PhotoCrop) {
