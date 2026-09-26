@@ -44,9 +44,13 @@ export function MarketplaceProvider({ children }: { children: React.ReactNode })
   const [cartError, setCartError] = useState("");
   const cartWrites = useRef(Promise.resolve());
   const completedSessions = useRef(new Set<string>());
+  const sessionVersion = useRef(0);
+  const signOutRequest = useRef<Promise<void> | null>(null);
 
   useEffect(() => {
     let active = true;
+    const version = sessionVersion.current;
+    const current = () => active && version === sessionVersion.current;
     async function bootstrap() {
       // Close an abandoned payment page before refreshing inventory on back/reload.
       if (window.location.pathname === "/cart") {
@@ -56,6 +60,7 @@ export function MarketplaceProvider({ children }: { children: React.ReactNode })
             method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reservationId }),
           });
           const data = await response.json() as { completedSessionId?: string };
+          if (!current()) return;
           if (data.completedSessionId) {
             window.location.assign(new URL(`/checkout/success?session_id=${encodeURIComponent(data.completedSessionId)}`, window.location.origin).href);
             return;
@@ -63,6 +68,7 @@ export function MarketplaceProvider({ children }: { children: React.ReactNode })
           if (response.ok) sessionStorage.removeItem(CHECKOUT_SESSION_KEY);
         } catch { /* Checkout retries cancellation before accepting another payment. */ }
       }
+      if (!current()) return;
       let guestCart: CartItem[] = [];
       let guestWishlist: string[] = [];
       try {
@@ -82,12 +88,12 @@ export function MarketplaceProvider({ children }: { children: React.ReactNode })
           profile?: { displayName: string; avatarUrl: string | null };
           store?: { id: string; name: string; status: string } | null;
         };
-        if (!active) return;
+        if (!current()) return;
         if (account.authenticated && account.user && account.profile) {
           setCollector({ id: account.user.id, email: account.user.email, displayName: account.profile.displayName, avatarUrl: account.profile.avatarUrl, store: account.store ?? null });
           const merge = await fetch("/api/account", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "merge", wishlist: guestWishlist, cart: guestCart.map((item) => ({ productId: item.productId, quantity: item.quantity })) }) });
           const merged = await merge.json() as { wishlist?: string[]; cart?: CartItem[]; error?: string };
-          if (!active) return;
+          if (!current()) return;
           if (!merge.ok || !merged.cart) throw new Error(merged.error || "Your saved cart could not be loaded.");
           setWishlist(merged.wishlist ?? []);
           setCart(merged.cart ?? []);
@@ -97,7 +103,8 @@ export function MarketplaceProvider({ children }: { children: React.ReactNode })
         }
       } catch {
         // Account service failures must not block guest browsing or checkout.
-        if (active) setCartError("Your saved cart could not be synced. Items on this device are kept, and your saved account cart is unchanged. Reload to retry.");
+        if (!current()) return;
+        setCartError("Your saved cart could not be synced. Items on this device are kept, and your saved account cart is unchanged. Reload to retry.");
       }
       if (guestCart.length) {
         try {
@@ -118,7 +125,7 @@ export function MarketplaceProvider({ children }: { children: React.ReactNode })
           // Preserve the locally saved cart if catalog refresh is temporarily unavailable.
         }
       }
-      if (!active) return;
+      if (!current()) return;
       setCart(guestCart);
       setWishlist(guestWishlist);
       setMode("guest");
@@ -135,13 +142,16 @@ export function MarketplaceProvider({ children }: { children: React.ReactNode })
   );
   const persistCart = useCallback((next: CartItem[]) => {
     if (mode !== "account") return;
+    const version = sessionVersion.current;
     const checkoutMarkers = [...completedSessions.current].map((sessionId) => `mcc-completed-checkout-${collector?.id ?? "guest"}-${sessionId}`);
     cartWrites.current = cartWrites.current.then(async () => {
+      if (version !== sessionVersion.current) return;
       const response = await fetch("/api/account", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "cart", items: next.map((item) => ({ productId: item.productId, quantity: item.quantity })) }) });
+      if (version !== sessionVersion.current) return;
       if (!response.ok) throw new Error("Cart sync failed.");
       try { checkoutMarkers.forEach((key) => localStorage.setItem(key, "1")); } catch { /* Storage may be disabled. */ }
       setCartError("");
-    }).catch(() => { setCartError("Your cart changes could not be saved to your account. Please retry before leaving this page."); });
+    }).catch(() => { if (version === sessionVersion.current) setCartError("Your cart changes could not be saved to your account. Please retry before leaving this page."); });
   }, [collector?.id, mode]);
   const addDirect = useCallback((product: ProductSummary, quantity: number) => {
     const existing = cart.find((item) => item.productId === product.id);
@@ -191,7 +201,28 @@ export function MarketplaceProvider({ children }: { children: React.ReactNode })
       if (mode === "account") void fetch("/api/account", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "wishlist", productId, saved }) });
     },
     wishlistHas(productId) { return wishlist.includes(productId); },
-    async signOut() { await authClient.signOut(); clearGuestStorage(); clearDeliveryDraft(); router.push("/"); },
+    signOut() {
+      if (signOutRequest.current) return signOutRequest.current;
+      signOutRequest.current = (async () => {
+        const result = await authClient.signOut();
+        if (result.error) throw new Error(result.error.message || "Could not sign out. Please try again.");
+        // The root provider survives navigation. Reset it and invalidate older
+        // account requests before refreshing any server-rendered account UI.
+        sessionVersion.current += 1;
+        setCollector(null);
+        setCart([]);
+        setWishlist([]);
+        setCartError("");
+        setMode("guest");
+        completedSessions.current.clear();
+        cartWrites.current = Promise.resolve();
+        clearGuestStorage();
+        clearDeliveryDraft();
+        router.replace("/");
+        router.refresh();
+      })().finally(() => { signOutRequest.current = null; });
+      return signOutRequest.current;
+    },
   }), [addDirect, cart, collector, mode, persistCart, router, wishlist]);
 
   return <MarketplaceContext.Provider value={value}>

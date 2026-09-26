@@ -19,10 +19,23 @@ export function SiteHeader({ overlay = false, showSearch = true, searchDisplay =
   const { cart, collector, authReady, signOut } = useMarketplace();
   const path = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+  const [signOutError, setSignOutError] = useState("");
   const searchParams = useSearchParams();
   const returnTo = path + (searchParams.toString() ? `?${searchParams}` : "");
   const signInHref = `/sign-in?returnTo=${encodeURIComponent(returnTo)}`;
   const count = cart.reduce((n, item) => n + item.quantity, 0);
+  async function handleSignOut() {
+    if (signingOut) return;
+    setSigningOut(true);
+    setSignOutError("");
+    try {
+      await signOut();
+      setMenuOpen(false);
+    } catch {
+      setSignOutError("Could not sign out. Please try again.");
+    } finally { setSigningOut(false); }
+  }
   const isCurrent = (href: string) => path === href || path.startsWith(`${href}/`);
   const menuGroups = [
     { title: "Discover", links: [
@@ -69,7 +82,8 @@ export function SiteHeader({ overlay = false, showSearch = true, searchDisplay =
           {collector.store && <Link href="/store">Seller Dashboard</Link>}
           <Link href="/account">Account & orders</Link><Link href="/wishlist">Wishlist</Link><Link href="/preorders">Your preorders</Link>
           <Link href="/resolution">Customer Support</Link><Link href="/account?view=hunts">Model Hunts</Link><Link href="/sell/model">Sell a Model</Link>
-          <button type="button" onClick={() => void signOut()}>Sign Out</button>
+          <button type="button" disabled={signingOut} onClick={() => void handleSignOut()}>{signingOut ? "Signing out…" : "Sign Out"}</button>
+          {signOutError && <p className="field-note form-error" role="alert">{signOutError}</p>}
         </div></details> : <Link className="account-sign-in" href={signInHref}>Sign in</Link>)}
       </div>
     </header>
@@ -83,7 +97,8 @@ export function SiteHeader({ overlay = false, showSearch = true, searchDisplay =
           {group.links.map(([href, label]) => <Link key={href} href={href} onClick={() => setMenuOpen(false)} aria-current={path === href ? "page" : undefined}><span>{label}</span><Icon name="arrow" /></Link>)}
         </section>)}
       </nav>
-      {collector && <button className="mobile-menu-sign-out" type="button" onClick={() => { setMenuOpen(false); void signOut(); }}>Sign Out</button>}
+      {collector && <button className="mobile-menu-sign-out" type="button" disabled={signingOut} onClick={() => void handleSignOut()}>{signingOut ? "Signing out…" : "Sign Out"}</button>}
+      {signOutError && <p className="field-note form-error" role="alert">{signOutError}</p>}
     </MobileSheet>
   </>;
 }
