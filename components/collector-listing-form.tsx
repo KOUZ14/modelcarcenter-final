@@ -17,6 +17,8 @@ import { countryName, SHIP_FROM_FIELD_NAMES, shipFromAddressValues } from "@/lib
 import { focusListingError, listingFieldLabel, listingFieldProps, listingFormErrors, listingInputError, requiredListingFieldMessage, type ListingFieldErrors } from "@/lib/listing-form-validation";
 import { ListingFieldError } from "./listing-field-error";
 import { ListingBuyerPreview } from "./listing-buyer-preview";
+import { buildListingPreview } from "@/lib/listing-preview";
+import type { ProductDetail } from "@/lib/types";
 import { getSelectedPhotoViews, photoAltForViews } from "@/lib/listing-evidence";
 import { listingEditorProgress } from "@/lib/listing-editor-progress";
 import { formatCondition } from "@/lib/format";
@@ -49,6 +51,7 @@ export function CollectorListingForm({
   prefill,
   marketplaceFeeBps,
   collectionCatalog,
+  catalogModel,
   collectionReturnTo,
   paymentSetup,
 }: {
@@ -59,6 +62,7 @@ export function CollectorListingForm({
   prefill: Record<string, string>;
   marketplaceFeeBps: number;
   collectionCatalog?: Record<string, unknown>;
+  catalogModel?: Record<string, unknown>;
   collectionReturnTo?: string;
   paymentSetup?: "returned" | "refresh" | "unavailable";
 }) {
@@ -92,7 +96,10 @@ export function CollectorListingForm({
   const [dirty, setDirty] = useState(false);
   const [savedAt, setSavedAt] = useState("");
   const [submitted, setSubmitted] = useState(false);
-  const [catalogSummary, setCatalogSummary] = useState<Record<string, unknown>>(product);
+  const [catalogSummary, setCatalogSummary] = useState<Record<string, unknown>>(catalogModel ?? product);
+  const [preview, setPreview] = useState<ProductDetail | null>(null);
+  const previewUrls = useRef<string[]>([]);
+  useEffect(() => () => { previewUrls.current.forEach(url => URL.revokeObjectURL(url)); }, []);
   const [values, setValues] = useState<Record<string, unknown>>({ ...product,
     price: product.priceCents == null ? "" : (Number(product.priceCents) / 100).toFixed(2), quantity: product.inventoryQuantity ?? 1,
     sellerDisplayName: seller?.storeName ?? displayName, sellerDescription: seller?.description ?? "", sellerSpecialty: seller?.specialty ?? "", sellerPackingApproach: seller?.packingApproach ?? "",
@@ -398,6 +405,25 @@ export function CollectorListingForm({
   const text = (key: string) => String(values[key] ?? "").trim();
   const photoSummary = `${images.length} uploaded${files.length ? ` · ${files.length} pending` : ""} · ${progress.photo.complete ? "Required views covered" : `${progress.photo.missing.length} photo requirement${progress.photo.missing.length === 1 ? "" : "s"} missing`}`;
   const catalogTitle = String(catalogSummary.title || [catalogSummary.modelManufacturer, catalogSummary.vehicleMake, catalogSummary.vehicleModel].filter(Boolean).join(" "));
+  function openPreview() {
+    if (!formRef.current || busy || photoBusy) return;
+    const current = { ...values, ...Object.fromEntries(new FormData(formRef.current)) };
+    if (selectedShipFromAddress) {
+      current.shippingOriginRegion = selectedShipFromAddress.region ?? "";
+      current.shippingOriginCountry = selectedShipFromAddress.country;
+    }
+    const pendingImages = files.map((file, index) => {
+      const url = URL.createObjectURL(file);
+      previewUrls.current.push(url);
+      return { id: `pending-${index}`, url, alt: photoAltForViews(getSelectedPhotoViews(file), file.name) };
+    });
+    setPreview(buildListingPreview({ values: current, catalog: { ...product, ...catalogSummary, id: productId }, seller, images, primaryImageUrl, pendingImages, pendingCoverUrl: pendingCover ? pendingImages[files.indexOf(pendingCover)]?.url : undefined }));
+  }
+  function closePreview() {
+    setPreview(null);
+    previewUrls.current.forEach(url => URL.revokeObjectURL(url));
+    previewUrls.current = [];
+  }
   const remaining = [
     ...(!progress.conditionComplete ? [{ section: "condition", label: "Complete condition disclosures", field: Object.keys(progress.conditionErrors)[0] }] : []),
     ...(!progress.photo.complete ? [{ section: "condition", label: `Photos: ${progress.photo.missing.join(", ")}`, field: "images" }] : []),
@@ -588,12 +614,16 @@ export function CollectorListingForm({
         <details className="listing-section" id="listing-review" open={Boolean(paymentSetup)}>
           <summary>
             <span>
-              <span className="step-label">5 · Preview</span>
-              <span className="listing-section-title">Preview &amp; submit</span><span className="listing-section-progress">{remaining.length ? `${remaining.length} step${remaining.length === 1 ? "" : "s"} remaining` : "Ready for review"}</span>
+              <span className="step-label">5 · Review</span>
+              <span className="listing-section-title">Review &amp; submit</span><span className="listing-section-progress">{remaining.length ? `${remaining.length} step${remaining.length === 1 ? "" : "s"} remaining` : "Ready for review"}</span>
             </span>
           </summary>
           <div className="listing-section-content listing-submit">
-          <ListingBuyerPreview values={values} title={text("title") || catalogTitle} coverUrl={primaryImageUrl || images[0]?.url} coverFile={pendingCover ?? (!images.length && !primaryImageUrl ? files[0] : undefined)} seller={seller} />
+          <div className="listing-review-summary">
+            <div><h3>{text("title") || catalogTitle || "Your listing"}</h3><p>{/^\d+(\.\d{1,2})?$/.test(text("price")) ? `$${Number(text("price")).toFixed(2)}` : "Price needed"} · {images.length + files.length} photos · Model condition: {formatCondition(text("modelCondition")) || "Not entered"}</p></div>
+            <button type="button" className="button dark" disabled={busy || photoBusy} onClick={openPreview}>Preview listing</button>
+            <p className="field-note">See the buyer page with your current edits and photo order. Purchase actions are inactive in preview.</p>
+          </div>
           <div className="listing-remaining"><h3>{remaining.length ? "Before you submit" : "Ready to submit"}</h3>{remaining.length > 0 && <ul>{remaining.map(item => <li key={item.label}><button className="text-action" type="button" onClick={() => openSection(item.section, item.field)}>{item.label}</button></li>)}</ul>}</div>
           <div>
             <p>{stripeReady ? "Your payout account is connected. Submitted listings are reviewed before going live." : "Connect your payout account to receive money from your sales. We’ll save your draft and photos before opening secure setup with Stripe, then bring you back to this listing."}</p>
@@ -610,11 +640,12 @@ export function CollectorListingForm({
         </fieldset>
         {catalogReady && <div className="listing-action-bar" aria-label="Save and submit listing">
           <div className="listing-save-status"><strong role="status">{busy ? "Saving draft and photos…" : photoBusy ? "Saving photo changes…" : dirty ? "Unsaved changes" : savedAt ? `Saved at ${savedAt}` : productId ? "Saved draft loaded" : "Draft not yet saved"}</strong>
-          <button type="button" className="text-action" onClick={() => openSection("review")}>{submitted ? "Submitted for review" : remaining.length ? `${remaining.length} step${remaining.length === 1 ? "" : "s"} to review · View` : "Preview listing"}</button></div>
+          <button type="button" className="text-action" onClick={() => openSection("review")}>{submitted ? "Submitted for review" : remaining.length ? `${remaining.length} step${remaining.length === 1 ? "" : "s"} to review · View` : "Review & submit"}</button></div>
           <div className="row-actions"><button className="button outline" type="submit" value="save" disabled={busy || photoBusy}>{busy ? "Saving…" : "Save draft"}</button><button className="button dark" type="submit" value="submit" disabled={busy || photoBusy || submitted}>{busy ? "Saving…" : "Submit for review"}</button></div>
           {message && <p className="admin-message" role="status">{message}</p>}
         </div>}
       </form>
+      {preview && <ListingBuyerPreview product={preview} onClose={closePreview} />}
       <p><Link className="text-link" href="/account?view=listings">Back to My Listings</Link></p>
     </div>
   );

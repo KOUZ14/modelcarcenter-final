@@ -55,6 +55,10 @@ export type ProductSummary = {
 
 export type ProductDetail = ProductSummary & {
   sellerDescription: string;
+  sellerSpecialty?: string;
+  sellerPackingApproach?: string;
+  shippingOriginRegion?: string | null;
+  shippingOriginCountry?: string;
   sellerWebsiteUrl: string | null;
   sellerLogoUrl: string | null;
   shippingPolicySummary: string;

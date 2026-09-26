@@ -14,7 +14,7 @@ type Estimate = {
   options: Array<{ provider: string; serviceLevel: string; amountCents: number; currency: string }>;
 };
 
-export function ProductShippingEstimate({ product }: { product: ProductSummary }) {
+export function ProductShippingEstimate({ product, preview = false }: { product: ProductSummary; preview?: boolean }) {
   const [open, setOpen] = useState(false);
   const [zip, setZip] = useShippingZip();
   const [loading, setLoading] = useState(false);
@@ -29,6 +29,7 @@ export function ProductShippingEstimate({ product }: { product: ProductSummary }
 
   async function calculate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (preview) return;
     pending.current?.abort();
     const controller = new AbortController();
     pending.current = controller;
@@ -57,9 +58,9 @@ export function ProductShippingEstimate({ product }: { product: ProductSummary }
 
   return <div>
     <div className="product-price-row">
-      <p className="detail-price">{formatMoney(product.priceCents, product.currency)}</p>
+      <p className="detail-price">{preview && !product.priceCents ? "Price not entered" : formatMoney(product.priceCents, product.currency)}</p>
       {shippingMode === "calculated" ? product.availableQuantity > 0 && (
-        <button className="text-button shipping-estimate-toggle" type="button" aria-expanded={open} aria-controls={panelId} onClick={() => setOpen(!open)}>
+        <button className="text-button shipping-estimate-toggle" type="button" disabled={preview} aria-expanded={open} aria-controls={panelId} onClick={() => { if (!preview) setOpen(!open); }}>
           Estimate shipping
         </button>
       ) : <span className="product-shipping-price">{shippingMode === "free" ? "Free shipping" : `${formatMoney(product.defaultShippingCents, product.currency)} flat-rate shipping per order`}</span>}

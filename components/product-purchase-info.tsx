@@ -3,10 +3,10 @@ import type { ProductDetail } from "@/lib/types";
 import { activeProtectionPolicy } from "@/lib/protection";
 import styles from "./purchase-info.module.css";
 
-export function ProductSellerLine({ product }: { product: ProductDetail }) {
+export function ProductSellerLine({ product, preview = false }: { product: ProductDetail; preview?: boolean }) {
   return <div className={styles.sellerLine}>
-    <p>Sold by <Link href={`/sellers/${product.sellerSlug}`}>{product.sellerName}</Link></p>
-    <Link className={styles.messageSeller} href={`/messages?product=${encodeURIComponent(product.id)}`}>Message seller</Link>
+    <p>Sold by {preview ? <span>{product.sellerName}</span> : <Link href={`/sellers/${product.sellerSlug}`}>{product.sellerName}</Link>}</p>
+    {preview ? <span className={styles.messageSeller} aria-disabled="true">Message seller</span> : <Link className={styles.messageSeller} href={`/messages?product=${encodeURIComponent(product.id)}`}>Message seller</Link>}
   </div>;
 }
 

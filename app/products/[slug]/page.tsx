@@ -1,22 +1,15 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { ModelCommunity } from "@/components/model-community";
 import { notFound } from "next/navigation";
 import { getCatalogListings, getProductBySlug, getRelatedProducts } from "@/lib/catalog";
-import { ProductGallery } from "@/components/product-gallery";
-import { ProductPurchase } from "@/components/product-purchase";
-import { ProductPurchaseInfo, ProductSellerLine } from "@/components/product-purchase-info";
 import { TrackEvent } from "@/components/track-event";
-import { ProductShippingEstimate } from "@/components/product-shipping-estimate";
 import { ProductCard } from "@/components/product-card";
-import { formatCondition, formatMoney } from "@/lib/format";
 import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
 import { SellerReputation } from "@/components/seller-reputation";
 import { getSellerReputation } from "@/lib/reputation";
-import { ProductSpecifications } from "@/components/product-specifications";
+import { ProductListingView } from "@/components/product-listing-view";
 import { ProductOtherOffers } from "@/components/product-other-offers";
-import "@/components/product-detail.css";
 
 export const dynamic = "force-dynamic";
 
@@ -80,35 +73,8 @@ export default async function ProductPage({
       <TrackEvent name="listing_viewed" />
       <SiteHeader />
       <div id="main-content" tabIndex={-1} className="inner-page product-page shell">
-        <nav className="breadcrumbs" aria-label="Breadcrumb">
-          <Link href="/marketplace">Shop</Link>
-          <span aria-hidden="true">/</span>
-          <span aria-current="page" title={product.title}>{product.title}</span>
-        </nav>
-        <div className="product-detail">
-          <ProductGallery
-            images={product.images}
-            productName={`${product.modelManufacturer} ${product.title}`}
-          />
-          <aside className="product-summary">
-            <p className="eyebrow">
-              {product.scale} · {product.modelManufacturer}
-            </p>
-            <h1>{product.title}</h1>
-            {product.availabilityType !== "preorder" ? <ProductShippingEstimate key={product.id} product={product} /> : <p className="detail-price">{product.priceCents ? formatMoney(product.priceCents, product.currency) : "Price to be announced"}</p>}
-            <p className="listing-condition-summary"><strong>Model: {formatCondition(product.modelCondition)}</strong> · Box: {formatCondition(product.originalBoxStatus)}</p>
-            <p className="stock-line">
-              {product.availabilityType === "preorder" ? "Upcoming release · See preorder terms below" : product.availableQuantity < 1 ? "Sold out"
-                : product.availableQuantity === 1 ? "Only 1 available" : `${product.availableQuantity} available`}
-            </p>
-            <ProductPurchase key={product.id} product={product} />
-            <ProductSellerLine product={product} />
-            {product.conditionNotes && <details className="listing-condition-notes"><summary>Seller condition notes</summary><p>{product.conditionNotes}</p></details>}
-            <ProductPurchaseInfo product={product} />
-          </aside>
-        </div>
+        <ProductListingView product={product} />
         {product.catalogProductId && <ProductOtherOffers catalogId={product.catalogProductId} offers={otherOffers} totalOffers={catalogOffers?.listings.length ?? 0} />}
-        <ProductSpecifications product={product} />
         {reputation && (
           <SellerReputation
             reputation={reputation}

@@ -231,6 +231,10 @@ export async function getProductBySlug(
     .select({
       ...productSelection,
       sellerDescription: sellers.description,
+      sellerSpecialty: sellers.specialty,
+      sellerPackingApproach: sellers.packingApproach,
+      shippingOriginRegion: sellers.shippingOriginRegion,
+      shippingOriginCountry: sellers.shippingOriginCountry,
       sellerWebsiteUrl: sellers.websiteUrl,
       sellerLogoUrl: sellers.logoUrl,
       shippingPolicySummary: sellers.shippingPolicySummary,

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { resolveObjectURL } from "node:buffer";
 import test from "node:test";
 import { mkdtemp, readdir, readFile, writeFile, unlink, rmdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -111,6 +112,29 @@ test("connecting payments saves the collector's current listing and photos befor
       },
     };
   }
+
+  await t.test("opening and returning from preview preserves unsaved entries and files without saving or uploading", () => {
+    const ui = editor();
+    ui.form.values.title = "Unsaved preview title";
+    ui.photos(["front.jpg", "detail.jpg"]);
+    const gallery = ui.node(node => node.type === "photo-fields").props;
+    gallery.onCoverFileChange(gallery.files[1]); ui.render();
+    ui.node(node => node.type === "button" && node.props.children === "Preview listing").props.onClick();
+    ui.render();
+    const preview = ui.node(node => node.type === "buyer-preview").props;
+    assert.equal(preview.product.title, "Unsaved preview title");
+    assert.match(preview.product.images[0].alt, /detail.jpg/);
+    assert.equal(preview.product.images.length, 2);
+    const coverUrl = preview.product.images[0].url;
+    assert.ok(resolveObjectURL(coverUrl));
+    assert.deepEqual(calls, []);
+    preview.onClose(); ui.render();
+    assert.equal(resolveObjectURL(coverUrl), undefined);
+    assert.equal(ui.node(node => node.type === "buyer-preview"), undefined);
+    assert.equal(ui.form.values.title, "Unsaved preview title");
+    assert.equal(ui.node(node => node.type === "photo-fields").props.files.length, 2);
+    assert.deepEqual(calls, []);
+  });
 
   await t.test("save and every photo complete before redirect; repeated clicks create one draft", async () => {
     const ui = editor(); ui.accept(); ui.photos(["front.jpg", "back.jpg"]);

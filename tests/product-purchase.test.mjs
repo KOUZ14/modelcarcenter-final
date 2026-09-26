@@ -73,9 +73,9 @@ test("listing purchase actions share cart limits and activate the mobile bar onl
     }
     return null;
   }
-  function render(overrides = {}) {
+  function render(overrides = {}, preview = false) {
     stateIndex = refIndex = effectIndex = 0;
-    const tree = ProductPurchase({ product: { ...product, ...overrides } });
+    const tree = ProductPurchase({ product: { ...product, ...overrides }, preview });
     const actions = find(tree, node => node.props?.className === "purchase-actions");
     refs[0].current = actions ? { id: "purchase-actions" } : null;
     pending.splice(0).forEach(callback => callback());
@@ -124,4 +124,12 @@ test("listing purchase actions share cart limits and activate the mobile bar onl
     assert.equal(sticky(tree), null);
   }
   assert.equal(observer.disconnected, true, "Observers are cleaned up when the listing cannot be purchased");
+  fixture.marketplace.cart = [{ productId: product.id, quantity: 3 }];
+  const beforePreview = calls.length, savedBeforePreview = saved;
+  tree = render({}, true);
+  assert.equal(buy(tree).props.disabled, true);
+  assert.equal(buy(tree).props.href, undefined, "An existing cart cannot turn preview into an active cart link");
+  assert.equal(save(tree).props.disabled, true);
+  buy(tree).props.onClick(); save(tree).props.onClick();
+  assert.equal(calls.length, beforePreview); assert.equal(saved, savedBeforePreview);
 });

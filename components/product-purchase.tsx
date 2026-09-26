@@ -9,7 +9,7 @@ import { useMarketplace } from "./marketplace-provider";
 import { Icon } from "./icons";
 import { PreorderOffer } from "./preorder-offer";
 
-export function ProductPurchase({ product }: { product: ProductSummary }) {
+export function ProductPurchase({ product, preview = false }: { product: ProductSummary; preview?: boolean }) {
   const { addToCart, toggleWishlist, wishlistHas, collector, cart, authReady } = useMarketplace();
   const [added, setAdded] = useState(false);
   const [showSticky, setShowSticky] = useState(false);
@@ -20,10 +20,10 @@ export function ProductPurchase({ product }: { product: ProductSummary }) {
   >("idle");
   const [alertError, setAlertError] = useState("");
   const email = emailOverride ?? collector?.email ?? "";
-  const saved = wishlistHas(product.id);
+  const saved = !preview && wishlistHas(product.id);
   const canBuy = product.availabilityType !== "preorder" && product.availableQuantity > 0;
   const inCart = cart.find(item => item.productId === product.id)?.quantity ?? 0;
-  const atLimit = inCart >= Math.min(10, product.availableQuantity);
+  const atLimit = !preview && inCart >= Math.min(10, product.availableQuantity);
 
   useEffect(() => {
     if (!added) return;
@@ -43,19 +43,20 @@ export function ProductPurchase({ product }: { product: ProductSummary }) {
   }, [canBuy, product.id]);
 
   function add() {
-    if (authReady && canBuy && !atLimit && !added && addToCart(product)) setAdded(true);
+    if (!preview && authReady && canBuy && !atLimit && !added && addToCart(product)) setAdded(true);
   }
 
   const cartAction = (sticky = false) => atLimit && !added ? (
     <Link className="button dark buy-button" href="/cart">View cart</Link>
   ) : (
-    <button className="button dark buy-button" type="button" disabled={!authReady || added}
+    <button className="button dark buy-button" type="button" disabled={preview || !authReady || added}
       aria-describedby={sticky ? undefined : `seller-checkout-${product.id}`} onClick={add}>
       {added ? <><Icon name="check"/> Added to cart</> : "Add to cart"}
     </button>
   );
   async function subscribe(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (preview) return;
     setAlertState("loading");
     setAlertError("");
     try {
@@ -76,7 +77,7 @@ export function ProductPurchase({ product }: { product: ProductSummary }) {
       setAlertState("error");
     }
   }
-  if (product.availabilityType === "preorder") return <PreorderOffer product={product}/>;
+  if (product.availabilityType === "preorder") return preview ? <button className="button dark" disabled>Preorder</button> : <PreorderOffer product={product}/>;
   if (product.availableQuantity < 1) {
     return <div className="restock-panel">
       <h2>Get a restock alert</h2>
@@ -85,23 +86,23 @@ export function ProductPurchase({ product }: { product: ProductSummary }) {
         <label>Email address<input type="email" required autoComplete="email" value={email} onChange={(event) => setEmailOverride(event.target.value)}/></label>
         <AdultConsent/>
         <p className="collection-notice">One requested restock email. You can stop optional emails using its unsubscribe link or by contacting support. See our <Link href="/privacy">Privacy Policy</Link>.</p>
-        <button className="button dark" disabled={alertState === "loading"}>{alertState === "loading" ? "Setting alert…" : "Notify me"}</button>
+        <button className="button dark" disabled={preview || alertState === "loading"}>{alertState === "loading" ? "Setting alert…" : "Notify me"}</button>
         {alertState === "error" && <p className="form-error" role="alert">{alertError}</p>}
       </form>}
       <div className="restock-secondary-actions">
-        <button className="save-sold-out" type="button" aria-pressed={saved} onClick={() => toggleWishlist(product.id)}><Icon name="heart"/> {saved ? "Listing saved" : "Save listing"}</button>
+        <button className="save-sold-out" type="button" disabled={preview} aria-pressed={saved} onClick={() => { if (!preview) toggleWishlist(product.id); }}><Icon name="heart"/> {saved ? "Listing saved" : "Save listing"}</button>
       </div>
     </div>;
   }
   return <div className="product-purchase">
     <div className="purchase-actions" ref={actionsRef}>
       {cartAction()}
-      <button className="button outline purchase-save" type="button" aria-label="Save listing" title={saved ? "Listing saved" : "Save listing"} aria-pressed={saved} onClick={() => toggleWishlist(product.id)}><Icon name="heart"/></button>
+      <button className="button outline purchase-save" type="button" disabled={preview} aria-label="Save listing" title={saved ? "Listing saved" : "Save listing"} aria-pressed={saved} onClick={() => { if (!preview) toggleWishlist(product.id); }}><Icon name="heart"/></button>
     </div>
     <span className="sr-only" role="status">{added ? `${product.title} added to cart.` : ""}</span>
-    <p className="seller-checkout-notice" id={`seller-checkout-${product.id}`}>Shop several sellers in one checkout. Each seller has separate shipping.{cart.some((item) => item.sellerId !== product.sellerId) && <> Adding this model to {product.sellerName}&apos;s group keeps all your other items in your cart.</>}</p>
+    <p className="seller-checkout-notice" id={`seller-checkout-${product.id}`}>Shop several sellers in one checkout. Each seller has separate shipping.{!preview && cart.some((item) => item.sellerId !== product.sellerId) && <> Adding this model to {product.sellerName}&apos;s group keeps all your other items in your cart.</>}</p>
     {showSticky && <div className="product-sticky-purchase" role="region" aria-label="Purchase this listing">
-      <Link className="sticky-shop-link" href="/marketplace" aria-label="Back to Shop"><Icon name="search"/><span>Shop</span></Link>
+      {preview ? <span className="sticky-shop-link" aria-disabled="true"><Icon name="search"/><span>Shop</span></span> : <Link className="sticky-shop-link" href="/marketplace" aria-label="Back to Shop"><Icon name="search"/><span>Shop</span></Link>}
       <div className="sticky-price"><strong>{formatMoney(product.priceCents, product.currency)}</strong><span>Item price</span></div>
       {cartAction(true)}
     </div>}

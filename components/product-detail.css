@@ -1,4 +1,32 @@
 .product-detail-page .product-summary h1 { margin-bottom: 8px; }
+.listing-preview-page { width: 100vw; max-width: none; height: 100dvh; max-height: none; margin: 0; padding: 0; border: 0; color: var(--ink); background: var(--paper, #f8f7f4); overflow: auto; }
+.listing-preview-page::backdrop { background: #fff; }
+.listing-preview-page .product-page { padding-bottom: 110px; }
+html:has(.listing-preview-page[open]) { overflow: hidden; }
+.listing-preview-bar { position: sticky; top: 0; z-index: 110; display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 60px; padding: 8px max(16px, calc((100vw - 1440px) / 2)); background: white; border-bottom: 1px solid var(--line); font-size: 14px; }
+.listing-preview-bar .button { min-height: 44px; padding: 10px 14px; font-size: 13px; white-space: nowrap; }
+.listing-review-summary { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; padding-bottom: 20px; border-bottom: 1px solid var(--line); }
+.listing-review-summary h3 { margin: 0 0 8px; font-size: 20px; }
+.listing-review-summary p { margin: 0; line-height: 1.5; font-size: 14px; }
+.listing-review-summary > .field-note { flex-basis: 100%; }
+.listing-issues-link { display: block; margin: 10px 0; padding: 10px 12px; background: #fff3df; border-left: 3px solid #865321; font-size: 14px; line-height: 1.5; text-decoration: underline; }
+.product-condition-details, .product-seller-details { margin-top: 32px; padding-top: 28px; border-top: 1px solid var(--line); scroll-margin-top: 80px; }
+.product-condition-details h2, .product-seller-details h2 { margin: 0 0 18px; font-size: 26px; line-height: 1.2; }
+.product-condition-details h3, .product-seller-details h3, .product-information-intro h3 { margin: 0 0 8px; font-size: 17px; line-height: 1.4; }
+.product-condition-details p, .product-seller-details p { font-size: 14px; line-height: 1.6; white-space: pre-line; overflow-wrap: anywhere; }
+.listing-specs.condition-grades { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.condition-disclosures { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 16px; margin-top: 20px; }
+.condition-disclosures article { padding: 16px; background: #fff3df; border-left: 3px solid #865321; }
+.condition-disclosures p { margin: 0; }
+.condition-clear, .listing-minor-details { color: var(--muted); font-size: 13px; line-height: 1.6; }
+.condition-additional { margin-top: 18px; }
+.condition-photo-coverage { font-size: 13px; border-top: 1px solid var(--line); margin-top: 16px; }
+.condition-photo-coverage summary { min-height: 44px; padding: 12px 0; cursor: pointer; }
+.product-seller-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+.product-seller-grid article { padding: 20px; border: 1px solid var(--line); background: white; }
+.product-seller-grid p { margin: 8px 0 0; }
+.product-shipping-details { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--line); }
+.product-detail-page [aria-disabled="true"], .product-detail-page button:disabled { cursor: default; opacity: .6; }
 .product-detail-page .product-price-row { margin: 8px 0; }
 .product-detail-page .listing-condition-summary { font-size: 14px; line-height: 1.5; margin: 8px 0; }
 .product-detail-page .stock-line { margin: 8px 0; }
@@ -47,6 +75,12 @@
 .all-collector-discussion { display: inline-flex; align-items: center; min-height: 44px; margin-top: 8px; font-size: 14px; }
 
 @media (max-width: 820px) {
+  .listing-preview-bar { gap: 8px; font-size: 12px; }
+  .listing-preview-bar strong { max-width: 16ch; line-height: 1.4; }
+  .listing-preview-bar .button { font-size: 12px; padding-inline: 10px; }
+  .product-seller-grid { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .listing-specs.condition-grades { grid-template-columns: minmax(0, 1fr); }
+  .listing-specs.condition-grades > div { flex-direction: row; align-items: baseline; justify-content: space-between; gap: 12px; }
   .product-detail-page .collector-header { min-height: 64px; }
   .product-detail-page .header-search { display: none; }
   .product-detail-page .inner-page.product-page { padding-top: 8px; }
