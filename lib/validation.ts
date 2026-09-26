@@ -1,7 +1,8 @@
 import { normalizeSearch } from "./business.ts";
-import { listingPhotoEvidence, type EvidenceImage } from "./listing-evidence.ts";
+import { isFactorySealed, listingPhotoEvidence, type EvidenceImage } from "./listing-evidence.ts";
 import { isCurrentPolicyVersion } from "./legal.ts";
 import { addressErrors, normalizeState, SHIP_FROM_FIELD_NAMES, shipFromAddressValues, type AddressField } from "./address.ts";
+import { listingFieldLabel, requiredListingFieldMessage } from "./listing-form-validation.ts";
 
 export class ValidationError extends Error {
   fields: Record<string, string>;
@@ -41,7 +42,10 @@ export function optionalHttpUrl(value: unknown) {
 
 export function requiredString(value: unknown, label: string, max = 200) {
   const result = cleanText(value, max);
-  if (!result) throw new ValidationError(`${label} is required.`, { [label]: "Required" });
+  if (!result) {
+    const message = requiredListingFieldMessage(label);
+    throw new ValidationError(message, { [label]: message });
+  }
   return result;
 }
 
@@ -49,9 +53,8 @@ export function integer(value: unknown, label: string, min: number, max: number)
   const raw = typeof value === "number" ? String(value) : String(value ?? "").trim();
   const parsed = /^-?\d+$/.test(raw) ? Number(raw) : Number.NaN;
   if (!Number.isInteger(parsed) || parsed < min || parsed > max) {
-    throw new ValidationError(`${label} must be between ${min} and ${max}.`, {
-      [label]: "Invalid value",
-    });
+    const message = `${listingFieldLabel(label)} must be a whole number between ${min} and ${max}.`;
+    throw new ValidationError(message, { [label]: message });
   }
   return parsed;
 }
@@ -59,11 +62,13 @@ export function integer(value: unknown, label: string, min: number, max: number)
 export function moneyToCents(value: unknown, label = "price") {
   const normalized = String(value ?? "").trim().replace(/^\$/, "");
   if (!/^\d+(\.\d{1,2})?$/.test(normalized)) {
-    throw new ValidationError(`${label} must be a valid amount with no more than two decimals.`);
+    const message = `${listingFieldLabel(label)} must be a valid amount with no more than two decimals.`;
+    throw new ValidationError(message, { [label]: message });
   }
   const cents = Math.round(Number(normalized) * 100);
   if (!Number.isSafeInteger(cents) || cents < 0 || cents > 100_000_000) {
-    throw new ValidationError(`${label} is outside the supported range.`);
+    const message = `${listingFieldLabel(label)} is outside the supported range.`;
+    throw new ValidationError(message, { [label]: message });
   }
   return cents;
 }
@@ -141,7 +146,8 @@ export const modelConditions = [
 ] as const;
 
 export const packagingConditions = [
-  "sealed",
+  "sealed", // Legacy: sealed, physical grade not recorded.
+  "sealed_mint", "sealed_excellent", "sealed_good", "sealed_fair", "sealed_poor",
   "mint",
   "excellent",
   "good",
@@ -197,7 +203,7 @@ export function legacyConditionFromCollectibleDetails(input: {
   modelCondition: (typeof modelConditions)[number];
   packagingCondition: (typeof packagingConditions)[number];
 }) {
-  if (input.packagingCondition === "sealed" && input.modelCondition === "mint")
+  if (isFactorySealed(input.packagingCondition) && input.modelCondition === "mint")
     return "new_sealed" as const;
   if (["mint", "near_mint"].includes(input.modelCondition))
     return "new_opened" as const;
@@ -207,6 +213,14 @@ export function legacyConditionFromCollectibleDetails(input: {
 }
 
 export function parseCollectibleDetails(payload: Record<string, unknown>) {
+  const fields: Record<string, string> = {};
+  for (const [name, options] of Object.entries({ modelCondition: modelConditions, packagingCondition: packagingConditions, originalBoxStatus: originalBoxStatuses, coaStatus: coaStatuses })) {
+    if (!(options as readonly string[]).includes(cleanText(payload[name], 40))) fields[name] = `Choose ${listingFieldLabel(name).toLowerCase()}.`;
+  }
+  for (const name of ["missingParts", "defects", "restorationCustomization"]) {
+    if (!cleanText(payload[name], 2_000)) fields[name] = requiredListingFieldMessage(name);
+  }
+  if (Object.keys(fields).length) throw new ValidationError("Check the highlighted condition and disclosure fields.", fields);
   const modelCondition = supportedValue(
     payload.modelCondition,
     modelConditions,
@@ -228,6 +242,7 @@ export function parseCollectibleDetails(payload: Record<string, unknown>) {
   ) {
     throw new ValidationError(
       "Packaging condition and original-box status must agree when no box is included.",
+      { packagingCondition: "Choose “Not included” for both packaging and original box if there is no box.", originalBoxStatus: "Choose “Not included” for both packaging and original box if there is no box." },
     );
   }
   return {
@@ -245,7 +260,7 @@ export function parseCollectibleDetails(payload: Record<string, unknown>) {
     productNumber: cleanText(payload.productNumber, 150) || null,
     editionSerial: cleanText(payload.editionSerial, 150) || null,
     coaStatus: supportedValue(payload.coaStatus, coaStatuses, "COA status"),
-    accessories: requiredString(payload.accessories, "accessories", 2_000),
+    accessories: cleanText(payload.accessories, 2_000),
     provenance: cleanText(payload.provenance, 2_000),
     photoFrontChecked: checked(payload.photoFrontChecked),
     photoRearChecked: checked(payload.photoRearChecked),
@@ -278,34 +293,25 @@ export function assertCollectibleListingReady(
   listing: ListingReadiness,
   images: EvidenceImage[] | number,
 ) {
-  if (
-    listing.modelCondition === "not_specified" ||
-    listing.packagingCondition === "not_specified" ||
-    listing.originalBoxStatus === "not_specified" ||
-    listing.coaStatus === "not_specified" ||
-    !listing.missingParts.trim() ||
-    !listing.defects.trim() ||
-    !listing.restorationCustomization.trim() ||
-    !listing.accessories.trim()
-  ) {
-    throw new ValidationError(
-      "Complete every required collectible condition and disclosure field before publishing.",
-    );
-  }
+  parseCollectibleDetails(listing);
   const imageCount = typeof images === "number" ? images : images.length;
-  const minimumPhotos = listing.packagingCondition === "sealed" ? 2 : 4;
+  const minimumPhotos = isFactorySealed(listing.packagingCondition) ? 2 : 4;
   if (imageCount < minimumPhotos) {
+    const message = `Add at least ${minimumPhotos === 4 ? "four" : "two"} photos of the actual item covering the required views before publishing.`;
     throw new ValidationError(
-      `Add at least ${minimumPhotos === 4 ? "four" : "two"} photos of the actual item covering the required views before publishing.`,
+      message, { images: message },
     );
   }
   if (typeof images !== "number") {
     const evidence = listingPhotoEvidence(listing, images);
-    if (!evidence.complete) throw new ValidationError(`Label the photos showing: ${evidence.missing.join(", ")}. Factory-sealed models can stay sealed.`);
+    if (!evidence.complete) {
+      const message = `Label the photos showing: ${evidence.missing.join(", ")}. Factory-sealed models can stay sealed.`;
+      throw new ValidationError(message, { images: message });
+    }
     return;
   }
   const incomplete = listingPhotoChecklist.filter(({ key }) => !listing[key] &&
-    !(listing.packagingCondition === "sealed" && ["photoRearChecked", "photoSidesChecked", "photoBaseChecked"].includes(key)) &&
+    !(isFactorySealed(listing.packagingCondition) && ["photoRearChecked", "photoSidesChecked", "photoBaseChecked"].includes(key)) &&
     !(listing.originalBoxStatus === "not_included" && key === "photoPackagingChecked"));
   if (incomplete.length) {
     throw new ValidationError(
@@ -374,11 +380,16 @@ export function validateShipFromFields(payload: Record<string, unknown>) {
 
 function listingPackageDecimal(value: unknown, label: string, max: number) {
   const text = String(value ?? "").trim();
-  if (!/^\d+(?:\.\d{1,2})?$/.test(text))
-    throw new ValidationError(`${label} must be a positive number with up to two decimal places.`);
+  const field = label.replace(/ ([a-z])/g, (_, letter: string) => letter.toUpperCase());
+  if (!/^\d+(?:\.\d{1,2})?$/.test(text)) {
+    const message = `Enter a positive ${label} with up to two decimal places.`;
+    throw new ValidationError(message, { [field]: message });
+  }
   const number = Number(text);
-  if (!Number.isFinite(number) || number <= 0 || number > max)
-    throw new ValidationError(`${label} must be greater than 0 and no more than ${max}.`);
+  if (!Number.isFinite(number) || number <= 0 || number > max) {
+    const message = `${listingFieldLabel(field)} must be greater than 0 and no more than ${max}.`;
+    throw new ValidationError(message, { [field]: message });
+  }
   return String(Number(number.toFixed(2)));
 }
 

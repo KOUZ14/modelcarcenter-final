@@ -98,6 +98,7 @@ export async function saveCollectorListing(input: {
     if (values.inventoryQuantity < owned.product.reservedQuantity) {
       throw new ValidationError(
         `Quantity cannot be below ${owned.product.reservedQuantity} reserved item(s).`,
+        { quantity: `Enter at least ${owned.product.reservedQuantity} to cover reserved items.` },
       );
     }
     const nextStatus =
@@ -183,7 +184,7 @@ async function resolveShipFromAddress(
       )
       .limit(1);
     if (!selected[0]) {
-      throw new ValidationError("Choose one of your saved ship-from addresses.");
+      throw new ValidationError("Choose one of your saved ship-from addresses.", { shipFromAddressId: "Choose a saved address or add a new one." });
     }
     return selected[0];
   }
@@ -316,7 +317,14 @@ export async function submitCollectorListing(
       "Connect your bank account to receive payments before submitting this listing.",
     );
   }
-  if (!sellerPublicProfileComplete(seller)) throw new ValidationError("Before review, add a seller introduction (30 characters), specialty, general shipping location, and packing approach (20 characters). Your draft is saved.");
+  if (!sellerPublicProfileComplete(seller)) {
+    const fields: Record<string, string> = {};
+    if (seller.description.trim().length < 30) fields.sellerDescription = "Introduce yourself to buyers in at least 30 characters.";
+    if (!seller.specialty?.trim()) fields.sellerSpecialty = "Describe the scales, makers, or themes you collect.";
+    if ((seller.packingApproach?.trim().length ?? 0) < 20) fields.sellerPackingApproach = "Describe how you protect models for shipping in at least 20 characters.";
+    if (!seller.shippingOriginCountry.trim() || !seller.shippingOriginRegion?.trim()) fields.shipFromAddressId = "Add a ship-from address with your country and state or region.";
+    throw new ValidationError("Complete the highlighted seller details before review. Your draft is saved.", fields);
+  }
   const evidenceImages = await getDb()
     .select({ alt: productImages.alt, url: productImages.url })
     .from(productImages)

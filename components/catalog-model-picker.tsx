@@ -1,19 +1,21 @@
 "use client";
 
 import { useId, useRef, useState } from "react";
+import Image from "next/image";
 import { catalogManufacturers, catalogScales, type CatalogModel } from "@/lib/catalog-product-rules";
 
 type InitialModel = {
   catalogProductId?: unknown; modelManufacturer?: unknown; vehicleMake?: unknown;
-  vehicleModel?: unknown; scale?: unknown; color?: unknown; productNumber?: unknown;
+  vehicleModel?: unknown; scale?: unknown; color?: unknown; productNumber?: unknown; primaryImageUrl?: unknown;
 };
 
-export function CatalogModelPicker({ initial, disabled, listingSaved, initialQuery = "", onReady }: {
+export function CatalogModelPicker({ initial, disabled, listingSaved, initialQuery = "", onReady, onModelChange }: {
   initial?: InitialModel | null;
   disabled?: boolean;
   listingSaved?: boolean;
   initialQuery?: string;
   onReady(ready: boolean): void;
+  onModelChange?(model: Record<string, unknown>): void;
 }) {
   const makerListId = useId();
   const fields = useRef<HTMLFieldSetElement>(null);
@@ -30,7 +32,7 @@ export function CatalogModelPicker({ initial, disabled, listingSaved, initialQue
   const requestSequence = useRef(0);
 
   function choose(model: CatalogModel) {
-    setSelected(model); setCreating(false); setNewModel(null); setSimilar([]); setError(""); onReady(true);
+    setSelected(model); setCreating(false); setNewModel(null); setSimilar([]); setError(""); onReady(true); onModelChange?.(model);
   }
 
   async function search() {
@@ -59,7 +61,7 @@ export function CatalogModelPicker({ initial, disabled, listingSaved, initialQue
       if (!response.ok) throw new Error(body.error || "The model could not be checked.");
       if (body.exact) { choose(body.exact); return; }
       if (body.similar?.length) { setCandidate(values); setSimilar(body.similar); return; }
-      setNewModel(values); setCreating(false); onReady(true);
+      setNewModel(values); setCreating(false); onReady(true); onModelChange?.(values);
     } catch (reason) { setError(reason instanceof Error ? reason.message : "The model could not be checked."); }
     finally { setBusy(false); }
   }
@@ -69,7 +71,7 @@ export function CatalogModelPicker({ initial, disabled, listingSaved, initialQue
   const summaryTitle = summary ? [summary.modelManufacturer, summary.vehicleMake, summary.vehicleModel, "vehicleVariant" in summary ? summary.vehicleVariant : ""].filter(Boolean).join(" ") : "";
   function modelRows(models: CatalogModel[]) {
     return <ul className="catalog-model-results">{models.map((model) => <li key={model.id}>
-      <div><strong>{model.title}</strong><p>{model.scale} · {model.color || "Color not specified"} · SKU {model.manufacturerSku || "unknown"}{model.livery ? ` · ${model.livery}` : ""}{model.releaseYear ? ` · Release ${model.releaseYear}` : ""}</p></div>
+      <div><strong>{model.title}</strong><p>{model.scale} · {model.color || "Color not specified"} · Manufacturer reference: {model.manufacturerSku || "Not recorded"}{model.livery ? ` · ${model.livery}` : ""}{model.releaseYear ? ` · Release ${model.releaseYear}` : ""}</p></div>
       <button className="button outline small" type="button" disabled={disabled || busy} onClick={() => choose(model)}>Use this model</button>
     </li>)}</ul>;
   }
@@ -77,11 +79,15 @@ export function CatalogModelPicker({ initial, disabled, listingSaved, initialQue
   return <section className="catalog-model-picker" aria-label="Find your model">
     <p className="step-label">Model catalog</p>
     {summary ? <>
-      <h2>{summaryTitle}</h2>
-      <p>{String(summary.scale ?? "")} · {String(summary.color || "Color not specified")} · SKU {String(selected?.manufacturerSku || newModel?.manufacturerSku || initial?.productNumber || "unknown")}</p>
+      <div className="catalog-identification">
+        {typeof summary.primaryImageUrl === "string" && summary.primaryImageUrl ? <Image src={summary.primaryImageUrl} alt="Model identification photo" width={96} height={72} unoptimized /> : <span className="catalog-photo-placeholder" aria-label="No reference photo">{String(summary.scale ?? "Model")}</span>}
+        <div><p className="eyebrow">Linked catalog model</p><h2>{summaryTitle}</h2></div>
+      </div>
+      <p>{String(summary.scale ?? "")} · {String(summary.color || "Color not specified")} · Manufacturer reference: {String(selected?.manufacturerSku || newModel?.manufacturerSku || initial?.productNumber || "Not recorded")}</p>
       <p>{newModel && !listingSaved ? "This model will be added to the shared MCC catalog when you save your listing." : "Your listing uses this shared catalog model. Add your price, quantity and condition below."}</p>
       {(lockedId || selected) && <input type="hidden" name="catalogProductId" value={lockedId || selected!.id} />}
       {newModel && Object.entries(newModel).map(([name, value]) => <input key={name} type="hidden" name={name} value={value} />)}
+      <a className="text-action" href={`mailto:support@modelcarcenter.com?subject=${encodeURIComponent(`Incorrect catalog details: ${summaryTitle}`)}&body=${encodeURIComponent(`Catalog model: ${lockedId || selected?.id || summaryTitle}\nDetails to correct: `)}`}>Report incorrect catalog details</a>
       {!lockedId && !listingSaved && <button className="text-action" type="button" disabled={disabled} onClick={() => { setSelected(null); setNewModel(null); setCandidate(null); setSimilar([]); onReady(false); }}>Change model</button>}
     </> : <>
       <h2>Find your model</h2>
@@ -120,7 +126,7 @@ export function CatalogModelPicker({ initial, disabled, listingSaved, initialQue
         </details>
         <button className="button dark small" type="button" onClick={() => void checkModel()}>Check model and continue</button>
       </fieldset>}
-      {similar.length > 0 && <div role="status"><h3>We found a similar model</h3><p>Check the color, livery, edition and year before choosing.</p>{modelRows(similar)}<button className="button outline small" type="button" disabled={disabled || busy} onClick={() => { if (candidate) { setNewModel({ ...candidate, confirmDifferentModel: "true" }); setCreating(false); setSimilar([]); onReady(true); } }}>This is a different model</button></div>}
+      {similar.length > 0 && <div role="status"><h3>We found a similar model</h3><p>Check the color, livery, edition and year before choosing.</p>{modelRows(similar)}<button className="button outline small" type="button" disabled={disabled || busy} onClick={() => { if (candidate) { setNewModel({ ...candidate, confirmDifferentModel: "true" }); setCreating(false); setSimilar([]); onReady(true); onModelChange?.(candidate); } }}>This is a different model</button></div>}
     </>}
     {error && <p className="form-error" role="alert">{error}</p>}
   </section>;

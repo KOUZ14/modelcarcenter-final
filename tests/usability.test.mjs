@@ -43,10 +43,10 @@ test('photo evidence adapts to sealed models, absent boxes, accessories and defe
   assert.deepEqual(requiredPhotoViews(sealed), ['packaging', 'seal']);
   assert.equal(listingPhotoEvidence(sealed, [{ alt: photoAltForViews(['packaging'], 'Actual box') }, { alt: photoAltForViews(['seal'], 'Intact seal') }]).complete, true);
   const loose = { packagingCondition: 'not_included', originalBoxStatus: 'not_included', accessories: 'None', defects: 'None known' };
-  assert.deepEqual(requiredPhotoViews(loose), ['front', 'rear', 'sides', 'base']);
-  assert.deepEqual(requiredPhotoViews({...loose, accessories: 'None included'}), ['front', 'rear', 'sides', 'base']);
-  assert.deepEqual(photoViewsFromAlt(photoAltForViews(['front', 'sides'], 'Actual model')), ['front', 'sides']);
-  assert.deepEqual(photoViewsFromAlt(photoAltForViews(['front', 'sides'], 'Actual model').replace(' - ', ' \u2014 ')), ['front', 'sides']);
+  assert.deepEqual(requiredPhotoViews(loose), ['front', 'rear', 'left', 'right', 'top', 'underside']);
+  assert.deepEqual(requiredPhotoViews({...loose, accessories: 'None included'}), ['front', 'rear', 'left', 'right', 'top', 'underside']);
+  assert.deepEqual(photoViewsFromAlt(photoAltForViews(['front', 'sides'], 'Actual model')), ['front', 'left', 'right']);
+  assert.deepEqual(photoViewsFromAlt(photoAltForViews(['front', 'sides'], 'Actual model').replace(' - ', ' \u2014 ')), ['front', 'left', 'right']);
   assert.equal(listingPhotoEvidence(loose, [{ alt: 'Legacy photo' }]).complete, false);
   assert.ok(requiredPhotoViews({ ...loose, defects: 'Chipped paint', accessories: 'Display base' }).includes('issues'));
   assert.ok(requiredPhotoViews({ ...loose, defects: 'Chipped paint', accessories: 'Display base' }).includes('accessories'));

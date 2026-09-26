@@ -4,7 +4,7 @@ import { useEffect, useId, useImperativeHandle, useRef, useState, type Ref, type
 import { addressFieldError, countryName, normalizeState, US_STATES, type Address, type AddressField, type AddressSuggestion } from "@/lib/address";
 
 export type AddressFieldsHandle = {
-  setErrors: (fields: Record<string, string>) => void;
+  setErrors: (fields: Record<string, string>, options?: { focus?: boolean }) => void;
   focusFirstInvalid: () => void;
 };
 
@@ -61,13 +61,13 @@ export function AddressFields({
       const element = root.current?.querySelector<HTMLElement>(`[data-address-field="${first}"]`);
       requestAnimationFrame(() => { openDetails(element ?? null); element?.focus(); element?.scrollIntoView({ block: "center" }); });
     },
-    setErrors(fields) {
+    setErrors(fields, options) {
       const next = Object.fromEntries((Object.keys(values) as AddressField[])
         .filter((field) => fields[name(field)]).map((field) => [field, fields[name(field)]]));
       setErrors(next);
       if (next.street2) setShowUnit(true);
       const first = Object.keys(next)[0];
-      if (first) {
+      if (first && options?.focus !== false) {
         const element = root.current?.querySelector<HTMLElement>(`[data-address-field="${first}"]`);
         requestAnimationFrame(() => { openDetails(element ?? null); element?.focus(); });
       }

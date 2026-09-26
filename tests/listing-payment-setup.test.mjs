@@ -40,14 +40,14 @@ test("connecting payments saves the collector's current listing and photos befor
   const calls = [], navigations = [];
   const savedPhoto = name => ({ id: name, url: `/media/${name}`, alt: name });
   const savedAddress = { id: "address", label: "Home", street1: "10 Model Lane", street2: null, city: "Burbank", region: "CA", postalCode: "91501", country: "US", phone: "5555550100", isDefault: true };
-  let failSave = false, failPhoto = "", failConnection = false, waitForPhoto;
+  let failSave = false, failPhoto = "", failConnection = false, waitForPhoto, reviewErrors;
   globalThis.location = { search: "" };
   globalThis.history = { replaceState(_state, _title, path) { location.search = new URL(path, "https://marketplace.test").search; } };
   globalThis.window = { location: { assign: url => navigations.push(url) } };
   globalThis.fetch = async (url, options) => {
     if (url === "/api/listings/images") {
       const name = options.body.get("images").name;
-      calls.push({ action: "photo", name, productId: options.body.get("productId") });
+      calls.push({ action: "photo", name, productId: options.body.get("productId"), makePrimary: options.body.get("makePrimary") });
       if (waitForPhoto) { const wait = waitForPhoto; waitForPhoto = undefined; await wait; }
       return name === failPhoto ? Response.json({ error: "Photo upload failed." }, { status: 503 }) : Response.json({ images: [savedPhoto(name)] });
     }
@@ -59,7 +59,8 @@ test("connecting payments saves the collector's current listing and photos befor
     if (payload.action === "stripe_onboarding") return failConnection
       ? Response.json({ error: "Payment provider unavailable." }, { status: 503 })
       : Response.json({ onboardingUrl: "https://connect.stripe.test/setup" });
-    assert.equal(payload.action, "submit"); return Response.json({ ok: true });
+    assert.equal(payload.action, "submit");
+    return reviewErrors ? Response.json({ error: "Complete your seller profile.", fields: reviewErrors }, { status: 400 }) : Response.json({ ok: true });
   };
   globalThis.__listingPaymentUi = { hooks: null };
   t.after(() => {
@@ -69,29 +70,33 @@ test("connecting payments saves the collector's current listing and photos befor
     delete globalThis.__listingPaymentUi;
   });
   const { CollectorListingForm } = await bundle(t, "export {CollectorListingForm} from './components/collector-listing-form.tsx';", {
-    react: "export const useState=(...args)=>globalThis.__listingPaymentUi.hooks.state(...args),useRef=(...args)=>globalThis.__listingPaymentUi.hooks.ref(...args);",
+    react: "export const useState=(...args)=>globalThis.__listingPaymentUi.hooks.state(...args),useRef=(...args)=>globalThis.__listingPaymentUi.hooks.ref(...args),useEffect=(...args)=>globalThis.__listingPaymentUi.hooks.effect(...args);",
     "next/link": "export default 'a';",
     "./catalog-model-picker": "export const CatalogModelPicker='catalog-picker';",
     "./seller-fee-disclosure": "export const SellerFeeDisclosure='fee-disclosure';",
     "@/components/collectible-listing-fields": "export const CollectibleListingFields='condition-fields',RequiredPhotoChecklist='photo-checklist';",
     "@/components/product-image-fields": "export const ProductImageFields='photo-fields';",
+    "./listing-buyer-preview": "export const ListingBuyerPreview='buyer-preview';",
     "./address-fields": "export const AddressFields='address-fields';",
   });
   function editor(overrides = {}) {
     calls.length = navigations.length = 0;
     failSave = failConnection = false; failPhoto = "";
+    reviewErrors = undefined;
     location.search = "?collectionItem=piece&selling=open_to_offers&minimum=125";
-    const states = []; let index = 0;
+    const states = [], effects = []; let index = 0;
     const hooks = {
       state(initial) { const slot = index++; if (!(slot in states)) states[slot] = typeof initial === "function" ? initial() : initial; return [states[slot], next => { states[slot] = typeof next === "function" ? next(states[slot]) : next; }]; },
       ref(initial) { const slot = index++; if (!(slot in states)) states[slot] = { current: initial }; return states[slot]; },
+      effect(callback) { effects.push(callback); },
     };
     const props = { initial: null, seller: null, shipFromAddresses: [], displayName: "Alex", prefill: {}, marketplaceFeeBps: 1000, collectionCatalog: { catalogProductId: "catalog" }, ...overrides };
-    const form = { values: { title: "My McLaren", description: "Original box", price: "175.00", quantity: "1", catalogProductId: "catalog", photoFrontChecked: "on" } };
+    const form = { controls: [], querySelectorAll() { return this.controls; }, values: { title: "My McLaren", description: "Original box", price: "175.00", quantity: "1", catalogProductId: "catalog", photoFrontChecked: "on" } };
     let tree;
     const render = () => {
       index = 0; globalThis.__listingPaymentUi.hooks = hooks; tree = CollectorListingForm(props);
       find(tree, node => node.type === "form").props.ref.current = form;
+      for (const effect of effects.splice(0)) effect();
       return tree;
     };
     render();
@@ -101,7 +106,7 @@ test("connecting payments saves the collector's current listing and photos befor
       accept() { find(tree, node => node.type === "input" && node.props.checked !== undefined).props.onChange({ target: { checked: true } }); render(); },
       photos(names) { find(tree, node => node.type === "photo-fields").props.onFilesChange(names.map(name => new File([name], name, { type: "image/jpeg" }))); render(); },
       save(value = "connect") {
-        if (value === "connect") return find(tree, node => node.type === "button" && /Connect payment method|Saving draft/.test(node.props.children)).props.onClick();
+        if (value === "connect") return find(tree, node => node.type === "button" && /Connect payout account|Saving draft/.test(node.props.children)).props.onClick();
         return find(tree, node => node.type === "form").props.onSubmit({ preventDefault() {}, currentTarget: form, nativeEvent: { submitter: { value } } });
       },
     };
@@ -128,7 +133,7 @@ test("connecting payments saves the collector's current listing and photos befor
 
   await t.test("validation and consent failures keep entries and photos on the form", async () => {
     const ui = editor(); ui.photos(["front.jpg"]);
-    assert.equal(ui.node(node => node.props?.children === "Connect payment method").props.type, "button");
+    assert.equal(ui.node(node => node.props?.children === "Connect payout account").props.type, "button");
     await ui.save(); assert.equal(calls.length, 0);
     ui.accept(); failSave = true;
     let addressErrors;
@@ -136,9 +141,46 @@ test("connecting payments saves the collector's current listing and photos befor
     await ui.save(); ui.render();
     assert.deepEqual(calls.map(call => call.action), ["save"]);
     assert.deepEqual(addressErrors, { shippingOriginCity: "Enter a city." });
-    assert.equal(ui.node(node => node.props?.role === "alert").props.children, "Check your address.");
+    assert.equal(ui.node(node => node.props?.className === "listing-error-summary" || node.props?.className === "form-error listing-error-summary").props.role, "alert");
     assert.equal(ui.node(node => node.type === "photo-fields").props.files[0].name, "front.jpg");
     assert.equal(ui.form.values.description, "Original box"); assert.deepEqual(navigations, []);
+  });
+
+  await t.test("missing disclosures stop the request, open their section and focus the first field", async () => {
+    const ui = editor(); ui.accept();
+    const section = { tagName: "DETAILS", open: false };
+    let focused, scrolled;
+    ui.form.controls = ["missingParts", "defects"].map(name => ({
+      name, value: "  ", required: true, willValidate: true, validity: { valid: true }, parentElement: section,
+      getAttribute(key) { return key === "name" ? name : null; }, matches() { return false; },
+      focus() { focused = name; }, scrollIntoView() { scrolled = name; },
+    }));
+    await ui.save("submit"); ui.render();
+    assert.deepEqual(calls, []);
+    assert.equal(section.open, true); assert.equal(focused, "missingParts"); assert.equal(scrolled, "missingParts");
+    const errors = ui.node(node => node.type === "condition-fields").props.errors;
+    assert.match(errors.missingParts, /None known/); assert.match(errors.defects, /None known/);
+    ui.form.controls.forEach(field => { field.value = "None known"; });
+    await ui.save("save"); ui.render();
+    assert.deepEqual(calls.map(call => call.action), ["save"]);
+    assert.deepEqual(ui.node(node => node.type === "condition-fields").props.errors, {});
+  });
+
+  await t.test("review errors highlight and open nested seller fields after the draft is saved", async () => {
+    const ui = editor({ seller: { status: "active", stripeChargesEnabled: true, stripePayoutsEnabled: true } }); ui.accept();
+    const outer = { tagName: "DETAILS", open: false };
+    const inner = { tagName: "DETAILS", open: false, parentElement: outer };
+    let focused = false;
+    ui.form.controls = [{ name: "sellerDescription", value: "Short", required: false, willValidate: true, validity: { valid: true }, parentElement: inner,
+      getAttribute(key) { return key === "name" ? "sellerDescription" : null; }, matches() { return false; },
+      focus() { focused = true; }, scrollIntoView() {},
+    }];
+    reviewErrors = { sellerDescription: "Introduce yourself to buyers in at least 30 characters." };
+    await ui.save("submit"); ui.render();
+    assert.deepEqual(calls.map(call => call.action), ["save", "submit"]);
+    assert.equal(outer.open, true); assert.equal(inner.open, true); assert.equal(focused, true);
+    assert.equal(ui.node(node => node.props?.name === "sellerDescription").props["aria-invalid"], true);
+    assert.equal(ui.node(node => node.props?.name === "sellerDescription").props["aria-describedby"], "listing-error-sellerDescription");
   });
 
   await t.test("partial uploads keep the saved draft and retry only the remaining photos", async () => {
@@ -168,11 +210,28 @@ test("connecting payments saves the collector's current listing and photos befor
     assert.equal(calls.filter(call => call.action === "save")[1].productId, "existing");
   });
 
+  await t.test("a new cover is uploaded first and keeps cover priority after a partial failure", async () => {
+    const ui = editor({ initial: { product: { id: "existing", catalogProductId: "catalog" }, images: [savedPhoto("old.jpg")] } });
+    ui.photos(["detail.jpg", "cover.jpg"]);
+    let gallery = ui.node(node => node.type === "photo-fields").props;
+    gallery.onCoverFileChange(gallery.files[1]); ui.render();
+    failPhoto = "detail.jpg";
+    await ui.save("save"); ui.render();
+    const upload = calls.find(call => call.action === "photo");
+    assert.equal(upload.name, "cover.jpg"); assert.equal(upload.makePrimary, "true");
+    gallery = ui.node(node => node.type === "photo-fields").props;
+    assert.equal(gallery.images[0].id, "cover.jpg"); assert.equal(gallery.primaryImageUrl, "/media/cover.jpg");
+    assert.equal(gallery.pendingCover, null); assert.deepEqual(gallery.files.map(file => file.name), ["detail.jpg"]);
+    failPhoto = ""; await ui.save("save"); ui.render();
+    assert.equal(calls.filter(call => call.action === "photo" && call.name === "cover.jpg").length, 1);
+    assert.equal(ui.node(node => node.type === "photo-fields").props.images[0].id, "cover.jpg");
+  });
+
   await t.test("ordinary saving and submission retain their separate behavior", async () => {
     let ui = editor(); await ui.save("save"); assert.deepEqual(calls.map(call => call.action), ["save"]);
     ui = editor({ seller: { status: "active", stripeChargesEnabled: true, stripePayoutsEnabled: true }, paymentSetup: "returned" });
     assert.equal(ui.node(node => node.props?.id === "listing-review").props.open, true);
-    assert.match(ui.node(node => node.props?.role === "status").props.children, /saved.*connected/);
+    assert.match(ui.node(node => node.props?.className === "admin-message").props.children, /saved.*connected/);
     ui.accept(); await ui.save("submit"); assert.deepEqual(calls.map(call => call.action), ["save", "submit"]);
     assert.deepEqual(navigations, []);
   });

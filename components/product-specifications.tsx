@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { ProductDetail } from "@/lib/types";
 import { formatCondition, formatMoney } from "@/lib/format";
-import { listingPhotoEvidence } from "@/lib/listing-evidence";
+import { isFactorySealed, listingPhotoEvidence } from "@/lib/listing-evidence";
 import { additionalShippingPolicy } from "@/lib/shipping-display";
 
 export function ProductSpecifications({ product }: { product: ProductDetail }) {
@@ -41,7 +41,7 @@ export function ProductSpecifications({ product }: { product: ProductDetail }) {
       <div className="listing-disclosures">
         <section aria-labelledby="listing-disclosures-title">
           <h3 id="listing-disclosures-title">Condition disclosures</h3>
-          {product.packagingCondition === "sealed" && <p>Factory sealed; hidden contents cannot be inspected.</p>}
+          {isFactorySealed(product.packagingCondition) && <p>Factory sealed; hidden contents cannot be inspected.</p>}
           {disclosures.filter(([, value]) => value?.trim()).map(([label, value]) => <p key={label}><strong>{label}:</strong> {value}</p>)}
           {undisclosed.length > 0 && <p><strong>Not disclosed by the seller:</strong> {undisclosed.join(", ")}. Unspecified does not mean defect-free. <Link href={`/messages?product=${encodeURIComponent(product.id)}`}>Ask the seller before buying</Link>.</p>}
         </section>

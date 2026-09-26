@@ -4,7 +4,7 @@ import { SellerFeeDisclosure } from "./seller-fee-disclosure";
 
 
 import Link from "next/link";
-import { FormEvent, useRef, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import {
   CollectibleListingFields,
   RequiredPhotoChecklist,
@@ -14,6 +14,12 @@ import { POLICY_VERSION } from "@/lib/legal";
 import { uploadProductPhotoFiles } from "@/lib/upload-client";
 import { AddressFields, type AddressFieldsHandle } from "./address-fields";
 import { countryName, SHIP_FROM_FIELD_NAMES, shipFromAddressValues } from "@/lib/address";
+import { focusListingError, listingFieldLabel, listingFieldProps, listingFormErrors, listingInputError, requiredListingFieldMessage, type ListingFieldErrors } from "@/lib/listing-form-validation";
+import { ListingFieldError } from "./listing-field-error";
+import { ListingBuyerPreview } from "./listing-buyer-preview";
+import { getSelectedPhotoViews, photoAltForViews } from "@/lib/listing-evidence";
+import { listingEditorProgress } from "@/lib/listing-editor-progress";
+import { formatCondition } from "@/lib/format";
 
 type Initial = {
   product: Record<string, unknown>;
@@ -80,6 +86,36 @@ export function CollectorListingForm({
     typeof product.primaryImageUrl === "string" ? product.primaryImageUrl : null,
   );
   const [files, setFiles] = useState<File[]>([]);
+  const [pendingCover, setPendingCover] = useState<File | null>(null);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const photoBusyRef = useRef(false);
+  const [dirty, setDirty] = useState(false);
+  const [savedAt, setSavedAt] = useState("");
+  const [submitted, setSubmitted] = useState(false);
+  const [catalogSummary, setCatalogSummary] = useState<Record<string, unknown>>(product);
+  const [values, setValues] = useState<Record<string, unknown>>({ ...product,
+    price: product.priceCents == null ? "" : (Number(product.priceCents) / 100).toFixed(2), quantity: product.inventoryQuantity ?? 1,
+    sellerDisplayName: seller?.storeName ?? displayName, sellerDescription: seller?.description ?? "", sellerSpecialty: seller?.specialty ?? "", sellerPackingApproach: seller?.packingApproach ?? "",
+  });
+
+  function readValues() { if (formRef.current && !savingRef.current) setValues(Object.fromEntries(new FormData(formRef.current))); }
+  function changedFiles(next: File[]) {
+    setFiles(next); setDirty(true); setSubmitted(false);
+    setPendingCover(current => current && next.includes(current) ? current : null);
+  }
+  useEffect(() => {
+    const form = formRef.current;
+    if (!form) return;
+    const update = () => queueMicrotask(() => { if (!savingRef.current) setValues(Object.fromEntries(new FormData(form))); });
+    update(); form.addEventListener?.("listing-details-change", update);
+    return () => form.removeEventListener?.("listing-details-change", update);
+  }, [catalogReady, shipFromAddressId]);
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener?.("beforeunload", warn);
+    return () => window.removeEventListener?.("beforeunload", warn);
+  }, [dirty]);
   const stripeReady = Boolean(
     seller?.stripeChargesEnabled &&
       seller?.stripePayoutsEnabled &&
@@ -87,16 +123,45 @@ export function CollectorListingForm({
   );
   const [message, setMessage] = useState(
     paymentSetup === "unavailable"
-      ? "Your draft is saved. We could not check your payment connection. Reload this page to try again."
+      ? "Your draft is saved. We could not check your payout connection. Reload this page to try again."
       : paymentSetup && stripeReady
-        ? "Your draft and photos are saved. Your payment method is connected. You can submit your listing for review."
+        ? "Your draft and photos are saved. Your payout account is connected. You can submit your listing for review."
         : paymentSetup
-          ? "Your draft and photos are saved. Connect your payment method again to finish setup."
+          ? "Your draft and photos are saved. Connect your payout account again to finish setup."
           : "",
   );
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [acceptedSellerTerms, setAcceptedSellerTerms] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<ListingFieldErrors>({});
+  const needsErrorFocus = useRef(false);
+  const errorRef = useRef<HTMLParagraphElement>(null);
+
+  useEffect(() => {
+    if (busy || !needsErrorFocus.current || !formRef.current) return;
+    needsErrorFocus.current = false;
+    focusListingError(formRef.current, fieldErrors);
+  }, [busy, fieldErrors]);
+
+  useEffect(() => {
+    if (!busy && error && errorRef.current) {
+      errorRef.current.focus({ preventScroll: true });
+      errorRef.current.scrollIntoView({ block: "center", behavior: "instant" });
+    }
+  }, [busy, error]);
+
+  function showValidation(fields: ListingFieldErrors) {
+    const next = Object.fromEntries(Object.entries(fields).map(([name, message]) =>
+      [name, message === "Required" ? requiredListingFieldMessage(name) : message === "Invalid value" ? `Check ${listingFieldLabel(name).toLowerCase()}.` : message],
+    ));
+    addressRef.current?.setErrors(next, { focus: false });
+    if (shipFromAddressId !== "new" && Object.keys(next).some(name => name.startsWith("shippingOrigin"))) {
+      for (const name of Object.keys(next)) if (name.startsWith("shippingOrigin")) delete next[name];
+      next.shipFromAddressId = "This saved address is incomplete. Choose another address or add a new one.";
+    }
+    needsErrorFocus.current = true;
+    setFieldErrors(next);
+  }
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -106,16 +171,23 @@ export function CollectorListingForm({
   }
 
   async function saveListing(form: HTMLFormElement, action: "save" | "submit" | "connect") {
-    if (savingRef.current) return;
-    if (!catalogReady) { setError("Choose a catalog model first."); return; }
+    if (savingRef.current || photoBusyRef.current) return;
+    if (!catalogReady) { showValidation({ catalogProductId: "Choose a catalog model first." }); return; }
     setError("");
     setMessage("");
     const shouldSubmit = action === "submit";
     const shouldConnect = action === "connect";
+    const errors = listingFormErrors(form);
     if ((shouldSubmit || shouldConnect) && !acceptedSellerTerms) {
-      setError("Accept the current Seller Terms before connecting your payment method or submitting for review.");
+      errors.sellerTermsVersion = "Accept the Seller Terms before connecting your payout account or submitting for review.";
+    }
+    if (Object.keys(errors).length) {
+      showValidation(errors);
       return;
     }
+    if (shouldSubmit && !stripeReady) { openSection("review"); setError("Connect your payout account before submitting for review."); return; }
+    setFieldErrors({});
+    addressRef.current?.setErrors({}, { focus: false });
     savingRef.current = true;
     setBusy(true);
     let draftSaved = false;
@@ -137,7 +209,7 @@ export function CollectorListingForm({
         shipFromAddress?: ShipFromAddress;
       };
       if (!response.ok || !body.productId) {
-        if (body.fields) addressRef.current?.setErrors(body.fields);
+        if (body.fields && Object.keys(body.fields).length) { showValidation(body.fields); return; }
         throw new Error(body.error || "The draft could not be saved.");
       }
       draftSaved = true;
@@ -162,22 +234,27 @@ export function CollectorListingForm({
       }
       let nextImages = images;
       if (files.length) {
+        const uploadFiles = pendingCover ? [pendingCover, ...files.filter(file => file !== pendingCover)] : files;
         await uploadProductPhotoFiles({
           endpoint: "/api/listings/images",
           productId: body.productId,
-          files,
+          files: uploadFiles,
+          makePrimary: Boolean(pendingCover),
           onUploaded(uploaded, processedCount) {
-            nextImages = [...nextImages, ...uploaded];
+            nextImages = pendingCover && processedCount === 1 ? [...uploaded, ...nextImages] : [...nextImages, ...uploaded];
+            if (pendingCover && processedCount === 1) { setPrimaryImageUrl(uploaded[0]?.url ?? null); setPendingCover(null); }
             setImages(nextImages);
-            setFiles(files.slice(processedCount));
+            setFiles(uploadFiles.slice(processedCount));
             setPrimaryImageUrl(
               (current) => current ?? uploaded[0]?.url ?? null,
             );
           },
         });
       }
+      setDirty(false);
+      setSavedAt(new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }));
       if (shouldConnect) {
-        setMessage("Draft and photos saved. Opening secure payment setup…");
+        setMessage("Draft and photos saved. Opening secure payout setup…");
         const connection = await fetch("/api/listings", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -195,7 +272,7 @@ export function CollectorListingForm({
           error?: string;
         };
         if (!connection.ok || !connectionBody.onboardingUrl) {
-          throw new Error(connectionBody.error || "Payment setup could not be started. Your draft is saved; please try again.");
+          throw new Error(connectionBody.error || "Payout setup could not be started. Your draft is saved; please try again.");
         }
         window.location.assign(connectionBody.onboardingUrl);
       } else if (shouldSubmit) {
@@ -208,13 +285,15 @@ export function CollectorListingForm({
             sellerTermsVersion: POLICY_VERSION,
           }),
         });
-        const reviewBody = (await review.json()) as { error?: string };
+        const reviewBody = (await review.json()) as { error?: string; fields?: ListingFieldErrors };
         if (!review.ok) {
+          if (reviewBody.fields && Object.keys(reviewBody.fields).length) { showValidation(reviewBody.fields); return; }
           throw new Error(
             reviewBody.error || "The listing could not be submitted.",
           );
         }
-        setMessage("Listing submitted for marketplace review.");
+        setSubmitted(true);
+        setMessage("Listing submitted for marketplace review. We’ll email the outcome; status and feedback are also in My Listings.");
       } else {
         setMessage(
           nextImages.length
@@ -224,7 +303,7 @@ export function CollectorListingForm({
       }
     } catch (reason) {
       setMessage(shouldConnect && draftSaved
-        ? "Your draft is saved. Fix the issue below, then try connecting your payment method again."
+        ? "Your draft is saved. Fix the issue below, then try connecting your payout account again."
         : "");
       setError(
         reason instanceof Error
@@ -247,9 +326,9 @@ export function CollectorListingForm({
     });
     const body = (await response.json()) as { error?: string };
     if (!response.ok) {
-      setError(body.error || "The photo could not be removed.");
-      return;
+      throw new Error(body.error || "The photo could not be removed.");
     }
+    setSubmitted(false);
     setImages((current) => {
       const removed = current.find((image) => image.id === imageId);
       const next = current.filter((image) => image.id !== imageId);
@@ -274,6 +353,7 @@ export function CollectorListingForm({
       setError(nextError);
       throw new Error(nextError);
     }
+    setSubmitted(false);
     setPrimaryImageUrl(images[0]?.url ?? null);
   }
 
@@ -291,27 +371,14 @@ export function CollectorListingForm({
       setError(nextError);
       throw new Error(nextError);
     }
+    setPendingCover(null);
+    setSubmitted(false);
     setImages((current) => {
       const byId = new Map(current.map((image) => [image.id, image]));
       const next = imageIds.map((id) => byId.get(id)!);
       setPrimaryImageUrl(next[0]?.url ?? null);
       return next;
     });
-  }
-
-  function fillCommonDisclosures() {
-    const form = formRef.current;
-    if (!form) return;
-    const defaults: Record<string, string> = {
-      missingParts: "None known",
-      defects: "None known",
-      restorationCustomization: "None known",
-      accessories: "None included",
-    };
-    for (const [name, value] of Object.entries(defaults)) {
-      const field = form.elements.namedItem(name) as HTMLTextAreaElement | null;
-      if (field && !field.value.trim()) field.value = value;
-    }
   }
 
   function setAllListingSections(open: boolean) {
@@ -325,6 +392,27 @@ export function CollectorListingForm({
   const selectedShipFromAddress = shipFromAddresses.find(
     (address) => address.id === shipFromAddressId,
   );
+
+  const evidenceImages = [...images, ...files.map(file => ({ alt: photoAltForViews(getSelectedPhotoViews(file), file.name) }))];
+  const progress = listingEditorProgress(values, evidenceImages);
+  const text = (key: string) => String(values[key] ?? "").trim();
+  const photoSummary = `${images.length} uploaded${files.length ? ` · ${files.length} pending` : ""} · ${progress.photo.complete ? "Required views covered" : `${progress.photo.missing.length} photo requirement${progress.photo.missing.length === 1 ? "" : "s"} missing`}`;
+  const catalogTitle = String(catalogSummary.title || [catalogSummary.modelManufacturer, catalogSummary.vehicleMake, catalogSummary.vehicleModel].filter(Boolean).join(" "));
+  const remaining = [
+    ...(!progress.conditionComplete ? [{ section: "condition", label: "Complete condition disclosures", field: Object.keys(progress.conditionErrors)[0] }] : []),
+    ...(!progress.photo.complete ? [{ section: "condition", label: `Photos: ${progress.photo.missing.join(", ")}`, field: "images" }] : []),
+    ...(!progress.priceComplete ? [{ section: "price", label: "Enter price and quantity" }] : []),
+    ...(!progress.packageComplete || !progress.addressComplete ? [{ section: "shipping", label: "Complete package and ship-from details" }] : []),
+    ...(!progress.profileComplete ? [{ section: "shipping", label: "Complete your reusable seller profile", field: "sellerDescription" }] : []),
+    ...(!stripeReady ? [{ section: "review", label: "Connect your payout account" }] : []),
+    ...(!acceptedSellerTerms ? [{ section: "review", label: "Accept Seller Terms", field: "sellerTermsVersion" }] : []),
+  ];
+  function openSection(section: string, field?: string) {
+    const target = formRef.current?.querySelector<HTMLDetailsElement>(`#listing-${section}`);
+    if (target) { target.open = true; target.scrollIntoView({ block: "start", behavior: "smooth" }); }
+    if (field && formRef.current) focusListingError(formRef.current, { [field]: "Complete this field" }, field);
+    else target?.querySelector<HTMLElement>("summary")?.focus({ preventScroll: true });
+  }
 
   return (
     <div className="listing-shell">
@@ -343,97 +431,124 @@ export function CollectorListingForm({
         </p>
       </div>
 
-      <form ref={formRef} className="listing-form" onSubmit={save} noValidate>
-        <CatalogModelPicker initial={product} listingSaved={Boolean(productId)} initialQuery={[prefill.manufacturer, prefill.make, prefill.model, prefill.scale].filter(Boolean).join(" ")} disabled={busy} onReady={setCatalogReady} />
+      <form ref={formRef} className="listing-form collector-editor" onSubmit={save} noValidate onChange={(event) => {
+        if ((event.target as HTMLElement).closest(".compact-photo-editor")) return;
+        setDirty(true); setSubmitted(false); queueMicrotask(readValues);
+        const field = event.target;
+        if (!(field instanceof HTMLInputElement || field instanceof HTMLSelectElement || field instanceof HTMLTextAreaElement)) return;
+        if (!fieldErrors[field.name]) return;
+        const message = listingInputError(field);
+        setFieldErrors(current => {
+          const next = { ...current };
+          if (message) next[field.name] = message;
+          else delete next[field.name];
+          return next;
+        });
+      }}>
+        {Object.keys(fieldErrors).length > 0 && <div className="form-error listing-error-summary" role="alert">
+          <p>Please check the highlighted fields before continuing.</p>
+          <ul>{Object.entries(fieldErrors).map(([name, message]) => <li key={name}>
+            <button type="button" className="text-action" onClick={() => { if (formRef.current) focusListingError(formRef.current, fieldErrors, name); }}>{listingFieldLabel(name)}: {message}</button>
+          </li>)}</ul>
+        </div>}
+        {error && <p ref={errorRef} tabIndex={-1} className="form-error" role="alert">{error}</p>}
+        <div data-listing-field="catalogProductId" tabIndex={-1} {...listingFieldProps(fieldErrors, "catalogProductId")}>
+        <CatalogModelPicker onModelChange={model => { setCatalogSummary(model); setDirty(true); }} initial={product} listingSaved={Boolean(productId)} initialQuery={[prefill.manufacturer, prefill.make, prefill.model, prefill.scale].filter(Boolean).join(" ")} disabled={busy} onReady={(ready) => {
+          setCatalogReady(ready);
+          if (ready) setFieldErrors(current => {
+            const next = { ...current };
+            delete next.catalogProductId;
+            return next;
+          });
+        }} />
+        <ListingFieldError errors={fieldErrors} name="catalogProductId" />
+        </div>
         <fieldset className="catalog-listing-fields" hidden={!catalogReady} disabled={!catalogReady || busy}>
         <div className="listing-section-controls">
-          <p>Open the section you need. Your entries stay in place when a section is closed.</p>
+          <p>Open the section you need. Save draft to keep your changes. Closing a section does not save them.</p>
           <div>
             <button className="text-action" type="button" onClick={() => setAllListingSections(true)}>Expand all</button>
             <button className="text-action" type="button" onClick={() => setAllListingSections(false)}>Collapse all</button>
           </div>
         </div>
 
-        <details className="listing-section" open>
+        <details className="listing-section" id="listing-model">
           <summary>
             <span>
               <span className="step-label">1 · The model</span>
-              <span className="listing-section-title">Model details</span>
+              <span className="listing-section-title">Model</span><span className="listing-section-progress">Catalog linked · Optional title and story</span>
             </span>
           </summary>
           <div className="listing-section-content">
           <label>Listing title (optional)<input name="title" maxLength={200} placeholder="Uses the catalog model name if blank" defaultValue={String(product.title ?? "")} /></label>
           <label>Seller SKU (optional)<input name="sellerSku" maxLength={100} placeholder="Your own inventory reference" defaultValue={String(product.sellerSku ?? "")} /></label>
-          <label>Listing description (optional)<textarea name="description" maxLength={4000} rows={4} defaultValue={String(product.description ?? "")} /></label>
-          <label>Condition notes (optional)<textarea name="conditionNotes" maxLength={2000} rows={3} defaultValue={String(product.conditionNotes ?? "")} /></label>
+          <label>Additional context or model story (optional)<textarea name="description" maxLength={4000} rows={4} defaultValue={String(product.description ?? "")} /></label>
           </div>
         </details>
 
-        <details className="listing-section">
+        <details className="listing-section" id="listing-condition" open>
           <summary>
             <span>
-              <span className="step-label">2 · Condition</span>
-              <span className="listing-section-title">Collector-grade details</span>
+              <span className="step-label">2 · Photos &amp; condition</span>
+              <span className="listing-section-title">Photos &amp; condition</span>
+              <span className="listing-section-progress">{text("modelCondition") ? formatCondition(text("modelCondition")) : "Condition needed"} · {text("originalBoxStatus") ? `Box ${formatCondition(text("originalBoxStatus")).toLowerCase()}` : "Box status needed"}</span>
+              <span className="listing-section-progress" data-incomplete={!progress.photo.complete}>{photoSummary} · {progress.conditionComplete ? "Disclosures complete" : "Disclosures needed"}</span>
             </span>
           </summary>
           <div className="listing-section-content">
-            <div className="listing-section-action-row">
-              <button className="text-action" type="button" onClick={fillCommonDisclosures}>Fill common “none” answers</button>
-            </div>
-          <CollectibleListingFields product={product} includeIdentity={false} />
+          <RequiredPhotoChecklist product={product} images={evidenceImages} />
+          <div data-listing-field="images" tabIndex={-1} {...listingFieldProps(fieldErrors, "images")}>
+            <ListingFieldError errors={fieldErrors} name="images" />
+            <ProductImageFields productId={productId || undefined} images={images} primaryImageUrl={primaryImageUrl} files={files} disabled={busy}
+              onFilesChange={changedFiles} onImagesChange={setImages} onLabelsChange={() => setSubmitted(false)}
+              onBusyChange={value => { photoBusyRef.current = value; setPhotoBusy(value); }}
+              pendingCover={pendingCover} onCoverFileChange={file => { changedFiles([file, ...files.filter(item => item !== file)]); setPendingCover(file); }}
+              onRemove={productId ? removeImage : undefined} onRemoveLegacy={productId ? removeLegacyImage : undefined} onReorder={productId ? reorderImages : undefined} />
+          </div>
+          <CollectibleListingFields product={product} includeIdentity={false} includeLegacyNotes errors={fieldErrors} />
           </div>
         </details>
 
-        <details className="listing-section">
+        <details className="listing-section" id="listing-price">
           <summary>
             <span>
               <span className="step-label">3 · Price</span>
-              <span className="listing-section-title">Price and availability</span>
+              <span className="listing-section-title">Price</span><span className="listing-section-progress">{progress.priceComplete ? `$${Number(text("price").replace(/^\$/, "")).toFixed(2)} · Quantity ${text("quantity")}` : "Enter a valid price and quantity"}</span>
             </span>
           </summary>
           <div className="listing-section-content">
           <div className="form-row">
-            <label>Price (USD)<input name="price" inputMode="decimal" required defaultValue={product.priceCents == null ? "" : (Number(product.priceCents) / 100).toFixed(2)} /></label>
-            <label>Quantity<input name="quantity" type="number" min={1} max={100} required defaultValue={String(product.inventoryQuantity ?? 1)} /></label>
+            <label>Price (USD)<input name="price" {...listingFieldProps(fieldErrors, "price")} inputMode="decimal" required defaultValue={product.priceCents == null ? "" : (Number(product.priceCents) / 100).toFixed(2)} /><ListingFieldError errors={fieldErrors} name="price" /></label>
+            <label>Quantity<input name="quantity" {...listingFieldProps(fieldErrors, "quantity")} type="number" min={1} max={100} required defaultValue={String(product.inventoryQuantity ?? 1)} /><ListingFieldError errors={fieldErrors} name="quantity" /></label>
           </div>
-          <SellerFeeDisclosure marketplaceFeeBps={marketplaceFeeBps} />
+          <SellerFeeDisclosure marketplaceFeeBps={marketplaceFeeBps} price={text("price")} />
           </div>
         </details>
 
-        <details className="listing-section">
+        <details className="listing-section" id="listing-shipping">
           <summary>
             <span>
-              <span className="step-label">4 · Package</span>
-              <span className="listing-section-title">Packaged shipment</span>
+              <span className="step-label">4 · Shipping</span>
+              <span className="listing-section-title">Shipping</span><span className="listing-section-progress">{progress.addressComplete ? "Address complete" : "Address needed"} · {progress.packageComplete ? "Package complete" : "Package details needed"} · {progress.profileComplete ? "Seller profile complete" : "Seller profile needed"}</span>
             </span>
           </summary>
           <div className="listing-section-content">
           <p>Enter the final box size and packed weight. Your preferred size is already filled in.</p>
           <div className="parcel-grid">
-            <label>Length (in)<input name="packageLength" inputMode="decimal" required defaultValue={String(product.packageLength ?? seller?.defaultPackageLength ?? "12")} /></label>
-            <label>Width (in)<input name="packageWidth" inputMode="decimal" required defaultValue={String(product.packageWidth ?? seller?.defaultPackageWidth ?? "9")} /></label>
-            <label>Height (in)<input name="packageHeight" inputMode="decimal" required defaultValue={String(product.packageHeight ?? seller?.defaultPackageHeight ?? "6")} /></label>
-            <label>Weight (lb)<input name="packageWeight" inputMode="decimal" required defaultValue={String(product.packageWeight ?? seller?.defaultPackageWeight ?? "2")} /></label>
+            <label>Length (in)<input name="packageLength" {...listingFieldProps(fieldErrors, "packageLength")} inputMode="decimal" required defaultValue={String(product.packageLength ?? seller?.defaultPackageLength ?? "12")} /><ListingFieldError errors={fieldErrors} name="packageLength" /></label>
+            <label>Width (in)<input name="packageWidth" {...listingFieldProps(fieldErrors, "packageWidth")} inputMode="decimal" required defaultValue={String(product.packageWidth ?? seller?.defaultPackageWidth ?? "9")} /><ListingFieldError errors={fieldErrors} name="packageWidth" /></label>
+            <label>Height (in)<input name="packageHeight" {...listingFieldProps(fieldErrors, "packageHeight")} inputMode="decimal" required defaultValue={String(product.packageHeight ?? seller?.defaultPackageHeight ?? "6")} /><ListingFieldError errors={fieldErrors} name="packageHeight" /></label>
+            <label>Weight (lb)<input name="packageWeight" {...listingFieldProps(fieldErrors, "packageWeight")} inputMode="decimal" required defaultValue={String(product.packageWeight ?? seller?.defaultPackageWeight ?? "2")} /><ListingFieldError errors={fieldErrors} name="packageWeight" /></label>
           </div>
           <label className="consent-check compact-check">
             <input type="checkbox" name="rememberPackageDefaults" defaultChecked={!productId} />
             <span>Use these package details as the starting point for my next listing.</span>
           </label>
-          </div>
-        </details>
-
-        <details className="listing-section">
-          <summary>
-            <span>
-              <span className="step-label">5 · Shipping</span>
-              <span className="listing-section-title">Where will this ship from?</span>
-            </span>
-          </summary>
-          <div className="listing-section-content">
+          <p>Your ship-from address, packed dimensions, weight, and the buyer’s destination determine carrier rates at checkout. Handling and return policies come from your saved seller settings.</p>
           <p>Saved addresses are private and are used only for carrier rates and labels.</p>
           <label>
             Ship-from address
-            <select name="shipFromAddressId" value={shipFromAddressId} onChange={(event) => setShipFromAddressId(event.target.value)}>
+            <select name="shipFromAddressId" {...listingFieldProps(fieldErrors, "shipFromAddressId")} value={shipFromAddressId} onChange={(event) => setShipFromAddressId(event.target.value)}>
               {shipFromAddresses.map((address) => (
                 <option key={address.id} value={address.id}>
                   {address.label}{address.isDefault ? " · Default" : ""} - {address.city}, {address.region || address.country}
@@ -441,6 +556,7 @@ export function CollectorListingForm({
               ))}
               <option value="new">+ Add a new address</option>
             </select>
+            <ListingFieldError errors={fieldErrors} name="shipFromAddressId" />
           </label>
 
           {selectedShipFromAddress ? (
@@ -465,57 +581,48 @@ export function CollectorListingForm({
           )}
 
           <details className="seller-profile-details">
-            <summary>Seller profile shown on every listing</summary>
+            <summary>Seller profile {progress.profileComplete ? "complete" : "needs details"} · Edit</summary>
+            <p>Saving these shared seller details updates your profile on every listing.</p>
             <div>
-              <label>Seller display name<input name="sellerDisplayName" required maxLength={120} defaultValue={String(seller?.storeName ?? displayName)} /></label>
-              <label>Short seller description<textarea name="sellerDescription" maxLength={1000} rows={3} defaultValue={String(seller?.description ?? "")} /></label>
-              <label>Specialty<input name="sellerSpecialty" maxLength={300} defaultValue={String(seller?.specialty ?? "")} placeholder="The scales, makers or themes you collect"/></label>
-              <label>How you pack models<textarea name="sellerPackingApproach" maxLength={1000} rows={3} defaultValue={String(seller?.packingApproach ?? "")} placeholder="How you protect the model, its box and accessories"/></label>
+              <label>Seller display name<input name="sellerDisplayName" {...listingFieldProps(fieldErrors, "sellerDisplayName")} required maxLength={120} defaultValue={String(seller?.storeName ?? displayName)} /><ListingFieldError errors={fieldErrors} name="sellerDisplayName" /></label>
+              <label>Short seller description<textarea name="sellerDescription" {...listingFieldProps(fieldErrors, "sellerDescription")} maxLength={1000} rows={3} defaultValue={String(seller?.description ?? "")} /><ListingFieldError errors={fieldErrors} name="sellerDescription" /></label>
+              <label>Specialty<input name="sellerSpecialty" {...listingFieldProps(fieldErrors, "sellerSpecialty")} maxLength={300} defaultValue={String(seller?.specialty ?? "")} placeholder="The scales, makers or themes you collect"/><ListingFieldError errors={fieldErrors} name="sellerSpecialty" /></label>
+              <label>How you pack models<textarea name="sellerPackingApproach" {...listingFieldProps(fieldErrors, "sellerPackingApproach")} maxLength={1000} rows={3} defaultValue={String(seller?.packingApproach ?? "")} placeholder="How you protect the model, its box and accessories"/><ListingFieldError errors={fieldErrors} name="sellerPackingApproach" /></label>
               <p>A useful introduction (at least 30 characters), specialty, and packing approach (at least 20 characters) are required before review. Your state or region is public; street addresses stay private. You can save a draft first.</p>
             </div>
           </details>
           </div>
         </details>
 
-        <details className="listing-section">
-          <summary>
-            <span>
-              <span className="step-label">6 · Photos</span>
-              <span className="listing-section-title">Photos</span>
-            </span>
-          </summary>
-          <div className="listing-section-content">
-          <p>Add original photos of your item. Factory-sealed models need at least two exterior views; other models need at least four photos. Do not reuse another seller&apos;s photos.</p>
-          <ProductImageFields productId={productId || undefined} images={images} primaryImageUrl={primaryImageUrl} files={files} disabled={busy} onFilesChange={setFiles} onRemove={productId ? removeImage : undefined} onRemoveLegacy={productId ? removeLegacyImage : undefined} onReorder={productId ? reorderImages : undefined} />
-          <RequiredPhotoChecklist product={product} />
-          </div>
-        </details>
-
         <details className="listing-section" id="listing-review" open={Boolean(paymentSetup)}>
           <summary>
             <span>
-              <span className="step-label">7 · Review</span>
-              <span className="listing-section-title">Payouts and review</span>
+              <span className="step-label">5 · Preview</span>
+              <span className="listing-section-title">Preview &amp; submit</span><span className="listing-section-progress">{remaining.length ? `${remaining.length} step${remaining.length === 1 ? "" : "s"} remaining` : "Ready for review"}</span>
             </span>
           </summary>
           <div className="listing-section-content listing-submit">
+          <ListingBuyerPreview values={values} title={text("title") || catalogTitle} coverUrl={primaryImageUrl || images[0]?.url} coverFile={pendingCover ?? (!images.length && !primaryImageUrl ? files[0] : undefined)} seller={seller} />
+          <div className="listing-remaining"><h3>{remaining.length ? "Before you submit" : "Ready to submit"}</h3>{remaining.length > 0 && <ul>{remaining.map(item => <li key={item.label}><button className="text-action" type="button" onClick={() => openSection(item.section, item.field)}>{item.label}</button></li>)}</ul>}</div>
           <div>
-            <p>{stripeReady ? "Your payment method is connected. Submitted listings are reviewed before going live." : "Connect your payment method to receive money from your sales. We’ll save your draft and photos before opening secure setup with Stripe, then bring you back to this listing."}</p>
+            <p>{stripeReady ? "Your payout account is connected. Submitted listings are reviewed before going live." : "Connect your payout account to receive money from your sales. We’ll save your draft and photos before opening secure setup with Stripe, then bring you back to this listing."}</p>
             <label className="consent-check">
-              <input type="checkbox" checked={acceptedSellerTerms} onChange={(event) => setAcceptedSellerTerms(event.target.checked)} />
+              <input type="checkbox" name="sellerTermsVersion" {...listingFieldProps(fieldErrors, "sellerTermsVersion")} checked={acceptedSellerTerms} onChange={(event) => setAcceptedSellerTerms(event.target.checked)} />
               <span>I agree to the current <Link href="/seller-terms">Seller Terms</Link>, including deductions for marketplace commission and actual payment processing, fulfillment rules, and return obligations.</span>
             </label>
-            {!stripeReady && <button className="button outline small" type="button" disabled={busy || !acceptedSellerTerms} onClick={() => { if (formRef.current) return saveListing(formRef.current, "connect"); }}>{busy ? "Saving draft…" : "Connect payment method"}</button>}
+            <ListingFieldError errors={fieldErrors} name="sellerTermsVersion" />
+            {!stripeReady && <button className="button outline small" type="button" disabled={busy || !acceptedSellerTerms} onClick={() => { if (formRef.current) return saveListing(formRef.current, "connect"); }}>{busy ? "Saving draft…" : "Connect payout account"}</button>}
           </div>
-          {message && <p className="admin-message" role="status">{message}</p>}
-          {error && <p className="form-error" role="alert">{error}</p>}
-          <div className="row-actions">
-            <button className="button outline" type="submit" value="save" disabled={busy}>{busy ? "Saving…" : "Save draft"}</button>
-            <button className="button dark" type="submit" value="submit" disabled={busy || !stripeReady || !acceptedSellerTerms}>{busy ? "Saving…" : "Submit for review"}</button>
-          </div>
+          <p>Submission sends this listing to marketplace review before it can be published. We’ll email the outcome; check My Listings for status and any requested changes.</p>
           </div>
         </details>
         </fieldset>
+        {catalogReady && <div className="listing-action-bar" aria-label="Save and submit listing">
+          <div className="listing-save-status"><strong role="status">{busy ? "Saving draft and photos…" : photoBusy ? "Saving photo changes…" : dirty ? "Unsaved changes" : savedAt ? `Saved at ${savedAt}` : productId ? "Saved draft loaded" : "Draft not yet saved"}</strong>
+          <button type="button" className="text-action" onClick={() => openSection("review")}>{submitted ? "Submitted for review" : remaining.length ? `${remaining.length} step${remaining.length === 1 ? "" : "s"} to review · View` : "Preview listing"}</button></div>
+          <div className="row-actions"><button className="button outline" type="submit" value="save" disabled={busy || photoBusy}>{busy ? "Saving…" : "Save draft"}</button><button className="button dark" type="submit" value="submit" disabled={busy || photoBusy || submitted}>{busy ? "Saving…" : "Submit for review"}</button></div>
+          {message && <p className="admin-message" role="status">{message}</p>}
+        </div>}
       </form>
       <p><Link className="text-link" href="/account?view=listings">Back to My Listings</Link></p>
     </div>

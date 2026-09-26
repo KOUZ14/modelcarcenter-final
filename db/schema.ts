@@ -521,6 +521,9 @@ export const products = sqliteTable(
       enum: [
         "not_specified",
         "sealed",
+        // Combined storage keeps legacy records readable; the editor asks
+        // seal status and physical packaging grade separately.
+        "sealed_mint", "sealed_excellent", "sealed_good", "sealed_fair", "sealed_poor",
         "mint",
         "excellent",
         "good",
