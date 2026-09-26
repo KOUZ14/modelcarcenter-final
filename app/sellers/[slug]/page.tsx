@@ -66,7 +66,7 @@ export default async function SellerPage({ params, searchParams }: {
               {packing && <div><dt>Packing approach</dt><dd>{packing}</dd></div>}
             </dl>}
             {seller.sellerType === "professional" && seller.websiteUrl && <p><a href={seller.websiteUrl} rel="noreferrer">Visit seller website</a></p>}
-            <p>{seller.sellerType === "collector" ? "Collector listings are reviewed before publication." : "Approval means the seller’s application was accepted."} Approval does not guarantee a model’s authenticity or condition.</p>
+            <p>{seller.sellerType === "collector" ? "Collectors publish their own listings. Report a problem from the listing page." : "Approval means the seller’s application was accepted."} Approval does not guarantee a model’s authenticity or condition.</p>
             <p>Buyer reputation comes from completed MCC orders and verified purchase feedback. Community likes and followers are separate. Stripe handles payment-account checks.</p>
             {reputation ? <StoreHistory reputation={reputation}/> : <p>Marketplace history is temporarily unavailable.</p>}
           </div>

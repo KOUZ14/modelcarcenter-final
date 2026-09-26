@@ -111,3 +111,10 @@ html:has(.listing-preview-page[open]) { overflow: hidden; }
   html:has(.product-sticky-purchase) { --mobile-nav-height: calc(76px + env(safe-area-inset-bottom)); }
   .product-detail-page:has(.product-sticky-purchase) .collector-main-nav { display: none; }
 }
+.listing-report { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--line, #dedbd5); font-size: .875rem; }
+.listing-report > button { min-height: 44px; padding: 0; background: none; border: 0; cursor: pointer; text-decoration: underline; color: inherit; }
+.listing-report > button:disabled { cursor: default; opacity: .55; }
+.listing-report-form { display: grid; gap: .75rem; margin-top: .5rem; }
+.listing-report-form label { display: grid; gap: .35rem; }
+.listing-report-form select, .listing-report-form textarea { width: 100%; min-width: 0; padding: .7rem; border: 1px solid var(--line, #dedbd5); background: var(--paper, #fff); color: inherit; font: inherit; }
+.listing-report-form p { margin: 0; }

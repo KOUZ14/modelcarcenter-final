@@ -343,8 +343,11 @@ test("catalog migrations, seller writes, matching and active offers use separate
     assert.equal(saved.catalogProductId, catalogId);
     assert.equal(count(), before);
     assert.equal(row(saved.productId).seller_sku, "COLLECTOR-01");
+    assert.equal(row(saved.productId).status, "draft");
+    sqlite.prepare("UPDATE products SET status='active' WHERE id=?").run(saved.productId);
     await api.saveCollectorListing({ user, profile: { displayName: "Collector", bio: "" }, productId: saved.productId, payload: { ...payload, price: "199", shipFromAddressId: saved.shipFromAddress.id } });
     assert.equal(row(saved.productId).price_cents, 19900);
+    assert.equal(row(saved.productId).status, "draft", "Save draft unpublishes without queuing an admin review");
     await assert.rejects(api.saveCollectorListing({ user: { ...user, id: "owner-b" }, profile: { displayName: "Other", bio: "" }, productId: saved.productId, payload }), /not found/);
   });
 });

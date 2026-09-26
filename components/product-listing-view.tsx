@@ -7,6 +7,7 @@ import { ProductPurchase } from "./product-purchase";
 import { ProductPurchaseInfo, ProductSellerLine } from "./product-purchase-info";
 import { ProductShippingEstimate } from "./product-shipping-estimate";
 import { ProductSpecifications } from "./product-specifications";
+import { ListingReportButton } from "./listing-report-button";
 import "./product-detail.css";
 
 /** The listing itself, shared by the public product route and unsaved draft preview. */
@@ -29,6 +30,7 @@ export function ProductListingView({ product, preview = false }: { product: Prod
         <ProductPurchase key={product.id} product={product} preview={preview} />
         <ProductSellerLine product={product} preview={preview} />
         <ProductPurchaseInfo product={product} />
+        <ListingReportButton productId={product.id} preview={preview} />
       </aside>
     </div>
     <ProductSpecifications product={product} preview={preview} />

@@ -20,7 +20,7 @@ export function SellerSetup({ data }: { data: StoreData }) {
   return <section className="store-panel seller-setup-compact"><h3>Store setup · {setup.completed}/4 complete</h3>
     {!setup.termsAccepted && <p><Link href="/store?view=settings&filter=terms#seller-terms">Accept current Seller Terms</Link> before publishing or accepting new payments.</p>}
     {remaining.length > 0 && <ul>{remaining.map(step => <li key={step.id}><Link href={step.href}>{step.title} →</Link></li>)}</ul>}
-    <details><summary>{setup.completed === 4 ? "View completed setup" : "Setup details"}</summary><ol className="seller-setup-list">{setup.steps.map(step => <li key={step.id}><span>{step.complete ? "Complete" : "To do"}</span><Link href={step.href}>{step.title}</Link><p>{step.detail}</p></li>)}</ol><p>Store approval, payment readiness, and listing publication are separate. {setup.listingCounts.live} live · {setup.listingCounts.draft} drafts · {setup.listingCounts.pending} awaiting review.</p></details>
+    <details><summary>{setup.completed === 4 ? "View completed setup" : "Setup details"}</summary><ol className="seller-setup-list">{setup.steps.map(step => <li key={step.id}><span>{step.complete ? "Complete" : "To do"}</span><Link href={step.href}>{step.title}</Link><p>{step.detail}</p></li>)}</ol><p>Store approval, payment readiness, and listing publication are separate. {setup.listingCounts.live} live · {setup.listingCounts.draft} drafts · {setup.listingCounts.pending} unpublished.</p></details>
   </section>;
 }
 

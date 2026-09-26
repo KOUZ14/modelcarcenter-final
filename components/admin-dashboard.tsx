@@ -191,13 +191,13 @@ function Overview({ data }: { data: AdminData }) {
     ["paymentExceptions", "Payment exceptions", "orders&filter=exceptions"],
     ["missingOrderItems", "Orders missing items", "orders&filter=missing_items"],
     ["failedNotifications", "Preorder notifications needing retry", "preorders"],
-    ["collectorListingsAwaitingReview", "Listings awaiting review", "products&filter=pending_review"],
+    ["openListingReports", "Open listing reports", "community"],
   ];
   return (
     <>
       <h2>Needs your attention</h2>
       <p className="admin-muted">Current open work across all records, including clearly marked test orders.</p>
-      <div className="admin-attention-grid">{attention.map(([key, label, destination]) => <Link key={key} href={destination === "preorders" ? "/admin/preorders" : `/admin?section=${destination}`}><span>{label}</span><strong>{counts[key] ?? 0}</strong><small>Open queue</small></Link>)}</div>
+      <div className="admin-attention-grid">{attention.map(([key, label, destination]) => <Link key={key} href={["preorders", "community"].includes(destination) ? `/admin/${destination}` : `/admin?section=${destination}`}><span>{label}</span><strong>{counts[key] ?? 0}</strong><small>Open queue</small></Link>)}</div>
       <h2>Marketplace activity</h2>
       <p className="admin-muted">Paid orders and subscribers are lifetime totals. Demand below includes open Model Hunts.</p>
       <div className="metric-grid">{[["activeProducts", "Active listings"], ["activeSellers", "Active sellers"], ["paidOrders", "Paid orders - all time"], ["signups", "Subscribers - all time"]].map(([key, label]) => <article key={key}><span>{label}</span><b>{counts[key] ?? 0}</b></article>)}</div>
@@ -724,13 +724,6 @@ function Products({
       ).sort((a, b) => sort === "title" ? a.title.localeCompare(b.title) : sort === "price" ? a.priceCents - b.priceCents : sort === "stock" ? a.inventoryQuantity - b.inventoryQuantity : 0),
     [data.products, query, sellerFilter, statusFilter, sort],
   );
-  const awaitingReview = visible.filter(
-    (product) => product.sellerType === "collector" && product.status === "pending_review",
-  );
-  function reject(productId: string) {
-    const reason = window.prompt("Optional rejection reason for the collector:") ?? "";
-    void action({ action: "product_review", productId, decision: "reject", reason });
-  }
   return (
     <div className="admin-stack">
       {editing && (
@@ -741,39 +734,7 @@ function Products({
           onClose={() => setEditing(null)}
         />
       )}
-      <section className="admin-panel">
-        <div className="panel-heading">
-          <div>
-            <p className="eyebrow">Manual moderation</p>
-            <h2>Collector Listings Awaiting Review</h2>
-          </div>
-          <b>{awaitingReview.length}</b>
-        </div>
-        {awaitingReview.length ? (
-          <div className="review-grid">
-            {awaitingReview.map((product) => (
-              <article key={product.id}>
-                {product.images?.[0] && (
-                  <Image src={product.images[0].url} alt={product.images[0].alt} width={240} height={190} unoptimized />
-                )}
-                <div>
-                  <span className="status pending_review">Awaiting Review</span>
-                  <h3>{product.title}</h3>
-                  <p>{product.scale} · {product.modelManufacturer} · model {product.modelCondition.replaceAll("_", " ")} · packaging {product.packagingCondition.replaceAll("_", " ")}</p>
-                  <p><b>Disclosures:</b> Missing parts: {product.missingParts}; defects: {product.defects}; restoration/customization: {product.restorationCustomization}</p>
-                  <p>{product.sellerName} · {product.sellerEmail}</p>
-                  <p>{money(product.priceCents)} · {product.inventoryQuantity} available</p>
-                  <div className="row-actions">
-                    <button onClick={() => void action({ action: "product_review", productId: product.id, decision: "approve" })}>Approve</button>
-                    <button onClick={() => reject(product.id)}>Reject</button>
-                    <button onClick={() => void action({ action: "product_status", productId: product.id, status: "inactive" })}>Suspend listing</button>
-                  </div>
-                </div>
-              </article>
-            ))}
-          </div>
-        ) : <p>No collector listings are waiting for review.</p>}
-      </section>
+      <section className="admin-panel"><h2>Listing reports</h2><p>Sellers publish directly. Investigate reported problems and take listings off sale when needed.</p><Link className="button outline small" href="/admin/community">Review listing reports</Link></section>
       <section className="admin-panel">
         <div className="panel-heading">
           <h2>Products</h2>
@@ -804,7 +765,7 @@ function Products({
             ))}
           </select>
         </div>
-        <div className="admin-queue-filters"><label>Listing status<select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}><option value="">All statuses</option>{["active", "draft", "inactive", "sold_out", "pending_review"].map(value => <option key={value} value={value}>{value.replaceAll("_", " ")}</option>)}<option value="missing_photo">Missing photos</option></select></label><label>Sort by<select value={sort} onChange={e => setSort(e.target.value)}><option value="updated">Recently updated</option><option value="title">Product name</option><option value="price">Price: low to high</option><option value="stock">Stock: low to high</option></select></label></div>
+        <div className="admin-queue-filters"><label>Listing status<select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}><option value="">All statuses</option>{["active", "draft", "inactive", "sold_out", "pending_review"].map(value => <option key={value} value={value}>{value === "pending_review" ? "unpublished (legacy)" : value.replaceAll("_", " ")}</option>)}<option value="missing_photo">Missing photos</option></select></label><label>Sort by<select value={sort} onChange={e => setSort(e.target.value)}><option value="updated">Recently updated</option><option value="title">Product name</option><option value="price">Price: low to high</option><option value="stock">Stock: low to high</option></select></label></div>
         <p className="admin-muted">{visible.length} listings shown - Latest 250 listings loaded</p>
         <div className="admin-table-wrap admin-mobile-records" role="region" aria-label="Scrollable records" tabIndex={0}>
           <table>

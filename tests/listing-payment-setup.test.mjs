@@ -60,7 +60,7 @@ test("connecting payments saves the collector's current listing and photos befor
     if (payload.action === "stripe_onboarding") return failConnection
       ? Response.json({ error: "Payment provider unavailable." }, { status: 503 })
       : Response.json({ onboardingUrl: "https://connect.stripe.test/setup" });
-    assert.equal(payload.action, "submit");
+    assert.equal(payload.action, "publish");
     return reviewErrors ? Response.json({ error: "Complete your seller profile.", fields: reviewErrors }, { status: 400 }) : Response.json({ ok: true });
   };
   globalThis.__listingPaymentUi = { hooks: null };
@@ -179,7 +179,7 @@ test("connecting payments saves the collector's current listing and photos befor
       getAttribute(key) { return key === "name" ? name : null; }, matches() { return false; },
       focus() { focused = name; }, scrollIntoView() { scrolled = name; },
     }));
-    await ui.save("submit"); ui.render();
+    await ui.save("publish"); ui.render();
     assert.deepEqual(calls, []);
     assert.equal(section.open, true); assert.equal(focused, "missingParts"); assert.equal(scrolled, "missingParts");
     const errors = ui.node(node => node.type === "condition-fields").props.errors;
@@ -190,7 +190,7 @@ test("connecting payments saves the collector's current listing and photos befor
     assert.deepEqual(ui.node(node => node.type === "condition-fields").props.errors, {});
   });
 
-  await t.test("review errors highlight and open nested seller fields after the draft is saved", async () => {
+  await t.test("publication errors highlight and open nested seller fields after the draft is saved", async () => {
     const ui = editor({ seller: { status: "active", stripeChargesEnabled: true, stripePayoutsEnabled: true } }); ui.accept();
     const outer = { tagName: "DETAILS", open: false };
     const inner = { tagName: "DETAILS", open: false, parentElement: outer };
@@ -200,8 +200,8 @@ test("connecting payments saves the collector's current listing and photos befor
       focus() { focused = true; }, scrollIntoView() {},
     }];
     reviewErrors = { sellerDescription: "Introduce yourself to buyers in at least 30 characters." };
-    await ui.save("submit"); ui.render();
-    assert.deepEqual(calls.map(call => call.action), ["save", "submit"]);
+    await ui.save("publish"); ui.render();
+    assert.deepEqual(calls.map(call => call.action), ["save", "publish"]);
     assert.equal(outer.open, true); assert.equal(inner.open, true); assert.equal(focused, true);
     assert.equal(ui.node(node => node.props?.name === "sellerDescription").props["aria-invalid"], true);
     assert.equal(ui.node(node => node.props?.name === "sellerDescription").props["aria-describedby"], "listing-error-sellerDescription");
@@ -251,12 +251,16 @@ test("connecting payments saves the collector's current listing and photos befor
     assert.equal(ui.node(node => node.type === "photo-fields").props.images[0].id, "cover.jpg");
   });
 
-  await t.test("ordinary saving and submission retain their separate behavior", async () => {
+  await t.test("ordinary saving and publication retain their separate behavior", async () => {
     let ui = editor(); await ui.save("save"); assert.deepEqual(calls.map(call => call.action), ["save"]);
     ui = editor({ seller: { status: "active", stripeChargesEnabled: true, stripePayoutsEnabled: true }, paymentSetup: "returned" });
     assert.equal(ui.node(node => node.props?.id === "listing-review").props.open, true);
-    assert.match(ui.node(node => node.props?.className === "admin-message").props.children, /saved.*connected/);
-    ui.accept(); await ui.save("submit"); assert.deepEqual(calls.map(call => call.action), ["save", "submit"]);
+    assert.match(ui.node(node => node.props?.className === "admin-message").props.children[0], /saved.*connected/);
+    ui.accept(); await ui.save("publish"); ui.render(); assert.deepEqual(calls.map(call => call.action), ["save", "publish"]);
+    assert.match(ui.node(node => node.props?.className === "admin-message").props.children[0], /listing is live/);
+    assert.equal(ui.node(node => node.type === "button" && node.props.value === "publish").props.disabled, true);
+    await ui.save("save"); ui.render();
+    assert.equal(ui.node(node => node.type === "button" && node.props.value === "publish").props.disabled, false, "Saving a published listing as a draft permits publishing it again");
     assert.deepEqual(navigations, []);
   });
 });

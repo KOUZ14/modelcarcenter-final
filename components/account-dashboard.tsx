@@ -174,7 +174,7 @@ function Overview({ data }: { data: GarageData }) {
     (hunt) => !["closed"].includes(String(hunt.status)),
   ).length;
   const activeListings = data.listings.filter((listing) =>
-    ["active", "pending_review"].includes(String(listing.status)),
+    listing.status === "active",
   ).length;
   const latestOrder = data.orders[0];
   const metrics = [
@@ -534,7 +534,7 @@ function Listings({
       {seller &&
         (!seller.stripeChargesEnabled || !seller.stripePayoutsEnabled) && (
           <div className="account-callout">
-            <b>Connect your payment method before submitting a listing.</b>
+            <b>Connect your payment method before publishing a listing.</b>
             <p>
               Receive money from your sales. Stripe securely collects identity
               and bank information on its hosted site.
@@ -585,7 +585,7 @@ function Listings({
               </p>
               {Boolean(listing.rejectionReason) && (
                 <p className="form-error">
-                  Review note: {String(listing.rejectionReason)}
+                  Marketplace note: {String(listing.rejectionReason)}
                 </p>
               )}
               <div className="row-actions">
@@ -826,7 +826,7 @@ function listingStatusLabel(status: string) {
     (
       {
         draft: "Draft",
-        pending_review: "Awaiting Review",
+        pending_review: "Unpublished",
         active: "Live",
         sold_out: "Sold",
         rejected: "Rejected",

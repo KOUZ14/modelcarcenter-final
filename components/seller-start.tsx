@@ -31,7 +31,7 @@ export function SellerStart({ collectorFee, professionalFee, application }: {
         <p>Your own models · collector account</p>
         <details>
           <summary>What you’ll need</summary>
-          <p>Sign in, add model and condition details, and upload actual photos. Before publishing, complete payout and shipping setup and any required listing review.</p>
+          <p>Sign in, add model and condition details, and upload actual photos. Before publishing, complete payout and shipping setup. Publish your listing when it is ready.</p>
         </details>
       </article>
       <article className="sell-choice" aria-label="Store selling">

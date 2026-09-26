@@ -6,5 +6,5 @@ export const dynamic = "force-dynamic";
 export const metadata = { title: "Community moderation", robots: { index: false, follow: false } };
 export default async function Page() {
   const user = await requireAdminPage();
-  return <AdminFrame adminEmail={user.email} environment={adminEnvironment()}><h1>Community moderation</h1><CommunityModeration/></AdminFrame>;
+  return <AdminFrame adminEmail={user.email} environment={adminEnvironment()}><CommunityModeration/></AdminFrame>;
 }

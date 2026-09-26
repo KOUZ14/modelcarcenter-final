@@ -69,6 +69,7 @@ test("editor renders one photo-label panel, five steps, live fees and a private-
     plugins: [{ name: "next-ui", setup(b) {
       const mocks = {
         "next/link": "export default 'a';",
+        "next/navigation": "export const useRouter=()=>({push:()=>{}});",
         "next/image": "import React from 'react'; export default function Image({unoptimized,fill,priority,...props}) {return React.createElement('img',props);}",
         "./marketplace-provider": "export const useMarketplace=()=>({cart:[],collector:null,authReady:true,wishlistHas:()=>false});",
         "./preorder-offer": "export const PreorderOffer='preorder-offer';",
@@ -87,7 +88,7 @@ test("editor renders one photo-label panel, five steps, live fees and a private-
   assert.equal((legacy.match(/name="conditionNotes"/g) || []).length, 1);
   assert.equal((html.match(/class="listing-section"/g) || []).length, 5);
   assert.equal((html.match(/class="photo-view-labels"/g) || []).length, 1);
-  assert.ok(html.indexOf('class="listing-action-bar"') > html.lastIndexOf('</details>'), "Save and submit are outside every collapsible section");
+  assert.ok(html.indexOf('class="listing-action-bar"') > html.lastIndexOf('</details>'), "Save and publish are outside every collapsible section");
   assert.ok(html.indexOf('Views buyers need') < html.indexOf('Add photos'));
   assert.match(html, /Enlarge photo 1/);
   assert.match(html, /Wrong linked model/);
@@ -98,7 +99,7 @@ test("editor renders one photo-label panel, five steps, live fees and a private-
   const draft = buildListingPreview({values:{...condition, packagingCondition:"sealed_poor", price:"125.00", quantity:"2", defects:"Paint chip on roof", sellerDisplayName:"Alex", sellerDescription:"Collector biography", sellerSpecialty:"Road cars", sellerPackingApproach:"Boxed inside protective padding", shippingOriginStreet1:"PRIVATE STREET", shippingOriginPostalCode:"PRIVATE ZIP", shippingOriginRegion:"CA", shippingOriginCountry:"US"},catalog:{title:"McLaren F1",modelManufacturer:"AUTOart",scale:"1:18"},seller:null,images:photos});
   const preview = renderToStaticMarkup(React.createElement(ui.ListingBuyerPreview, {product:draft,onClose:()=>{}}));
   assert.match(preview, /Poor · factory sealed/); assert.match(preview, /CA, US/); assert.doesNotMatch(preview, /PRIVATE STREET|PRIVATE ZIP/);
-  assert.match(html, /Review &amp; submit/); assert.match(html, /Preview listing/); assert.doesNotMatch(html, /Buyer-facing listing preview/);
+  assert.match(html, /Review &amp; publish/); assert.match(html, /Preview listing/); assert.doesNotMatch(html, /Buyer-facing listing preview/);
   const live = renderToStaticMarkup(React.createElement(ui.ProductListingView, {product:draft}));
   for (const rendered of [preview,live]) {
     for (const text of ['View photo 7 of 7','Model condition:','Paint chip on roof','About the seller','Collector biography','How your model is packed','Boxed inside protective padding','Shipping &amp; dispatch','2 available']) assert.ok(rendered.includes(text),text);
@@ -106,6 +107,8 @@ test("editor renders one photo-label panel, five steps, live fees and a private-
   }
   assert.match(preview, /Preview — not published/);
   assert.match(preview, /Back to editing/);
+  assert.match(preview, /disabled=""[^>]*>Report listing/);
+  assert.match(live, />Report listing<\/button>/);
   assert.match(preview, /class="button dark buy-button"[^>]*disabled=""/);
   assert.match(preview, /class="button outline purchase-save"[^>]*disabled=""/);
   assert.doesNotMatch(live, /class="button dark buy-button"[^>]*disabled=""/);

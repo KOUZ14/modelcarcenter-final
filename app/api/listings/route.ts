@@ -5,7 +5,7 @@ import {
   refreshCollectorStripe,
   saveCollectorListing,
   startCollectorStripeOnboarding,
-  submitCollectorListing,
+  publishCollectorListing,
 } from "@/lib/listings";
 import { cleanText, requiredString, ValidationError } from "@/lib/validation";
 import { isCurrentPolicyVersion } from "@/lib/legal";
@@ -26,11 +26,11 @@ export async function POST(request: Request) {
         productId: typeof payload.productId === "string" && payload.productId ? payload.productId : null,
       }) });
     }
-    if (action === "submit") {
+    if (action === "publish" || action === "submit") {
       if (!isCurrentPolicyVersion(payload.sellerTermsVersion)) {
-        throw new ValidationError("Accept the current Seller Terms before submitting.");
+        throw new ValidationError("Accept the current Seller Terms before publishing.");
       }
-      return Response.json({ ok: true, ...await submitCollectorListing(
+      return Response.json({ ok: true, ...await publishCollectorListing(
         collector.user.id,
         requiredString(payload.productId, "productId", 100),
         requiredString(payload.sellerTermsVersion, "sellerTermsVersion", 40),

@@ -138,7 +138,7 @@ async function loadAdminSection(section: string) {
       unfulfilledOrders,
       signups,
       applications,
-      collectorListingsAwaitingReview,
+      openListingReports,
     ] = await Promise.all([
       count(products, eq(products.status, "active")),
       count(sellers, eq(sellers.status, "active")),
@@ -153,7 +153,7 @@ async function loadAdminSection(section: string) {
       ),
       count(communitySubscribers),
       count(sellerApplications, eq(sellerApplications.status, "pending")),
-      count(products, eq(products.status, "pending_review")),
+      getD1().prepare("SELECT COUNT(*) count FROM community_reports WHERE target_type='listing' AND status='open'").first<{ count: number }>().then(row => Number(row?.count ?? 0)),
     ]);
     const [overdueShipments, urgentDisputes, paymentExceptions, missingOrderItems, failedNotices] = await Promise.all([
       count(orders, sql`${orders.paymentStatus} IN ('paid', 'partially_refunded') AND ${orders.fulfillmentStatus} IN ('unfulfilled', 'processing') AND julianday(${orders.shipByAt}) < julianday('now')`),
@@ -210,7 +210,7 @@ async function loadAdminSection(section: string) {
         unfulfilledOrders,
         signups,
         applications,
-        collectorListingsAwaitingReview,
+        openListingReports,
       },
       demand: {
         scales: scaleDemand,

@@ -101,8 +101,7 @@ export async function saveCollectorListing(input: {
         { quantity: `Enter at least ${owned.product.reservedQuantity} to cover reserved items.` },
       );
     }
-    const nextStatus =
-      owned.product.status === "active" ? "pending_review" : "draft";
+    const nextStatus = "draft" as const;
     const model = await persistCatalogListing(catalog, (model) => db
       .update(products)
       .set({
@@ -290,13 +289,13 @@ function listingProductValues(
   };
 }
 
-export async function submitCollectorListing(
+export async function publishCollectorListing(
   userId: string,
   productId: string,
   sellerTermsVersion: string,
 ) {
   if (!isCurrentPolicyVersion(sellerTermsVersion)) {
-    throw new ValidationError("Accept the current Seller Terms before submitting.");
+    throw new ValidationError("Accept the current Seller Terms before publishing.");
   }
   const owned = await getOwnedProduct(userId, productId);
   if (!owned) throw new ValidationError("Listing not found.");
@@ -314,7 +313,7 @@ export async function submitCollectorListing(
     seller.status !== "active"
   ) {
     throw new ValidationError(
-      "Connect your bank account to receive payments before submitting this listing.",
+      "Connect your bank account to receive payments before publishing this listing.",
     );
   }
   if (!sellerPublicProfileComplete(seller)) {
@@ -323,7 +322,7 @@ export async function submitCollectorListing(
     if (!seller.specialty?.trim()) fields.sellerSpecialty = "Describe the scales, makers, or themes you collect.";
     if ((seller.packingApproach?.trim().length ?? 0) < 20) fields.sellerPackingApproach = "Describe how you protect models for shipping in at least 20 characters.";
     if (!seller.shippingOriginCountry.trim() || !seller.shippingOriginRegion?.trim()) fields.shipFromAddressId = "Add a ship-from address with your country and state or region.";
-    throw new ValidationError("Complete the highlighted seller details before review. Your draft is saved.", fields);
+    throw new ValidationError("Complete the highlighted seller details before publishing. Your draft is saved.", fields);
   }
   const evidenceImages = await getDb()
     .select({ alt: productImages.alt, url: productImages.url })
@@ -344,7 +343,7 @@ export async function submitCollectorListing(
   await getDb()
     .update(products)
     .set({
-      status: "pending_review",
+      status: "active",
       rejectionReason: null,
       updatedAt: new Date().toISOString(),
     })
@@ -354,7 +353,7 @@ export async function submitCollectorListing(
         eq(products.sellerId, owned.product.sellerId),
       ),
     );
-  return { status: "pending_review" as const };
+  return { status: "active" as const, slug: owned.product.slug };
 }
 
 export async function startCollectorStripeOnboarding(
@@ -472,7 +471,7 @@ export function listingStatusLabel(status: string) {
     (
       {
         draft: "Draft",
-        pending_review: "Awaiting Review",
+        pending_review: "Unpublished",
         active: "Live",
         sold_out: "Sold",
         rejected: "Rejected",

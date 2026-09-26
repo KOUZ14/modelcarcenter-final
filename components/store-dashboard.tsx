@@ -468,7 +468,7 @@ function Inventory({
       </nav>
       {queue === "slow" && <p className="hub-note">Active, in-stock listings at least 90 days old with no paid sale in the last 90 days.</p>}
       {queue === "low" && <p className="hub-note">Active, in-stock listings with 1–2 available units, after reservations.</p>}
-      {queue === "attention" && <p className="hub-note">Drafts, listings in review or rejected, and in-stock listings missing required photo evidence. Each listing counts once.</p>}
+      {queue === "attention" && <p className="hub-note">Drafts, unpublished or removed listings, and in-stock listings missing required photo evidence. Each listing counts once.</p>}
       <div className="store-inventory-tools">
         <input
           aria-label="Search inventory"

@@ -95,7 +95,8 @@ export function CollectorListingForm({
   const photoBusyRef = useRef(false);
   const [dirty, setDirty] = useState(false);
   const [savedAt, setSavedAt] = useState("");
-  const [submitted, setSubmitted] = useState(false);
+  const [published, setPublished] = useState(false);
+  const [publishedSlug, setPublishedSlug] = useState("");
   const [catalogSummary, setCatalogSummary] = useState<Record<string, unknown>>(catalogModel ?? product);
   const [preview, setPreview] = useState<ProductDetail | null>(null);
   const previewUrls = useRef<string[]>([]);
@@ -107,7 +108,7 @@ export function CollectorListingForm({
 
   function readValues() { if (formRef.current && !savingRef.current) setValues(Object.fromEntries(new FormData(formRef.current))); }
   function changedFiles(next: File[]) {
-    setFiles(next); setDirty(true); setSubmitted(false);
+    setFiles(next); setDirty(true); setPublished(false);
     setPendingCover(current => current && next.includes(current) ? current : null);
   }
   useEffect(() => {
@@ -132,7 +133,7 @@ export function CollectorListingForm({
     paymentSetup === "unavailable"
       ? "Your draft is saved. We could not check your payout connection. Reload this page to try again."
       : paymentSetup && stripeReady
-        ? "Your draft and photos are saved. Your payout account is connected. You can submit your listing for review."
+        ? "Your draft and photos are saved. Your payout account is connected. You can publish your listing."
         : paymentSetup
           ? "Your draft and photos are saved. Connect your payout account again to finish setup."
           : "",
@@ -174,25 +175,25 @@ export function CollectorListingForm({
     event.preventDefault();
     const submitter = (event.nativeEvent as SubmitEvent)
       .submitter as HTMLButtonElement | null;
-    await saveListing(event.currentTarget, submitter?.value === "submit" ? "submit" : "save");
+    await saveListing(event.currentTarget, submitter?.value === "publish" ? "publish" : "save");
   }
 
-  async function saveListing(form: HTMLFormElement, action: "save" | "submit" | "connect") {
+  async function saveListing(form: HTMLFormElement, action: "save" | "publish" | "connect") {
     if (savingRef.current || photoBusyRef.current) return;
     if (!catalogReady) { showValidation({ catalogProductId: "Choose a catalog model first." }); return; }
     setError("");
     setMessage("");
-    const shouldSubmit = action === "submit";
+    const shouldPublish = action === "publish";
     const shouldConnect = action === "connect";
     const errors = listingFormErrors(form);
-    if ((shouldSubmit || shouldConnect) && !acceptedSellerTerms) {
-      errors.sellerTermsVersion = "Accept the Seller Terms before connecting your payout account or submitting for review.";
+    if ((shouldPublish || shouldConnect) && !acceptedSellerTerms) {
+      errors.sellerTermsVersion = "Accept the Seller Terms before connecting your payout account or publishing.";
     }
     if (Object.keys(errors).length) {
       showValidation(errors);
       return;
     }
-    if (shouldSubmit && !stripeReady) { openSection("review"); setError("Connect your payout account before submitting for review."); return; }
+    if (shouldPublish && !stripeReady) { openSection("review"); setError("Connect your payout account before publishing."); return; }
     setFieldErrors({});
     addressRef.current?.setErrors({}, { focus: false });
     savingRef.current = true;
@@ -220,6 +221,7 @@ export function CollectorListingForm({
         throw new Error(body.error || "The draft could not be saved.");
       }
       draftSaved = true;
+      setPublished(false);
       setProductId(body.productId);
       const query = new URLSearchParams(location.search);
       query.set("id", body.productId);
@@ -282,30 +284,31 @@ export function CollectorListingForm({
           throw new Error(connectionBody.error || "Payout setup could not be started. Your draft is saved; please try again.");
         }
         window.location.assign(connectionBody.onboardingUrl);
-      } else if (shouldSubmit) {
-        const review = await fetch("/api/listings", {
+      } else if (shouldPublish) {
+        const publication = await fetch("/api/listings", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            action: "submit",
+            action: "publish",
             productId: body.productId,
             sellerTermsVersion: POLICY_VERSION,
           }),
         });
-        const reviewBody = (await review.json()) as { error?: string; fields?: ListingFieldErrors };
-        if (!review.ok) {
-          if (reviewBody.fields && Object.keys(reviewBody.fields).length) { showValidation(reviewBody.fields); return; }
+        const publicationBody = (await publication.json()) as { error?: string; fields?: ListingFieldErrors; slug?: string };
+        if (!publication.ok) {
+          if (publicationBody.fields && Object.keys(publicationBody.fields).length) { showValidation(publicationBody.fields); return; }
           throw new Error(
-            reviewBody.error || "The listing could not be submitted.",
+            publicationBody.error || "The listing could not be published.",
           );
         }
-        setSubmitted(true);
-        setMessage("Listing submitted for marketplace review. We’ll email the outcome; status and feedback are also in My Listings.");
+        setPublished(true);
+        setPublishedSlug(publicationBody.slug || "");
+        setMessage("Your listing is live and available to buyers. You can manage it in My Listings.");
       } else {
         setMessage(
           nextImages.length
             ? "Draft, photos, and preferences saved."
-            : "Draft and preferences saved. Add photos before submitting.",
+            : "Draft and preferences saved. Add photos before publishing.",
         );
       }
     } catch (reason) {
@@ -335,7 +338,7 @@ export function CollectorListingForm({
     if (!response.ok) {
       throw new Error(body.error || "The photo could not be removed.");
     }
-    setSubmitted(false);
+    setPublished(false);
     setImages((current) => {
       const removed = current.find((image) => image.id === imageId);
       const next = current.filter((image) => image.id !== imageId);
@@ -360,7 +363,7 @@ export function CollectorListingForm({
       setError(nextError);
       throw new Error(nextError);
     }
-    setSubmitted(false);
+    setPublished(false);
     setPrimaryImageUrl(images[0]?.url ?? null);
   }
 
@@ -379,7 +382,7 @@ export function CollectorListingForm({
       throw new Error(nextError);
     }
     setPendingCover(null);
-    setSubmitted(false);
+    setPublished(false);
     setImages((current) => {
       const byId = new Map(current.map((image) => [image.id, image]));
       const next = imageIds.map((id) => byId.get(id)!);
@@ -442,7 +445,7 @@ export function CollectorListingForm({
 
   return (
     <div className="listing-shell collector-listing-shell">
-      {collectionReturnTo && <div className="collection-selling-setup"><p>This listing is for the model saved in your collection. Complete the condition, photos and shipping details, then submit it for review. Once it is active, return to enable your chosen availability.</p><Link href={collectionReturnTo + (productId ? `&listing=${encodeURIComponent(productId)}` : "")}>Return to collection setup</Link></div>}
+      {collectionReturnTo && <div className="collection-selling-setup"><p>This listing is for the model saved in your collection. Complete the condition, photos and shipping details, then publish it. Once it is active, return to enable your chosen availability.</p><Link href={collectionReturnTo + (productId ? `&listing=${encodeURIComponent(productId)}` : "")}>Return to collection setup</Link></div>}
       <div className="page-title listing-editor-intro">
         <h1>{productId ? "Edit your listing" : "Sell a Model"}</h1>
         <p>{marketplaceFeeBps / 100}% marketplace fee + actual payment processing. No listing or monthly fees.</p>
@@ -450,7 +453,7 @@ export function CollectorListingForm({
 
       <form ref={formRef} className="listing-form collector-editor" onSubmit={save} noValidate onChange={(event) => {
         if ((event.target as HTMLElement).closest(".compact-photo-editor")) return;
-        setDirty(true); setSubmitted(false); queueMicrotask(readValues);
+        setDirty(true); setPublished(false); queueMicrotask(readValues);
         const field = event.target;
         if (!(field instanceof HTMLInputElement || field instanceof HTMLSelectElement || field instanceof HTMLTextAreaElement)) return;
         if (!fieldErrors[field.name]) return;
@@ -517,7 +520,7 @@ export function CollectorListingForm({
           <div data-listing-field="images" tabIndex={-1} {...listingFieldProps(fieldErrors, "images")}>
             <ListingFieldError errors={fieldErrors} name="images" />
             <ProductImageFields productId={productId || undefined} images={images} primaryImageUrl={primaryImageUrl} files={files} disabled={busy}
-              onFilesChange={changedFiles} onImagesChange={setImages} onLabelsChange={() => setSubmitted(false)}
+              onFilesChange={changedFiles} onImagesChange={setImages} onLabelsChange={() => setPublished(false)}
               onBusyChange={value => { photoBusyRef.current = value; setPhotoBusy(value); }}
               pendingCover={pendingCover} onCoverFileChange={file => { changedFiles([file, ...files.filter(item => item !== file)]); setPendingCover(file); }}
               onRemove={productId ? removeImage : undefined} onRemoveLegacy={productId ? removeLegacyImage : undefined} onReorder={productId ? reorderImages : undefined} />
@@ -605,7 +608,7 @@ export function CollectorListingForm({
               <label>Short seller description<textarea name="sellerDescription" {...listingFieldProps(fieldErrors, "sellerDescription")} maxLength={1000} rows={3} defaultValue={String(seller?.description ?? "")} /><ListingFieldError errors={fieldErrors} name="sellerDescription" /></label>
               <label>Specialty<input name="sellerSpecialty" {...listingFieldProps(fieldErrors, "sellerSpecialty")} maxLength={300} defaultValue={String(seller?.specialty ?? "")} placeholder="The scales, makers or themes you collect"/><ListingFieldError errors={fieldErrors} name="sellerSpecialty" /></label>
               <label>How you pack models<textarea name="sellerPackingApproach" {...listingFieldProps(fieldErrors, "sellerPackingApproach")} maxLength={1000} rows={3} defaultValue={String(seller?.packingApproach ?? "")} placeholder="How you protect the model, its box and accessories"/><ListingFieldError errors={fieldErrors} name="sellerPackingApproach" /></label>
-              <p>A useful introduction (at least 30 characters), specialty, and packing approach (at least 20 characters) are required before review. Your state or region is public; street addresses stay private. You can save a draft first.</p>
+              <p>A useful introduction (at least 30 characters), specialty, and packing approach (at least 20 characters) are required before publishing. Your state or region is public; street addresses stay private. You can save a draft first.</p>
             </div>
           </details>
           </div>
@@ -615,7 +618,7 @@ export function CollectorListingForm({
           <summary>
             <span>
               <span className="step-label">5 · Review</span>
-              <span className="listing-section-title">Review &amp; submit</span><span className="listing-section-progress">{remaining.length ? `${remaining.length} step${remaining.length === 1 ? "" : "s"} remaining` : "Ready for review"}</span>
+              <span className="listing-section-title">Review &amp; publish</span><span className="listing-section-progress">{remaining.length ? `${remaining.length} step${remaining.length === 1 ? "" : "s"} remaining` : "Ready to publish"}</span>
             </span>
           </summary>
           <div className="listing-section-content listing-submit">
@@ -624,9 +627,9 @@ export function CollectorListingForm({
             <button type="button" className="button dark" disabled={busy || photoBusy} onClick={openPreview}>Preview listing</button>
             <p className="field-note">See the buyer page with your current edits and photo order. Purchase actions are inactive in preview.</p>
           </div>
-          <div className="listing-remaining"><h3>{remaining.length ? "Before you submit" : "Ready to submit"}</h3>{remaining.length > 0 && <ul>{remaining.map(item => <li key={item.label}><button className="text-action" type="button" onClick={() => openSection(item.section, item.field)}>{item.label}</button></li>)}</ul>}</div>
+          <div className="listing-remaining"><h3>{remaining.length ? "Before you publish" : "Ready to publish"}</h3>{remaining.length > 0 && <ul>{remaining.map(item => <li key={item.label}><button className="text-action" type="button" onClick={() => openSection(item.section, item.field)}>{item.label}</button></li>)}</ul>}</div>
           <div>
-            <p>{stripeReady ? "Your payout account is connected. Submitted listings are reviewed before going live." : "Connect your payout account to receive money from your sales. We’ll save your draft and photos before opening secure setup with Stripe, then bring you back to this listing."}</p>
+            <p>{stripeReady ? "Your payout account is connected. Publish when your listing is ready." : "Connect your payout account to receive money from your sales. We’ll save your draft and photos before opening secure setup with Stripe, then bring you back to this listing."}</p>
             <label className="consent-check">
               <input type="checkbox" name="sellerTermsVersion" {...listingFieldProps(fieldErrors, "sellerTermsVersion")} checked={acceptedSellerTerms} onChange={(event) => setAcceptedSellerTerms(event.target.checked)} />
               <span>I agree to the current <Link href="/seller-terms">Seller Terms</Link>, including deductions for marketplace commission and actual payment processing, fulfillment rules, and return obligations.</span>
@@ -634,15 +637,17 @@ export function CollectorListingForm({
             <ListingFieldError errors={fieldErrors} name="sellerTermsVersion" />
             {!stripeReady && <button className="button outline small" type="button" disabled={busy || !acceptedSellerTerms} onClick={() => { if (formRef.current) return saveListing(formRef.current, "connect"); }}>{busy ? "Saving draft…" : "Connect payout account"}</button>}
           </div>
-          <p>Submission sends this listing to marketplace review before it can be published. We’ll email the outcome; check My Listings for status and any requested changes.</p>
+          {product.status === "pending_review" && <p>This older submission is not live yet. You can publish it directly once the requirements above are complete.</p>}
+          {product.status === "active" && <p>Saving as a draft takes this listing off sale. Choose Publish listing to make your changes live.</p>}
+          <p>Publishing makes this listing available to buyers immediately. Buyers can report a problem with a listing.</p>
           </div>
         </details>
         </fieldset>
-        {catalogReady && <div className="listing-action-bar" aria-label="Save and submit listing">
+        {catalogReady && <div className="listing-action-bar" aria-label="Save and publish listing">
           <div className="listing-save-status"><strong role="status">{busy ? "Saving draft and photos…" : photoBusy ? "Saving photo changes…" : dirty ? "Unsaved changes" : savedAt ? `Saved at ${savedAt}` : productId ? "Saved draft loaded" : "Draft not yet saved"}</strong>
-          <button type="button" className="text-action" onClick={() => openSection("review")}>{submitted ? "Submitted for review" : remaining.length ? `${remaining.length} step${remaining.length === 1 ? "" : "s"} to review · View` : "Review & submit"}</button></div>
-          <div className="row-actions"><button className="button outline" type="submit" value="save" disabled={busy || photoBusy}>{busy ? "Saving…" : "Save draft"}</button><button className="button dark" type="submit" value="submit" disabled={busy || photoBusy || submitted}>{busy ? "Saving…" : "Submit for review"}</button></div>
-          {message && <p className="admin-message" role="status">{message}</p>}
+          <button type="button" className="text-action" onClick={() => openSection("review")}>{published ? "Listing is live" : remaining.length ? `${remaining.length} step${remaining.length === 1 ? "" : "s"} to review · View` : "Review & publish"}</button></div>
+          <div className="row-actions"><button className="button outline" type="submit" value="save" disabled={busy || photoBusy}>{busy ? "Saving…" : "Save draft"}</button><button className="button dark" type="submit" value="publish" disabled={busy || photoBusy || published}>{busy ? "Saving…" : "Publish listing"}</button></div>
+          {message && <p className="admin-message" role="status">{message}{published && publishedSlug && <> <Link className="text-link" href={`/products/${publishedSlug}`}>View live listing</Link></>}</p>}
         </div>}
       </form>
       {preview && <ListingBuyerPreview product={preview} onClose={closePreview} />}

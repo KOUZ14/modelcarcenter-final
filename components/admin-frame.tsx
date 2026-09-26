@@ -22,7 +22,7 @@ export function AdminFrame({ adminEmail, environment, children }: {
   const section = params.get("section") || "overview";
   const destinations = [
     ...adminSections.map(([id, label]) => ({ label, href: `/admin?section=${id}`, active: pathname === "/admin" && section === id })),
-    ...[["preorders", "Preorder operations"], ["promotions", "Promoted listings"], ["community", "Community moderation"]].map(([id, label]) => ({ label, href: `/admin/${id}`, active: pathname === `/admin/${id}` })),
+    ...[["preorders", "Preorder operations"], ["promotions", "Promoted listings"], ["community", "Listing & community reports"]].map(([id, label]) => ({ label, href: `/admin/${id}`, active: pathname === `/admin/${id}` })),
   ];
   return <div className="admin-shell">
     <header className="admin-header">

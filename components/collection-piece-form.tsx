@@ -105,7 +105,7 @@ export function CollectionPieceForm({ piece, shelves, visibility, seedCatalogId,
       <label>Marketplace listing
         <select value={listingId} onChange={e => setListingId(e.target.value)}>
           <option value="">{listings.length ? "Choose the listing for this physical piece" : "No eligible matching listing yet"}</option>
-          {listingId && !selectedListing && <option value={listingId} disabled>Previously selected listing · setup or review required</option>}
+          {listingId && !selectedListing && <option value={listingId} disabled>Previously selected listing · not published</option>}
           {listings.map(l => <option value={l.id} key={l.id}>{l.title} · {new Intl.NumberFormat(undefined, { style: "currency", currency: l.currency }).format(l.priceCents / 100)}</option>)}
         </select>
       </label>
