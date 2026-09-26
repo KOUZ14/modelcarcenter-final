@@ -31,6 +31,16 @@ export function ProductImageFields({ images, primaryImageUrl, files, disabled = 
   const [notice, setNotice] = useState("");
   const [labelOverrides, setLabelOverrides] = useState<Record<string, PhotoView[]>>({});
   const labelsRef = useRef<HTMLFieldSetElement>(null);
+  const overflowRef = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    const dismiss = (event: PointerEvent) => {
+      const menu = overflowRef.current;
+      if (menu?.open && !menu.contains(event.target as Node)) menu.open = false;
+    };
+    document.addEventListener("pointerdown", dismiss);
+    return () => document.removeEventListener("pointerdown", dismiss);
+  }, []);
+  function closeActions() { if (overflowRef.current) overflowRef.current.open = false; }
   const legacyPrimary = primaryImageUrl && !images.some(image => image.url === primaryImageUrl) ? primaryImageUrl : null;
   const photos = [
     ...(legacyPrimary ? [{ key: "legacy", url: legacyPrimary, alt: "Existing cover photo", file: undefined as File | undefined, image: undefined as EditableProductImage | undefined }] : []),
@@ -74,6 +84,7 @@ export function ProductImageFields({ images, primaryImageUrl, files, disabled = 
 
   function move(to: number) {
     if (!active) return;
+    closeActions();
     if (active.file) {
       const from = files.indexOf(active.file);
       onFilesChange(moveItem(files, from, to));
@@ -110,9 +121,12 @@ export function ProductImageFields({ images, primaryImageUrl, files, disabled = 
           if (active.file && onCoverFileChange) onCoverFileChange(active.file);
           else move(0);
         }}>Set as cover</button>
-        <details className="photo-overflow" key={String(index)}><summary>More actions</summary><div>
+        <details ref={overflowRef} className="photo-overflow" key={String(index)} onKeyDown={event => {
+          if (event.key === "Escape") { event.preventDefault(); closeActions(); event.currentTarget.querySelector("summary")?.focus(); }
+        }} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) closeActions(); }}><summary>More actions</summary><div>
           {(active.file || (active.image && onReorder)) && <><button type="button" disabled={locked || ownIndex === 0} onClick={() => move(ownIndex - 1)}>Move earlier</button><button type="button" disabled={locked || ownIndex === ownCount - 1} onClick={() => move(ownIndex + 1)}>Move later</button></>}
-          {(active.file || onRemove || (active.key === "legacy" && onRemoveLegacy)) && <button type="button" disabled={locked} onClick={() => {
+          {(active.file || onRemove || (active.key === "legacy" && onRemoveLegacy)) && <button type="button" className="photo-remove-action" disabled={locked} onClick={() => {
+            closeActions();
             if (active.file) onFilesChange(files.filter(file => file !== active.file));
             else if (active.image && onRemove) void run(() => onRemove(active.image!.id), "Photo removed.");
             else if (onRemoveLegacy) void run(onRemoveLegacy, "Photo removed.");
