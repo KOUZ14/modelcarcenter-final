@@ -1,0 +1,42 @@
+# Seller Hub
+
+The professional seller workspace remains at `/store`, with Overview, Orders, Inventory, Payments, Buyer messages, Growth, Analytics, Settings and Help. Phones use a compact header and navigation drawer; desktop keeps the sidebar. Legacy Demand, Opportunities and Marketing URLs resolve to Growth. Existing `view`, `filter`, `edit`, preorder and setup-anchor links remain supported.
+
+The View storefront link appears only for active stores with recorded acceptance of the current Seller Terms, matching the public storefront route. Other stores see Storefront not live and a direct terms, approval, payment-setup or support action. The dashboard does not imply that approval alone makes a storefront public.
+
+Overview starts with paid orders awaiting shipment, sorted by dispatch deadline, then compact metrics and task links. Completed setup steps are collapsed. The four setup tasks derive their status from saved store details, payment connection, shipping configuration and inventory. Drafts can be added before setup is complete. Application approval, listing review, current Seller Terms and publication readiness remain separate; bank setup cannot approve an applicant store.
+
+Orders show purchased item snapshots, thumbnails, seller SKUs, quantities, status and dispatch deadlines before expandable fulfillment and financial details. Missing historical items are identified explicitly with a support route, and shipment creation is unavailable until those records are resolved. Current inventory is never used to invent historical packing details. Carrier labels, manual tracking, combined shipments, resolution links and preorder tools are retained.
+
+Inventory uses product cards on phones and a table on desktop. Required-photo warnings link to the editor; the Needs attention count includes each affected listing once. Bulk stock/price updates and CSV import are in the main toolbar. Spreadsheet uploads keep the template, editable preview, row errors and create/update labels. Repeated uploads reuse case-insensitive seller SKUs while retaining their saved spelling. Reserved stock cannot be removed. New items stay drafts; existing items retain their status. Stock sold elsewhere must still be updated manually.
+
+The full-page listing editor has Model, Price & stock, Condition and Photos sections, one scrolling area, and persistent Save/Cancel controls. Shared catalog reuse remains the first step. Optional manual catalog fields are expandable, and a publication checklist sits with photo evidence. Model and packaging condition remain separate.
+
+Payments shows one actionable account status. A connected Stripe account with outdated Seller Terms asks for terms acceptance without claiming that another bank connection is required. Held proceeds, recorded releases, eligible dates and legacy direct payouts are distinguished. Settings separates storefront details, shipping/returns, payments/fees and terms; section URLs survive refresh. Logo selection supports a preview and replacement/removal, with metadata removed before storage and ownership enforced when saving. Country names replace public-profile country codes. Help links directly to each task.
+
+Buyer messages stays inside Seller Hub. Existing listing enquiries open first when present, with collector messages, requests, offers and combined-shipping requests in separate views. Listing enquiries are scoped to the seller's incoming conversations. The shipping view links to Orders. Message dates use explicit UTC formatting to avoid server/browser hydration differences.
+
+See [the usability handoff](marketplace-usability-handoff.md), [task measurement](task-measurement.md), and [owner study protocol](store-owner-study.md).
+
+## Data and definitions
+
+- Overview order counts are lifetime; Analytics explicitly offers the last 30, 90 or 180 days. One UTC interval and currency drive Analytics totals, the preceding equal-length comparison, revenue chart and product performance. Paid dates are preferred, with creation dates used for older records.
+- Analytics revenue is gross item subtotal for paid and partially refunded orders. Shipping, tax, unpaid/fully refunded orders, test orders, future dates and other currencies are excluded. Partial refunds are not deducted from this gross-sales measure. It is not profit or an accounting statement.
+- Units and product performance use saved order items. If history is incomplete, the report labels the known count as Recorded units, or Unavailable when no items are recorded, and links to affected orders. It does not equate absent history with zero sales. Product rows compare current and previous revenue and link to the relevant inventory listing.
+- Inventory queues distinguish slow, low, out-of-stock and preorder listings. Low stock means 1-2 available units on active in-stock listings; reservations reduce availability. Needs attention includes drafts/review/rejected listings and non-preorder listings with missing required photo evidence.
+- Slow inventory means active in-stock listings created at least 90 days ago, with stock remaining and no paid sale in the last 90 days. Editing does not reset listing age.
+- Inventory value is available non-preorder stock at current list price, excluding rejected listings. It is not inventory cost. The existing sell-through calculation uses 90-day units divided by those units plus current available stock; it is not historical inventory turnover.
+- Payout totals separate recorded releases to Stripe, less reversals, from held proceeds adjusted for refunds. Processing transfers are not released. Unfinalized fee amounts and legacy destination payouts are excluded where appropriate. Legacy rows show known order proceeds separately from untracked release amounts. Stripe bank deposits and arrival dates are not tracked by MCC.
+- Old orders retain their recorded fee payer: a legacy MCC-paid processing fee is explained as historical treatment. New orders deduct the actual processing fee from seller proceeds, with no change to the settlement rules.
+- Growth uses seller-scoped wishlist saves, active restock subscriptions and aggregate open/possible-match Model Hunts. Owner saves are excluded. No collector contacts or private hunt notes are sent to the browser.
+- Rising interest means at least three current saves created in the last 30 days, exceeding the preceding 30 days. This is wishlist interest, not price growth. Removed saves do not remain in trend history.
+- Want List matching respects model, scale, requested maker/color/condition and budget. Unfulfilled demand means demand the store cannot fulfill from active in-stock inventory.
+- Returns shows return-and-refund resolution requests, including historical ones, and links to the Resolution Center. Repeat buyers use normalized email across paid/partially refunded orders.
+
+## Capability boundaries
+
+Promoted listings are under Growth > Promoted listings. Eligible inventory can be promoted for the configured price and period through Stripe, then paused, resumed or ended from the same row. Existing administrator pricing, tax, availability and refund settings remain authoritative. See [Promoted listings operations](promoted-listings.md). Pricing opportunities, Model Hunts and restock demand remain actionable Growth views; unavailable offers-to-watchers, follower attribution and buyer-search reports are described only in collapsed capability guidance.
+
+Optional aggregate buyer-search and task counts remain administrator-only under the site's privacy choices. They contain no search terms or collector identities and do not provide seller-level attribution. Targeted offers and coupon/scheduled discount campaigns remain separate work. Community followers are distinct from purchase history. The temporary profit calculator and unavailable turnover panel were removed from Analytics to keep the shared-period report central.
+
+Preorders are created in the listing form by selecting **Preorder - 10% deposit**, with expected ship date, incoming quantity and buyer limit. Buyers pay 10% upfront, then the balance when stock is ready. Change-of-mind deposits are non-refundable unless the seller approves a refund; inability to fulfill and qualifying delays require refunds. Inventory > Manage preorder opens stock/date/refund tools. Orders > Preorders shows deposits and balances; buyers use My Orders. Former standalone pages redirect into these screens. See [Preorders](preorders.md) and migrations `0032`-`0034`.

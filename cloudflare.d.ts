@@ -24,6 +24,7 @@ interface Fetcher {
 }
 
 interface R2ObjectBody {
+  customMetadata?: Record<string, string>;
   body: ReadableStream;
   size: number;
   httpEtag: string;

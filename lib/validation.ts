@@ -1,4 +1,8 @@
 import { normalizeSearch } from "./business.ts";
+import { isFactorySealed, listingPhotoEvidence, type EvidenceImage } from "./listing-evidence.ts";
+import { isCurrentPolicyVersion } from "./legal.ts";
+import { addressErrors, normalizeState, SHIP_FROM_FIELD_NAMES, shipFromAddressValues, type AddressField } from "./address.ts";
+import { listingFieldLabel, requiredListingFieldMessage } from "./listing-form-validation.ts";
 
 export class ValidationError extends Error {
   fields: Record<string, string>;
@@ -38,7 +42,10 @@ export function optionalHttpUrl(value: unknown) {
 
 export function requiredString(value: unknown, label: string, max = 200) {
   const result = cleanText(value, max);
-  if (!result) throw new ValidationError(`${label} is required.`, { [label]: "Required" });
+  if (!result) {
+    const message = requiredListingFieldMessage(label);
+    throw new ValidationError(message, { [label]: message });
+  }
   return result;
 }
 
@@ -46,9 +53,8 @@ export function integer(value: unknown, label: string, min: number, max: number)
   const raw = typeof value === "number" ? String(value) : String(value ?? "").trim();
   const parsed = /^-?\d+$/.test(raw) ? Number(raw) : Number.NaN;
   if (!Number.isInteger(parsed) || parsed < min || parsed > max) {
-    throw new ValidationError(`${label} must be between ${min} and ${max}.`, {
-      [label]: "Invalid value",
-    });
+    const message = `${listingFieldLabel(label)} must be a whole number between ${min} and ${max}.`;
+    throw new ValidationError(message, { [label]: message });
   }
   return parsed;
 }
@@ -56,11 +62,13 @@ export function integer(value: unknown, label: string, min: number, max: number)
 export function moneyToCents(value: unknown, label = "price") {
   const normalized = String(value ?? "").trim().replace(/^\$/, "");
   if (!/^\d+(\.\d{1,2})?$/.test(normalized)) {
-    throw new ValidationError(`${label} must be a valid amount with no more than two decimals.`);
+    const message = `${listingFieldLabel(label)} must be a valid amount with no more than two decimals.`;
+    throw new ValidationError(message, { [label]: message });
   }
   const cents = Math.round(Number(normalized) * 100);
   if (!Number.isSafeInteger(cents) || cents < 0 || cents > 100_000_000) {
-    throw new ValidationError(`${label} is outside the supported range.`);
+    const message = `${listingFieldLabel(label)} is outside the supported range.`;
+    throw new ValidationError(message, { [label]: message });
   }
   return cents;
 }
@@ -77,9 +85,9 @@ export function parseModelHunt(payload: Record<string, unknown>) {
   if (!isEmail(email)) throw new ValidationError("Enter a valid email address.");
   const budget = cleanText(payload.maxBudget, 30);
   return {
-    vehicleMake: requiredString(payload.vehicleMake, "vehicleMake", 80),
-    vehicleModel: requiredString(payload.vehicleModel, "vehicleModel", 100),
-    preferredScale: requiredString(payload.preferredScale, "preferredScale", 30),
+    vehicleMake: cleanText(payload.vehicleMake, 80),
+    vehicleModel: requiredString(payload.vehicleModel, "Model or search description", 200),
+    preferredScale: cleanText(payload.preferredScale, 30),
     modelManufacturer: cleanText(payload.modelManufacturer, 100) || null,
     color: cleanText(payload.color, 80) || null,
     conditionPreference: cleanText(payload.conditionPreference, 40) || null,
@@ -91,6 +99,9 @@ export function parseModelHunt(payload: Record<string, unknown>) {
 
 export function parseSellerApplication(payload: Record<string, unknown>) {
   rejectHoneypot(payload);
+  if (!isCurrentPolicyVersion(payload.sellerTermsVersion)) {
+    throw new ValidationError("Accept the current Seller Terms to apply.");
+  }
   const email = normalizeEmail(payload.email);
   if (!isEmail(email)) throw new ValidationError("Enter a valid email address.");
   const rawWebsite = cleanText(payload.website, 1_500);
@@ -125,29 +136,261 @@ export const collectorListingConditions = [
   "used_fair",
 ] as const;
 
-export function parseCollectorListing(payload: Record<string, unknown>) {
-  const condition = cleanText(payload.condition, 40);
-  if (!collectorListingConditions.includes(condition as (typeof collectorListingConditions)[number])) {
-    throw new ValidationError("Choose a supported listing condition.");
+export const modelConditions = [
+  "mint",
+  "near_mint",
+  "excellent",
+  "good",
+  "fair",
+  "poor",
+] as const;
+
+export const packagingConditions = [
+  "sealed", // Legacy: sealed, physical grade not recorded.
+  "sealed_mint", "sealed_excellent", "sealed_good", "sealed_fair", "sealed_poor",
+  "mint",
+  "excellent",
+  "good",
+  "fair",
+  "poor",
+  "not_included",
+] as const;
+
+export const originalBoxStatuses = [
+  "included",
+  "not_included",
+  "reproduction",
+] as const;
+
+export const coaStatuses = [
+  "included",
+  "not_included",
+  "not_applicable",
+] as const;
+
+export const listingPhotoChecklist = [
+  { key: "photoFrontChecked", label: "Front and front three-quarter view" },
+  { key: "photoRearChecked", label: "Rear and rear three-quarter view" },
+  { key: "photoSidesChecked", label: "Both sides of the model" },
+  { key: "photoBaseChecked", label: "Top and underside/base markings" },
+  {
+    key: "photoPackagingChecked",
+    label: "Box, labels, COA, and accessories when included",
+  },
+  {
+    key: "photoIssuesChecked",
+    label: "Close-ups of every defect, missing part, repair, or customization",
+  },
+] as const;
+
+function checked(value: unknown) {
+  return value === true || value === 1 || value === "1" || value === "true" || value === "on";
+}
+
+function supportedValue<const T extends readonly string[]>(
+  value: unknown,
+  values: T,
+  label: string,
+): T[number] {
+  const candidate = cleanText(value, 40);
+  if (!values.includes(candidate as T[number])) {
+    throw new ValidationError(`Choose a supported ${label}.`);
+  }
+  return candidate as T[number];
+}
+
+export function legacyConditionFromCollectibleDetails(input: {
+  modelCondition: (typeof modelConditions)[number];
+  packagingCondition: (typeof packagingConditions)[number];
+}) {
+  if (isFactorySealed(input.packagingCondition) && input.modelCondition === "mint")
+    return "new_sealed" as const;
+  if (["mint", "near_mint"].includes(input.modelCondition))
+    return "new_opened" as const;
+  if (input.modelCondition === "excellent") return "used_excellent" as const;
+  if (input.modelCondition === "good") return "used_good" as const;
+  return "used_fair" as const;
+}
+
+export function parseCollectibleDetails(payload: Record<string, unknown>) {
+  const fields: Record<string, string> = {};
+  for (const [name, options] of Object.entries({ modelCondition: modelConditions, packagingCondition: packagingConditions, originalBoxStatus: originalBoxStatuses, coaStatus: coaStatuses })) {
+    if (!(options as readonly string[]).includes(cleanText(payload[name], 40))) fields[name] = `Choose ${listingFieldLabel(name).toLowerCase()}.`;
+  }
+  for (const name of ["missingParts", "defects", "restorationCustomization"]) {
+    if (!cleanText(payload[name], 2_000)) fields[name] = requiredListingFieldMessage(name);
+  }
+  if (Object.keys(fields).length) throw new ValidationError("Check the highlighted condition and disclosure fields.", fields);
+  const modelCondition = supportedValue(
+    payload.modelCondition,
+    modelConditions,
+    "model condition",
+  );
+  const packagingCondition = supportedValue(
+    payload.packagingCondition,
+    packagingConditions,
+    "packaging condition",
+  );
+  const originalBoxStatus = supportedValue(
+    payload.originalBoxStatus,
+    originalBoxStatuses,
+    "original-box status",
+  );
+  if (
+    (packagingCondition === "not_included") !==
+    (originalBoxStatus === "not_included")
+  ) {
+    throw new ValidationError(
+      "Packaging condition and original-box status must agree when no box is included.",
+      { packagingCondition: "Choose “Not included” for both packaging and original box if there is no box.", originalBoxStatus: "Choose “Not included” for both packaging and original box if there is no box." },
+    );
   }
   return {
+    modelCondition,
+    packagingCondition,
+    originalBoxStatus,
+    missingParts: requiredString(payload.missingParts, "missingParts", 2_000),
+    defects: requiredString(payload.defects, "defects", 2_000),
+    restorationCustomization: requiredString(
+      payload.restorationCustomization,
+      "restorationCustomization",
+      2_000,
+    ),
+    material: cleanText(payload.material, 120),
+    productNumber: cleanText(payload.productNumber, 150) || null,
+    editionSerial: cleanText(payload.editionSerial, 150) || null,
+    coaStatus: supportedValue(payload.coaStatus, coaStatuses, "COA status"),
+    accessories: cleanText(payload.accessories, 2_000),
+    provenance: cleanText(payload.provenance, 2_000),
+    photoFrontChecked: checked(payload.photoFrontChecked),
+    photoRearChecked: checked(payload.photoRearChecked),
+    photoSidesChecked: checked(payload.photoSidesChecked),
+    photoBaseChecked: checked(payload.photoBaseChecked),
+    photoPackagingChecked: checked(payload.photoPackagingChecked),
+    photoIssuesChecked: checked(payload.photoIssuesChecked),
+  };
+}
+
+type ListingReadiness = {
+  modelCondition: string;
+  packagingCondition: string;
+  originalBoxStatus: string;
+  missingParts: string;
+  defects: string;
+  restorationCustomization: string;
+  material: string;
+  coaStatus: string;
+  accessories: string;
+  photoFrontChecked: boolean;
+  photoRearChecked: boolean;
+  photoSidesChecked: boolean;
+  photoBaseChecked: boolean;
+  photoPackagingChecked: boolean;
+  photoIssuesChecked: boolean;
+};
+
+export function assertCollectibleListingReady(
+  listing: ListingReadiness,
+  images: EvidenceImage[] | number,
+) {
+  parseCollectibleDetails(listing);
+  const imageCount = typeof images === "number" ? images : images.length;
+  const minimumPhotos = isFactorySealed(listing.packagingCondition) ? 2 : 4;
+  if (imageCount < minimumPhotos) {
+    const message = `Add at least ${minimumPhotos === 4 ? "four" : "two"} photos of the actual item covering the required views before publishing.`;
+    throw new ValidationError(
+      message, { images: message },
+    );
+  }
+  if (typeof images !== "number") {
+    const evidence = listingPhotoEvidence(listing, images);
+    if (!evidence.complete) {
+      const message = `Label the photos showing: ${evidence.missing.join(", ")}. Factory-sealed models can stay sealed.`;
+      throw new ValidationError(message, { images: message });
+    }
+    return;
+  }
+  const incomplete = listingPhotoChecklist.filter(({ key }) => !listing[key] &&
+    !(isFactorySealed(listing.packagingCondition) && ["photoRearChecked", "photoSidesChecked", "photoBaseChecked"].includes(key)) &&
+    !(listing.originalBoxStatus === "not_included" && key === "photoPackagingChecked"));
+  if (incomplete.length) {
+    throw new ValidationError(
+      `Complete the required photo checklist before publishing: ${incomplete.map((item) => item.label).join(", ")}.`,
+    );
+  }
+}
+
+export function parseCollectorListing(payload: Record<string, unknown>) {
+  validateShipFromFields(payload);
+  const collectible = parseCollectibleDetails(payload);
+  const packageLength = listingPackageDecimal(payload.packageLength, "package length", 108);
+  const packageWidth = listingPackageDecimal(payload.packageWidth, "package width", 108);
+  const packageHeight = listingPackageDecimal(payload.packageHeight, "package height", 108);
+  const packageWeight = listingPackageDecimal(payload.packageWeight, "package weight", 150);
+  const shippingOriginCountry = requiredString(payload.shippingOriginCountry || "US", "shippingOriginCountry", 2).toUpperCase();
+  const shippingOriginRegion = (shippingOriginCountry === "US" ? normalizeState(cleanText(payload.shippingOriginRegion, 80)) : cleanText(payload.shippingOriginRegion, 80)) || null;
+  if (["US", "CA"].includes(shippingOriginCountry) && !shippingOriginRegion)
+    throw new ValidationError("State or region is required for US and Canadian ship-from addresses.");
+  return {
     title: requiredString(payload.title, "title", 200),
-    description: requiredString(payload.description, "description", 4_000),
+    description: cleanText(payload.description, 4_000),
     vehicleMake: requiredString(payload.vehicleMake, "vehicleMake", 100),
     vehicleModel: requiredString(payload.vehicleModel, "vehicleModel", 120),
     vehicleYear: cleanText(payload.vehicleYear, 20) || null,
     scale: requiredString(payload.scale, "scale", 30),
     modelManufacturer: requiredString(payload.modelManufacturer, "modelManufacturer", 100),
     color: cleanText(payload.color, 80) || null,
-    condition: condition as (typeof collectorListingConditions)[number],
+    condition: legacyConditionFromCollectibleDetails(collectible),
+    ...collectible,
     priceCents: moneyToCents(payload.price, "price"),
     inventoryQuantity: integer(payload.quantity, "quantity", 1, 100),
-    shippingCents: moneyToCents(payload.shippingPrice ?? "0", "shipping price"),
+    packageLength,
+    packageWidth,
+    packageHeight,
+    packageWeight,
+    rememberPackageDefaults: checked(payload.rememberPackageDefaults),
     sellerDisplayName: requiredString(payload.sellerDisplayName, "sellerDisplayName", 120),
     sellerDescription: cleanText(payload.sellerDescription, 1_000),
-    shippingOriginCountry: requiredString(payload.shippingOriginCountry || "US", "shippingOriginCountry", 2).toUpperCase(),
-    shippingOriginRegion: cleanText(payload.shippingOriginRegion, 80) || null,
+    sellerSpecialty: cleanText(payload.sellerSpecialty, 300),
+    sellerPackingApproach: cleanText(payload.sellerPackingApproach, 1000),
+    shipFromAddressId:
+      cleanText(payload.shipFromAddressId, 100) === "new"
+        ? null
+        : cleanText(payload.shipFromAddressId, 100) || null,
+    shipFromAddressLabel:
+      cleanText(payload.shipFromAddressLabel, 80) || "Primary ship-from",
+    shippingOriginCountry,
+    shippingOriginRegion,
+    shippingOriginStreet1: requiredString(payload.shippingOriginStreet1, "shippingOriginStreet1", 200),
+    shippingOriginStreet2: cleanText(payload.shippingOriginStreet2, 200) || null,
+    shippingOriginCity: requiredString(payload.shippingOriginCity, "shippingOriginCity", 120),
+    shippingOriginPostalCode: requiredString(payload.shippingOriginPostalCode, "shippingOriginPostalCode", 20),
+    shippingOriginPhone: requiredString(payload.shippingOriginPhone, "shippingOriginPhone", 50),
   };
+}
+
+export function validateShipFromFields(payload: Record<string, unknown>) {
+  const address = shipFromAddressValues(payload);
+  address.country = address.country.trim().toUpperCase();
+  const errors = addressErrors(address, { phone: true });
+  if (Object.keys(errors).length) throw new ValidationError("Check the highlighted address fields.",
+    Object.fromEntries(Object.entries(errors).map(([field, message]) => [SHIP_FROM_FIELD_NAMES[field as AddressField], message])),
+  );
+}
+
+function listingPackageDecimal(value: unknown, label: string, max: number) {
+  const text = String(value ?? "").trim();
+  const field = label.replace(/ ([a-z])/g, (_, letter: string) => letter.toUpperCase());
+  if (!/^\d+(?:\.\d{1,2})?$/.test(text)) {
+    const message = `Enter a positive ${label} with up to two decimal places.`;
+    throw new ValidationError(message, { [field]: message });
+  }
+  const number = Number(text);
+  if (!Number.isFinite(number) || number <= 0 || number > max) {
+    const message = `${listingFieldLabel(field)} must be greater than 0 and no more than ${max}.`;
+    throw new ValidationError(message, { [field]: message });
+  }
+  return String(Number(number.toFixed(2)));
 }
 
 export type CsvRow = Record<string, string>;
@@ -196,7 +439,15 @@ const requiredCsv = [
   "model_manufacturer",
   "vehicle_make",
   "vehicle_model",
-  "condition",
+  "model_condition",
+  "packaging_condition",
+  "original_box",
+  "missing_parts",
+  "defects",
+  "restoration_customization",
+  "material",
+  "coa",
+  "accessories",
   "price",
   "inventory_quantity",
 ] as const;
@@ -212,10 +463,29 @@ export type ValidatedImportRow = {
   vehicleModel: string;
   vehicleYear: string | null;
   color: string | null;
-  condition: "new" | "used" | "preowned" | "other";
+  condition: ReturnType<typeof legacyConditionFromCollectibleDetails>;
+  modelCondition: (typeof modelConditions)[number];
+  packagingCondition: (typeof packagingConditions)[number];
+  originalBoxStatus: (typeof originalBoxStatuses)[number];
+  missingParts: string;
+  defects: string;
+  restorationCustomization: string;
+  material: string;
+  productNumber: string | null;
+  editionSerial: string | null;
+  coaStatus: (typeof coaStatuses)[number];
+  accessories: string;
+  provenance: string;
+  photoFrontChecked: boolean;
+  photoRearChecked: boolean;
+  photoSidesChecked: boolean;
+  photoBaseChecked: boolean;
+  photoPackagingChecked: boolean;
+  photoIssuesChecked: boolean;
   priceCents: number;
   inventoryQuantity: number;
-  imageUrls: string[];
+  availabilityType: "in_stock" | "preorder";
+  releaseDate: string | null;
   keywords: string;
 };
 
@@ -233,14 +503,39 @@ export function validateImportRows(rows: CsvRow[]) {
     let inventoryQuantity = 0;
     try { priceCents = moneyToCents(row.price); } catch (error) { rowErrors.push((error as Error).message); }
     try { inventoryQuantity = integer(row.inventory_quantity, "inventory_quantity", 0, 1_000_000); } catch (error) { rowErrors.push((error as Error).message); }
-    const condition = cleanText(row.condition, 30).toLowerCase();
-    if (!["new", "used", "preowned", "other"].includes(condition)) rowErrors.push("condition must be new, used, preowned, or other");
-    const imageUrls = cleanText(row.image_urls, 5_000)
-      .split(/[|;]/)
-      .map((url) => url.trim())
-      .filter(Boolean);
-    if (imageUrls.some((url) => !optionalHttpUrl(url))) rowErrors.push("image_urls must contain only http or https URLs separated by | or ;");
-    if (rowErrors.length) {
+    const availabilityType = cleanText(row.availability_type, 20) || "in_stock";
+    const releaseDate = cleanText(row.release_date, 10) || null;
+    if (!['in_stock', 'preorder'].includes(availabilityType))
+      rowErrors.push("availability_type must be in_stock or preorder");
+    if (
+      availabilityType === "preorder" &&
+      (!releaseDate || !/^\d{4}-\d{2}-\d{2}$/.test(releaseDate))
+    )
+      rowErrors.push("release_date is required for preorders in YYYY-MM-DD format");
+    let collectible: ReturnType<typeof parseCollectibleDetails> | null = null;
+    try {
+      collectible = parseCollectibleDetails({
+        modelCondition: row.model_condition,
+        packagingCondition: row.packaging_condition,
+        originalBoxStatus: row.original_box,
+        missingParts: row.missing_parts,
+        defects: row.defects,
+        restorationCustomization: row.restoration_customization,
+        material: row.material,
+        productNumber: row.product_number,
+        editionSerial: row.edition_serial,
+        coaStatus: row.coa,
+        accessories: row.accessories,
+        provenance: row.provenance,
+      });
+    } catch (error) {
+      rowErrors.push((error as Error).message);
+    }
+    if (cleanText(row.image_urls, 5_000))
+      rowErrors.push(
+        "image_urls is no longer supported; upload product photos after importing",
+      );
+    if (rowErrors.length || !collectible) {
       errors.push({ row: index + 2, errors: rowErrors });
       return;
     }
@@ -255,10 +550,12 @@ export function validateImportRows(rows: CsvRow[]) {
       vehicleModel: cleanText(row.vehicle_model, 120),
       vehicleYear: cleanText(row.vehicle_year, 20) || null,
       color: cleanText(row.color, 80) || null,
-      condition: condition as ValidatedImportRow["condition"],
+      condition: legacyConditionFromCollectibleDetails(collectible),
+      ...collectible,
       priceCents,
       inventoryQuantity,
-      imageUrls,
+      availabilityType: availabilityType as "in_stock" | "preorder",
+      releaseDate: availabilityType === "preorder" ? releaseDate : null,
       keywords: cleanText(row.keywords, 1_000),
     });
   });
@@ -276,6 +573,7 @@ export function planImportUpserts(
     const id = previous?.id ?? createId();
     return {
       ...row,
+      sellerSku: previous?.sellerSku ?? row.sellerSku,
       id,
       slug: previous?.slug ?? `${makeSlug(row.title)}-${makeSlug(row.sellerSku)}-${id.slice(0, 6)}`,
       operation: previous ? "update" as const : "insert" as const,

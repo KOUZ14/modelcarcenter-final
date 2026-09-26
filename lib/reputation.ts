@@ -1,0 +1,228 @@
+import {
+  and,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  or,
+  sql,
+} from "drizzle-orm";
+import { getDb } from "@/db";
+import {
+  collectorProfiles,
+  orders,
+  resolutionCases,
+  sellerFeedback,
+  sellers,
+} from "@/db/schema";
+import {
+  canLeaveVerifiedFeedback,
+  getVerifiedFeedbackEligibility,
+  percentage,
+  publicCollectorName,
+  VERIFIED_FEEDBACK_WAIT_DAYS,
+} from "./reputation-rules";
+import {
+  integer,
+  requiredString,
+  ValidationError,
+} from "./validation";
+
+export type SellerReputation = {
+  completedTransactions: number;
+  onTimeShipmentRate: number | null;
+  onTimeShipments: number;
+  trackedShipments: number;
+  sellerSince: string;
+  handlingTimeBusinessDays: number;
+  feedbackCount: number;
+  averageRating: number | null;
+  totalCases: number;
+  resolvedCases: number;
+  recentFeedback: Array<{
+    id: string;
+    rating: number;
+    comment: string;
+    createdAt: string;
+    buyerName: string;
+  }>;
+};
+
+export async function getSellerReputation(
+  sellerId: string,
+): Promise<SellerReputation | null> {
+  const db = getDb();
+  const feedbackWaitingPeriodStart = new Date(
+    Date.now() - VERIFIED_FEEDBACK_WAIT_DAYS * 24 * 60 * 60 * 1_000,
+  ).toISOString();
+  const eligibleFeedbackDelivery = or(
+    eq(orders.fulfillmentStatus, "delivered"),
+    and(
+      eq(orders.fulfillmentStatus, "shipped"),
+      isNotNull(orders.shippedAt),
+      sql`julianday(${orders.shippedAt}) <= julianday(${feedbackWaitingPeriodStart})`,
+    ),
+  );
+  const [sellerRows, completedRows, shippingRows, caseRows, feedbackRows, recentRows] =
+    await Promise.all([
+      db
+        .select({
+          createdAt: sellers.createdAt,
+          handlingTimeBusinessDays: sellers.handlingTimeBusinessDays,
+        })
+        .from(sellers)
+        .where(eq(sellers.id, sellerId))
+        .limit(1),
+      db
+        .select({ count: sql<number>`count(*)` })
+        .from(orders)
+        .where(
+          and(
+            eq(orders.sellerId, sellerId),
+            inArray(orders.paymentStatus, ["paid", "partially_refunded"]),
+            inArray(orders.fulfillmentStatus, ["shipped", "delivered"]),
+          ),
+        ),
+      db
+        .select({
+          tracked: sql<number>`count(*)`,
+          onTime: sql<number>`coalesce(sum(case when julianday(${orders.shippedAt}) <= julianday(${orders.shipByAt}) then 1 else 0 end), 0)`,
+        })
+        .from(orders)
+        .where(
+          and(
+            eq(orders.sellerId, sellerId),
+            isNotNull(orders.shippedAt),
+            isNotNull(orders.shipByAt),
+          ),
+        ),
+      db
+        .select({
+          total: sql<number>`count(*)`,
+          resolved: sql<number>`coalesce(sum(case when ${resolutionCases.status} in ('resolved', 'closed', 'denied') then 1 else 0 end), 0)`,
+        })
+        .from(resolutionCases)
+        .innerJoin(orders, eq(resolutionCases.orderId, orders.id))
+        .where(eq(orders.sellerId, sellerId)),
+      db
+        .select({
+          count: sql<number>`count(*)`,
+          average: sql<number | null>`avg(${sellerFeedback.rating})`,
+        })
+        .from(sellerFeedback)
+        .innerJoin(orders, eq(sellerFeedback.orderId, orders.id))
+        .where(
+          and(
+            eq(sellerFeedback.sellerId, sellerId),
+            eligibleFeedbackDelivery,
+          ),
+        ),
+      db
+        .select({
+          id: sellerFeedback.id,
+          rating: sellerFeedback.rating,
+          comment: sellerFeedback.comment,
+          createdAt: sellerFeedback.createdAt,
+          displayName: collectorProfiles.displayName,
+        })
+        .from(sellerFeedback)
+        .innerJoin(orders, eq(sellerFeedback.orderId, orders.id))
+        .leftJoin(
+          collectorProfiles,
+          eq(sellerFeedback.buyerUserId, collectorProfiles.userId),
+        )
+        .where(
+          and(
+            eq(sellerFeedback.sellerId, sellerId),
+            eligibleFeedbackDelivery,
+          ),
+        )
+        .orderBy(desc(sellerFeedback.createdAt))
+        .limit(6),
+    ]);
+  const seller = sellerRows[0];
+  if (!seller) return null;
+  const trackedShipments = Number(shippingRows[0]?.tracked ?? 0);
+  const onTimeShipments = Number(shippingRows[0]?.onTime ?? 0);
+  const feedbackCount = Number(feedbackRows[0]?.count ?? 0);
+  const average = feedbackRows[0]?.average;
+  return {
+    completedTransactions: Number(completedRows[0]?.count ?? 0),
+    onTimeShipmentRate: percentage(onTimeShipments, trackedShipments),
+    onTimeShipments,
+    trackedShipments,
+    sellerSince: seller.createdAt,
+    handlingTimeBusinessDays: seller.handlingTimeBusinessDays,
+    feedbackCount,
+    averageRating:
+      feedbackCount && average != null ? Math.round(Number(average) * 10) / 10 : null,
+    totalCases: Number(caseRows[0]?.total ?? 0),
+    resolvedCases: Number(caseRows[0]?.resolved ?? 0),
+    recentFeedback: recentRows.map((item) => ({
+      id: item.id,
+      rating: item.rating,
+      comment: item.comment,
+      createdAt: item.createdAt,
+      buyerName: publicCollectorName(item.displayName),
+    })),
+  };
+}
+
+export async function saveVerifiedPurchaseFeedback(
+  buyerUserId: string,
+  payload: Record<string, unknown>,
+) {
+  const orderId = requiredString(payload.orderId, "orderId", 100);
+  const rating = integer(payload.rating, "rating", 1, 5);
+  const comment = requiredString(payload.comment, "comment", 1_000);
+  if (comment.length < 10)
+    throw new ValidationError("Feedback must be at least 10 characters.");
+  const db = getDb();
+  const orderRows = await db
+    .select({
+      id: orders.id,
+      sellerId: orders.sellerId,
+      paymentStatus: orders.paymentStatus,
+      fulfillmentStatus: orders.fulfillmentStatus,
+      shippedAt: orders.shippedAt,
+    })
+    .from(orders)
+    .where(and(eq(orders.id, orderId), eq(orders.buyerUserId, buyerUserId)))
+    .limit(1);
+  const order = orderRows[0];
+  if (!order)
+    throw new ValidationError("This order is not connected to your account.");
+  if (!canLeaveVerifiedFeedback(order)) {
+    const eligibility = getVerifiedFeedbackEligibility(order);
+    const fallbackDate = eligibility.eligibleAt
+      ? new Intl.DateTimeFormat("en-US", {
+          dateStyle: "medium",
+          timeZone: "UTC",
+        }).format(new Date(eligibility.eligibleAt))
+      : null;
+    throw new ValidationError(
+      fallbackDate
+        ? `Verified feedback becomes available after carrier-confirmed delivery, or on ${fallbackDate} if no delivery event arrives.`
+        : "Verified feedback becomes available after carrier-confirmed delivery.",
+    );
+  }
+  const now = new Date().toISOString();
+  const id = crypto.randomUUID();
+  await db
+    .insert(sellerFeedback)
+    .values({
+      id,
+      orderId,
+      sellerId: order.sellerId,
+      buyerUserId,
+      rating,
+      comment,
+      createdAt: now,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: sellerFeedback.orderId,
+      set: { rating, comment, updatedAt: now },
+    });
+  return { feedback: { orderId, rating, comment, updatedAt: now } };
+}

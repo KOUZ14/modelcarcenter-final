@@ -1,14 +1,17 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import { authClient } from "@/lib/auth-client";
+import Link from "next/link";
+import { AdultConsent } from "./adult-consent";
 
 export function SignInForm({
   returnTo = "/account",
   initialError = "",
+  saveOrder = false,
 }: {
   returnTo?: string;
   initialError?: string;
+  saveOrder?: boolean;
 }) {
   const [email, setEmail] = useState("");
   const [state, setState] = useState<"idle" | "loading" | "sent" | "error">(
@@ -23,31 +26,41 @@ export function SignInForm({
       returnTo.startsWith("/") && !returnTo.startsWith("//")
         ? returnTo
         : "/account";
-    const result = await authClient.signIn.magicLink({
-      email,
-      name: email.split("@")[0] || "Collector",
-      callbackURL,
-      newUserCallbackURL: "/account?new=1",
-      errorCallbackURL: "/sign-in?error=invalid-link",
-    });
-    if (result.error) {
+    const newUserReturn = new URL(callbackURL, "https://modelcarcenter.invalid");
+    newUserReturn.searchParams.set("new", "1");
+    const newUserCallbackURL = `${newUserReturn.pathname}${newUserReturn.search}${newUserReturn.hash}`;
+    const errorParams = new URLSearchParams({ error: "invalid-link", returnTo: callbackURL });
+    if (saveOrder) errorParams.set("intent", "save-order");
+    try {
+      const response = await fetch("/api/auth/sign-in/magic-link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          adultConsent: new FormData(event.currentTarget).get("adultConsent"),
+          email,
+          name: email.split("@")[0] || "Collector",
+          callbackURL,
+          newUserCallbackURL,
+          errorCallbackURL: `/sign-in?${errorParams}`,
+        }),
+      });
+      const result = await response.json() as { message?: string; error?: string };
+      if (!response.ok) throw new Error(result.error || result.message || "We could not send the sign-in email. Please try again.");
+      setState("sent");
+    } catch (error) {
       setState("error");
-      setMessage(
-        result.error.message ||
-          "We could not send the sign-in email. Please try again.",
-      );
-      return;
+      setMessage(error instanceof Error ? error.message : "We could not send the sign-in email. Please try again.");
     }
-    setState("sent");
+
   }
   if (state === "sent")
     return (
       <div className="auth-card" role="status">
         <p className="eyebrow">Check your email</p>
-        <h1>Your secure link is on its way.</h1>
+        <h1>Check for your secure link.</h1>
         <p>
-          We sent a single-use sign-in link to <b>{email}</b>. It expires in 10
-          minutes.
+          If your request can be processed, a single-use sign-in link will arrive at <b>{email}</b>.
+          It expires in 10 minutes. If you recently requested a link, use that email or wait 10 minutes before trying again.
         </p>
         <button
           className="text-button"
@@ -56,16 +69,22 @@ export function SignInForm({
         >
           Use another email
         </button>
+        {returnTo === "/cart" && <Link className="button outline" href="/cart">Continue as guest</Link>}
+        {saveOrder && <Link className="text-link" href="/marketplace">Continue browsing</Link>}
       </div>
     );
   return (
-    <form className="auth-card" onSubmit={submit} noValidate>
-      <p className="eyebrow">Collector account</p>
-      <h1>Sign in to Model Car Center</h1>
-      <p>
-        Keep your orders, wishlist, Model Hunts, listings, and sales in one My
-        Garage account.
+    <form className="auth-card" onSubmit={submit}>
+      <p className="eyebrow">
+        {returnTo.startsWith("/store") ? "Store account" : "Your account"}
       </p>
+      <h1>{saveOrder ? "Create your optional account" : "Sign in to Model Car Center"}</h1>
+      <p>
+        {saveOrder
+          ? "Use the same email you used at checkout. After you verify the secure link, your guest orders will appear in My Garage. If you already have an account, the link signs you in."
+          : "Use one secure account for shopping and selling. Approved stores should sign in with the contact email on their seller record."}
+      </p>
+      {saveOrder && <p>Your purchase is complete. This step is optional; tracking emails and support do not require an account.</p>}
       <label htmlFor="sign-in-email">
         Email address
         <input
@@ -79,6 +98,7 @@ export function SignInForm({
           placeholder="you@example.com"
         />
       </label>
+      <AdultConsent/>
       {state === "error" && (
         <p className="form-error" role="alert">
           {message ||
@@ -93,9 +113,10 @@ export function SignInForm({
         {state === "loading" ? "Sending secure link…" : "Continue"}
       </button>
       <p className="form-note">
-        No password needed. Browsing and guest checkout remain available without
-        an account.
+        No password needed. By continuing, you agree to the <Link href="/terms">Marketplace Terms</Link> and acknowledge the <Link href="/privacy">Privacy Policy</Link>. Browsing and guest checkout remain available without an account.
       </p>
+      {returnTo === "/cart" && <Link className="button outline" href="/cart">Continue as guest</Link>}
+      {saveOrder && <Link className="text-link" href="/marketplace">Skip and continue browsing</Link>}
     </form>
   );
 }

@@ -8,7 +8,7 @@ export async function GET(
 ) {
   const raw = (await params).key;
   const key = Array.isArray(raw) ? raw.join("/") : raw;
-  if (!key.startsWith("listings/") || key.includes("..")) return new Response("Not found", { status: 404 });
+  if ((!key.startsWith("listings/") && !/^store-logos\/[^/]+\/[a-f0-9-]+\.jpg$/.test(key)) || key.includes("..")) return new Response("Not found", { status: 404 });
   const object = await env.IMAGES.get(key);
   if (!object) return new Response("Not found", { status: 404 });
   const headers = new Headers();

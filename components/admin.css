@@ -1,0 +1,66 @@
+.admin-shell { min-width: 0; overflow-wrap: anywhere; }
+.admin-shell *, .admin-shell *::before, .admin-shell *::after { box-sizing: border-box; }
+.admin-main { padding-block: 28px 60px; }
+.admin-main :is(section, article, form, fieldset, div, label) { min-width: 0; }
+.admin-main :is(input, select, textarea) { max-width: 100%; min-width: 0; }
+.admin-main fieldset { min-inline-size: 0; }
+.admin-header { gap: 16px; }
+.admin-header > div { flex-wrap: wrap; gap: 12px; }
+.admin-environment { display: inline-block; padding: 6px 10px; border: 1px solid #e6be64; border-radius: 4px; color: #fff0bf; font-weight: 700; }
+.admin-navigation { position: sticky; top: 0; z-index: 20; background: white; border-bottom: 1px solid #d3d0c9; }
+.admin-tabs { position: static; flex-wrap: wrap; padding: 8px 24px; overflow: visible; }
+.admin-tabs a { padding: 10px 12px; font-size: 13px; text-decoration: none; }
+.admin-tabs a.active { background: #171717; color: white; }
+.admin-menu-toggle { display: none; }
+.admin-title h1, .admin-main > h1 { font-size: 32px; margin-bottom: 24px; }
+.admin-main .panel-heading { gap: 16px; flex-wrap: wrap; }
+.admin-main :is(.admin-panel, .store-panel, .preorder-panel) { padding: 20px; }
+.admin-table-wrap { width: 100%; max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; }
+.admin-table-wrap:focus-visible { outline: 2px solid #77622f; outline-offset: 3px; }
+.admin-main .row-actions { flex-wrap: wrap; }
+.admin-main .row-actions button { min-height: 40px; }
+.admin-stack, .order-admin-list { min-width: 0; }
+.admin-queue-filters { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin-bottom: 18px; }
+.admin-queue-filters label { display: grid; gap: 6px; flex: 1 1 160px; font-size: 13px; }
+.admin-queue-filters input, .admin-queue-filters select { min-height: 44px; padding: 8px; border: 1px solid #aaa; background: white; }
+.admin-attention-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 16px 0 24px; }
+.admin-attention-grid a { display: grid; gap: 8px; padding: 18px; background: white; border: 1px solid #cbc5b8; }
+.admin-attention-grid strong { font-size: 30px; }
+.admin-records { display: grid; gap: 12px; }
+.admin-records > article, .admin-records > details { padding: 18px; background: white; border: 1px solid #d8d4cc; }
+.admin-records summary { cursor: pointer; display: grid; gap: 8px; }
+.admin-records summary::after { content: "Open order details"; text-decoration: underline; font-size: 13px; }
+.admin-records details[open] > summary::after { content: "Close order details"; }
+.admin-record-summary { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.admin-record-meta { display: flex; flex-wrap: wrap; gap: 8px 20px; color: #555; font-size: 13px; }
+.admin-item { display: flex; align-items: center; gap: 12px; padding: 10px 0; }
+.admin-item img, .admin-product-thumbnail { width: 64px; height: 52px; object-fit: contain; background: #f5f3ef; }
+.admin-item p { margin: 0; }
+.admin-warning { padding: 10px 12px; background: #fff0ce; color: #6e4100; border-left: 3px solid #ad7717; }
+.admin-muted { color: #555; font-size: 13px; }
+.admin-focus-panel { border: 2px solid #817042; scroll-margin-top: 140px; }
+.admin-tax-nav { display: flex; flex-wrap: wrap; gap: 8px; }
+.admin-tax-nav a { padding: 10px 14px; background: white; border: 1px solid #ccc; }
+.admin-tax-nav a[aria-current="page"] { color: white; background: #222; }
+.admin-shell .tax-command-bar { grid-template-columns: minmax(0, 1fr) minmax(0, 220px); }
+.admin-shell .tax-command-bar h2 { font-size: 25px; }
+.admin-shell .tax-readiness-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.admin-shell pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 700px) {
+  .admin-header { padding: 12px 15px; flex-direction: column; }
+  .admin-header > div:last-child { align-items: flex-start; flex-direction: row; font-size: 11px; }
+  .admin-main { width: calc(100% - 24px); padding-top: 20px; }
+  .admin-menu-toggle { display: block; width: 100%; text-align: left; padding: 15px; min-height: 48px; }
+  .admin-tabs { display: none; padding: 8px 12px; }
+  .admin-tabs.is-open { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); max-height: 65vh; overflow-y: auto; }
+  .admin-main :is(.admin-panel, .store-panel, .preorder-panel) { padding: 15px; }
+  .admin-main .form-row, .admin-main .admin-filters, .admin-shell .tax-command-bar, .admin-shell .tax-readiness-grid { grid-template-columns: minmax(0, 1fr); }
+  .admin-attention-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .admin-mobile-records :is(thead) { display: none; }
+  .admin-mobile-records :is(table, tbody, tr, td) { display: block; width: 100%; }
+  .admin-mobile-records tr { border-bottom: 2px solid #ccc; padding: 12px 0; }
+  .admin-mobile-records td { min-width: 0; padding: 6px 0; border: 0; }
+  .admin-mobile-records td[data-label]::before { content: attr(data-label) ": "; font-weight: 700; color: #666; }
+  .admin-mobile-records td:empty { display: none; }
+  .admin-focus-panel { scroll-margin-top: 65px; }
+}

@@ -16,13 +16,13 @@ export default async function AccountPage({
 }: {
   searchParams: Promise<{ view?: string; new?: string }>;
 }) {
-  const collector = await requireCollector("/account");
   const query = await searchParams;
+  const collector = await requireCollector(query.view ? `/account?${new URLSearchParams({view:query.view})}` : "/account");
   const data = await getGarageData(collector.user.id);
   return (
-    <main>
-      <SiteHeader />
-      <div className="inner-page shell">
+    <>
+      <SiteHeader searchDisplay="compact" />
+      <main id="main-content" tabIndex={-1} className="inner-page shell account-page">
         <AccountDashboard
           initialView={
             query.view ?? (query.new === "1" ? "profile" : "overview")
@@ -32,8 +32,8 @@ export default async function AccountPage({
           email={collector.user.email}
           isNew={query.new === "1"}
         />
-      </div>
+      </main>
       <SiteFooter />
-    </main>
+    </>
   );
 }

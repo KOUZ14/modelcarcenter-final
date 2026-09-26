@@ -1,104 +1,657 @@
 "use client";
+import { CatalogModelPicker } from "./catalog-model-picker";
+import { SellerFeeDisclosure } from "./seller-fee-disclosure";
 
-import Image from "next/image";
+
 import Link from "next/link";
-import { FormEvent, useState } from "react";
-import { collectorListingConditions } from "@/lib/validation";
+import { FormEvent, useEffect, useRef, useState } from "react";
+import {
+  CollectibleListingFields,
+  RequiredPhotoChecklist,
+} from "@/components/collectible-listing-fields";
+import { ProductImageFields } from "@/components/product-image-fields";
+import { POLICY_VERSION } from "@/lib/legal";
+import { uploadProductPhotoFiles } from "@/lib/upload-client";
+import { AddressFields, type AddressFieldsHandle } from "./address-fields";
+import { countryName, SHIP_FROM_FIELD_NAMES, shipFromAddressValues } from "@/lib/address";
+import { focusListingError, listingFieldLabel, listingFieldProps, listingFormErrors, listingInputError, requiredListingFieldMessage, type ListingFieldErrors } from "@/lib/listing-form-validation";
+import { ListingFieldError } from "./listing-field-error";
+import { ListingBuyerPreview } from "./listing-buyer-preview";
+import { buildListingPreview } from "@/lib/listing-preview";
+import type { ProductDetail } from "@/lib/types";
+import { getSelectedPhotoViews, photoAltForViews } from "@/lib/listing-evidence";
+import { listingEditorProgress } from "@/lib/listing-editor-progress";
+import { formatCondition } from "@/lib/format";
 
 type Initial = {
   product: Record<string, unknown>;
   images: Array<{ id: string; url: string; alt: string }>;
 } | null;
+
 type Seller = Record<string, unknown> | null;
 
-const conditionLabels: Record<string, string> = {
-  new_sealed: "New / sealed",
-  new_opened: "New / opened for inspection",
-  displayed: "Displayed",
-  used_excellent: "Used / excellent",
-  used_good: "Used / good",
-  used_fair: "Used / fair",
+type ShipFromAddress = {
+  id: string;
+  label: string;
+  street1: string;
+  street2: string | null;
+  city: string;
+  region: string | null;
+  postalCode: string;
+  country: string;
+  phone: string;
+  isDefault: boolean;
 };
 
 export function CollectorListingForm({
   initial,
   seller,
+  shipFromAddresses: initialShipFromAddresses,
   displayName,
   prefill,
+  marketplaceFeeBps,
+  collectionCatalog,
+  catalogModel,
+  collectionReturnTo,
+  paymentSetup,
 }: {
   initial: Initial;
   seller: Seller;
+  shipFromAddresses: ShipFromAddress[];
   displayName: string;
   prefill: Record<string, string>;
+  marketplaceFeeBps: number;
+  collectionCatalog?: Record<string, unknown>;
+  catalogModel?: Record<string, unknown>;
+  collectionReturnTo?: string;
+  paymentSetup?: "returned" | "refresh" | "unavailable";
 }) {
-  const product = initial?.product ?? {};
+  const product = initial?.product ?? collectionCatalog ?? {};
+  const [catalogReady, setCatalogReady] = useState(Boolean(product.catalogProductId));
+  const formRef = useRef<HTMLFormElement>(null);
+  const addressRef = useRef<AddressFieldsHandle>(null);
+  const savingRef = useRef(false);
   const [productId, setProductId] = useState(String(product.id ?? ""));
+  const [shipFromAddresses, setShipFromAddresses] = useState(
+    initialShipFromAddresses,
+  );
+  const initialShipFromAddressId =
+    initialShipFromAddresses.find(
+      (address) => address.id === String(product.shipFromAddressId ?? ""),
+    )?.id ??
+    initialShipFromAddresses.find((address) => address.isDefault)?.id ??
+    initialShipFromAddresses[0]?.id ??
+    "new";
+  const [shipFromAddressId, setShipFromAddressId] = useState(
+    initialShipFromAddressId,
+  );
   const [images, setImages] = useState(initial?.images ?? []);
+  const [primaryImageUrl, setPrimaryImageUrl] = useState<string | null>(
+    typeof product.primaryImageUrl === "string" ? product.primaryImageUrl : null,
+  );
   const [files, setFiles] = useState<File[]>([]);
-  const [message, setMessage] = useState("");
+  const [pendingCover, setPendingCover] = useState<File | null>(null);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const photoBusyRef = useRef(false);
+  const [dirty, setDirty] = useState(false);
+  const [savedAt, setSavedAt] = useState("");
+  const [published, setPublished] = useState(false);
+  const [publishedSlug, setPublishedSlug] = useState("");
+  const [catalogSummary, setCatalogSummary] = useState<Record<string, unknown>>(catalogModel ?? product);
+  const [preview, setPreview] = useState<ProductDetail | null>(null);
+  const previewUrls = useRef<string[]>([]);
+  useEffect(() => () => { previewUrls.current.forEach(url => URL.revokeObjectURL(url)); }, []);
+  const [values, setValues] = useState<Record<string, unknown>>({ ...product,
+    price: product.priceCents == null ? "" : (Number(product.priceCents) / 100).toFixed(2), quantity: product.inventoryQuantity ?? 1,
+    sellerDisplayName: seller?.storeName ?? displayName, sellerDescription: seller?.description ?? "", sellerSpecialty: seller?.specialty ?? "", sellerPackingApproach: seller?.packingApproach ?? "",
+  });
+
+  function readValues() { if (formRef.current && !savingRef.current) setValues(Object.fromEntries(new FormData(formRef.current))); }
+  function changedFiles(next: File[]) {
+    setFiles(next); setDirty(true); setPublished(false);
+    setPendingCover(current => current && next.includes(current) ? current : null);
+  }
+  useEffect(() => {
+    const form = formRef.current;
+    if (!form) return;
+    const update = () => queueMicrotask(() => { if (!savingRef.current) setValues(Object.fromEntries(new FormData(form))); });
+    update(); form.addEventListener?.("listing-details-change", update);
+    return () => form.removeEventListener?.("listing-details-change", update);
+  }, [catalogReady, shipFromAddressId]);
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener?.("beforeunload", warn);
+    return () => window.removeEventListener?.("beforeunload", warn);
+  }, [dirty]);
+  const stripeReady = Boolean(
+    seller?.stripeChargesEnabled &&
+      seller?.stripePayoutsEnabled &&
+      seller?.status === "active",
+  );
+  const [message, setMessage] = useState(
+    paymentSetup === "unavailable"
+      ? "Your draft is saved. We could not check your payout connection. Reload this page to try again."
+      : paymentSetup && stripeReady
+        ? "Your draft and photos are saved. Your payout account is connected. You can publish your listing."
+        : paymentSetup
+          ? "Your draft and photos are saved. Connect your payout account again to finish setup."
+          : "",
+  );
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [acceptedSellerTerms, setAcceptedSellerTerms] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<ListingFieldErrors>({});
+  const needsErrorFocus = useRef(false);
+  const errorRef = useRef<HTMLParagraphElement>(null);
+
+  useEffect(() => {
+    if (busy || !needsErrorFocus.current || !formRef.current) return;
+    needsErrorFocus.current = false;
+    focusListingError(formRef.current, fieldErrors);
+  }, [busy, fieldErrors]);
+
+  useEffect(() => {
+    if (!busy && error && errorRef.current) {
+      errorRef.current.focus({ preventScroll: true });
+      errorRef.current.scrollIntoView({ block: "center", behavior: "instant" });
+    }
+  }, [busy, error]);
+
+  function showValidation(fields: ListingFieldErrors) {
+    const next = Object.fromEntries(Object.entries(fields).map(([name, message]) =>
+      [name, message === "Required" ? requiredListingFieldMessage(name) : message === "Invalid value" ? `Check ${listingFieldLabel(name).toLowerCase()}.` : message],
+    ));
+    addressRef.current?.setErrors(next, { focus: false });
+    if (shipFromAddressId !== "new" && Object.keys(next).some(name => name.startsWith("shippingOrigin"))) {
+      for (const name of Object.keys(next)) if (name.startsWith("shippingOrigin")) delete next[name];
+      next.shipFromAddressId = "This saved address is incomplete. Choose another address or add a new one.";
+    }
+    needsErrorFocus.current = true;
+    setFieldErrors(next);
+  }
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setBusy(true); setError(""); setMessage("");
-    const submitter = (event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
-    const shouldSubmit = submitter?.value === "submit";
+    const submitter = (event.nativeEvent as SubmitEvent)
+      .submitter as HTMLButtonElement | null;
+    await saveListing(event.currentTarget, submitter?.value === "publish" ? "publish" : "save");
+  }
+
+  async function saveListing(form: HTMLFormElement, action: "save" | "publish" | "connect") {
+    if (savingRef.current || photoBusyRef.current) return;
+    if (!catalogReady) { showValidation({ catalogProductId: "Choose a catalog model first." }); return; }
+    setError("");
+    setMessage("");
+    const shouldPublish = action === "publish";
+    const shouldConnect = action === "connect";
+    const errors = listingFormErrors(form);
+    if ((shouldPublish || shouldConnect) && !acceptedSellerTerms) {
+      errors.sellerTermsVersion = "Accept the Seller Terms before connecting your payout account or publishing.";
+    }
+    if (Object.keys(errors).length) {
+      showValidation(errors);
+      return;
+    }
+    if (shouldPublish && !stripeReady) { openSection("review"); setError("Connect your payout account before publishing."); return; }
+    setFieldErrors({});
+    addressRef.current?.setErrors({}, { focus: false });
+    savingRef.current = true;
+    setBusy(true);
+    let draftSaved = false;
     try {
-      const payload = Object.fromEntries(new FormData(event.currentTarget));
-      const response = await fetch("/api/listings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "save", productId: productId || undefined, ...payload }) });
-      const body = await response.json() as { productId?: string; error?: string };
-      if (!response.ok || !body.productId) throw new Error(body.error || "The draft could not be saved.");
+      const payload = Object.fromEntries(new FormData(form));
+      const response = await fetch("/api/listings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "save",
+          productId: productId || undefined,
+          ...payload,
+        }),
+      });
+      const body = (await response.json()) as {
+        productId?: string;
+        error?: string;
+        fields?: Record<string, string>;
+        shipFromAddress?: ShipFromAddress;
+      };
+      if (!response.ok || !body.productId) {
+        if (body.fields && Object.keys(body.fields).length) { showValidation(body.fields); return; }
+        throw new Error(body.error || "The draft could not be saved.");
+      }
+      draftSaved = true;
+      setPublished(false);
       setProductId(body.productId);
+      const query = new URLSearchParams(location.search);
+      query.set("id", body.productId);
+      query.delete("stripe");
+      history.replaceState(null, "", `/sell/model?${query}`);
+      if (body.shipFromAddress) {
+        const savedAddress = body.shipFromAddress;
+        setShipFromAddresses((current) => {
+          const withoutSaved = current.filter(
+            (address) => address.id !== savedAddress.id,
+          );
+          return [...withoutSaved, savedAddress].sort(
+            (left, right) =>
+              Number(right.isDefault) - Number(left.isDefault) ||
+              left.label.localeCompare(right.label),
+          );
+        });
+        setShipFromAddressId(savedAddress.id);
+      }
       let nextImages = images;
       if (files.length) {
-        const form = new FormData();
-        form.set("productId", body.productId);
-        files.forEach((file) => form.append("images", file));
-        const upload = await fetch("/api/listings/images", { method: "POST", body: form });
-        const uploaded = await upload.json() as { images?: Array<{ id: string; url: string; alt: string }>; error?: string };
-        if (!upload.ok) throw new Error(uploaded.error || "Photos could not be uploaded.");
-        nextImages = [...images, ...(uploaded.images ?? [])];
-        setImages(nextImages);
-        setFiles([]);
+        const uploadFiles = pendingCover ? [pendingCover, ...files.filter(file => file !== pendingCover)] : files;
+        await uploadProductPhotoFiles({
+          endpoint: "/api/listings/images",
+          productId: body.productId,
+          files: uploadFiles,
+          makePrimary: Boolean(pendingCover),
+          onUploaded(uploaded, processedCount) {
+            nextImages = pendingCover && processedCount === 1 ? [...uploaded, ...nextImages] : [...nextImages, ...uploaded];
+            if (pendingCover && processedCount === 1) { setPrimaryImageUrl(uploaded[0]?.url ?? null); setPendingCover(null); }
+            setImages(nextImages);
+            setFiles(uploadFiles.slice(processedCount));
+            setPrimaryImageUrl(
+              (current) => current ?? uploaded[0]?.url ?? null,
+            );
+          },
+        });
       }
-      history.replaceState(null, "", `/sell/model?id=${encodeURIComponent(body.productId)}`);
-      if (shouldSubmit) {
-        const review = await fetch("/api/listings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "submit", productId: body.productId }) });
-        const reviewBody = await review.json() as { error?: string };
-        if (!review.ok) throw new Error(reviewBody.error || "The listing could not be submitted.");
-        setMessage("Listing submitted for marketplace review.");
-      } else setMessage(nextImages.length ? "Draft and photos saved." : "Draft saved. Add at least one photo before submitting.");
+      setDirty(false);
+      setSavedAt(new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }));
+      if (shouldConnect) {
+        setMessage("Draft and photos saved. Opening secure payout setup…");
+        const connection = await fetch("/api/listings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "stripe_onboarding",
+            productId: body.productId,
+            sellerTermsVersion: POLICY_VERSION,
+            collectionItem: query.get("collectionItem"),
+            selling: query.get("selling"),
+            minimum: query.get("minimum"),
+          }),
+        });
+        const connectionBody = (await connection.json()) as {
+          onboardingUrl?: string;
+          error?: string;
+        };
+        if (!connection.ok || !connectionBody.onboardingUrl) {
+          throw new Error(connectionBody.error || "Payout setup could not be started. Your draft is saved; please try again.");
+        }
+        window.location.assign(connectionBody.onboardingUrl);
+      } else if (shouldPublish) {
+        const publication = await fetch("/api/listings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "publish",
+            productId: body.productId,
+            sellerTermsVersion: POLICY_VERSION,
+          }),
+        });
+        const publicationBody = (await publication.json()) as { error?: string; fields?: ListingFieldErrors; slug?: string };
+        if (!publication.ok) {
+          if (publicationBody.fields && Object.keys(publicationBody.fields).length) { showValidation(publicationBody.fields); return; }
+          throw new Error(
+            publicationBody.error || "The listing could not be published.",
+          );
+        }
+        setPublished(true);
+        setPublishedSlug(publicationBody.slug || "");
+        setMessage("Your listing is live and available to buyers. You can manage it in My Listings.");
+      } else {
+        setMessage(
+          nextImages.length
+            ? "Draft, photos, and preferences saved."
+            : "Draft and preferences saved. Add photos before publishing.",
+        );
+      }
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "The listing could not be saved.");
-    } finally { setBusy(false); }
+      setMessage(shouldConnect && draftSaved
+        ? "Your draft is saved. Fix the issue below, then try connecting your payout account again."
+        : "");
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : "The listing could not be saved.",
+      );
+    } finally {
+      savingRef.current = false;
+      setBusy(false);
+    }
   }
 
   async function removeImage(imageId: string) {
     if (!productId) return;
     setError("");
-    const response = await fetch("/api/listings/images", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ productId, imageId }) });
-    const body = await response.json() as { error?: string };
-    if (!response.ok) { setError(body.error || "The photo could not be removed."); return; }
-    setImages((current) => current.filter((image) => image.id !== imageId));
+    const response = await fetch("/api/listings/images", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ productId, imageId }),
+    });
+    const body = (await response.json()) as { error?: string };
+    if (!response.ok) {
+      throw new Error(body.error || "The photo could not be removed.");
+    }
+    setPublished(false);
+    setImages((current) => {
+      const removed = current.find((image) => image.id === imageId);
+      const next = current.filter((image) => image.id !== imageId);
+      setPrimaryImageUrl((primary) =>
+        removed?.url === primary ? next[0]?.url ?? null : primary,
+      );
+      return next;
+    });
   }
 
-  async function startOnboarding() {
-    setBusy(true); setError("");
-    try {
-      const response = await fetch("/api/listings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "stripe_onboarding" }) });
-      const body = await response.json() as { onboardingUrl?: string; error?: string };
-      if (!response.ok || !body.onboardingUrl) throw new Error(body.error || "Stripe onboarding could not be started.");
-      window.location.assign(body.onboardingUrl);
-    } catch (reason) { setError(reason instanceof Error ? reason.message : "Stripe onboarding could not be started."); setBusy(false); }
+  async function removeLegacyImage() {
+    if (!productId) return;
+    setError("");
+    const response = await fetch("/api/listings/images", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ productId, removeLegacyPrimary: true }),
+    });
+    const body = (await response.json()) as { error?: string };
+    if (!response.ok) {
+      const nextError = body.error || "The photo could not be removed.";
+      setError(nextError);
+      throw new Error(nextError);
+    }
+    setPublished(false);
+    setPrimaryImageUrl(images[0]?.url ?? null);
   }
 
-  const stripeReady = Boolean(seller?.stripeChargesEnabled && seller?.stripePayoutsEnabled && seller?.status === "active");
-  return <div className="listing-shell"><div className="page-title"><p className="eyebrow">Sell from your collection</p><h1>{productId ? "Edit your listing" : "Sell a Model"}</h1><p>Save a draft first. Stripe payout onboarding is only required when you’re ready to submit for review.</p></div><form className="listing-form" onSubmit={save} noValidate>
-    <section><h2>Model details</h2><label>Product title<input name="title" required maxLength={200} defaultValue={String(product.title ?? "")}/></label><div className="form-row"><label>Vehicle make<input name="vehicleMake" required maxLength={100} defaultValue={String(product.vehicleMake ?? prefill.make ?? "")}/></label><label>Vehicle model<input name="vehicleModel" required maxLength={120} defaultValue={String(product.vehicleModel ?? prefill.model ?? "")}/></label></div><div className="form-row"><label>Vehicle year<input name="vehicleYear" maxLength={20} defaultValue={String(product.vehicleYear ?? "")}/></label><label>Scale<select name="scale" required defaultValue={String(product.scale ?? prefill.scale ?? "1:18")}>{["1:18", "1:24", "1:43", "1:64", "1:87", "Other"].map((scale) => <option key={scale}>{scale}</option>)}</select></label></div><div className="form-row"><label>Model manufacturer<input name="modelManufacturer" required maxLength={100} defaultValue={String(product.modelManufacturer ?? prefill.manufacturer ?? "")}/></label><label>Color<input name="color" maxLength={80} defaultValue={String(product.color ?? "")}/></label></div><label>Condition<select name="condition" required defaultValue={String(product.condition ?? "new_sealed")}>{collectorListingConditions.map((condition) => <option key={condition} value={condition}>{conditionLabels[condition]}</option>)}</select></label><label>Description<textarea name="description" required maxLength={4000} rows={6} defaultValue={String(product.description ?? "")}/></label></section>
-    <section><h2>Price and availability</h2><div className="form-row"><label>Price (USD)<input name="price" inputMode="decimal" required defaultValue={product.priceCents == null ? "" : (Number(product.priceCents) / 100).toFixed(2)}/></label><label>Quantity<input name="quantity" type="number" min={1} max={100} required defaultValue={String(product.inventoryQuantity ?? 1)}/></label></div><label>Flat shipping price (USD)<input name="shippingPrice" inputMode="decimal" required defaultValue={seller?.defaultShippingCents == null ? "0.00" : (Number(seller.defaultShippingCents) / 100).toFixed(2)}/></label></section>
-    <section><h2>Seller profile</h2><div className="form-row"><label>Seller display name<input name="sellerDisplayName" required maxLength={120} defaultValue={String(seller?.storeName ?? displayName)}/></label><label>Shipping country code<input name="shippingOriginCountry" required maxLength={2} defaultValue={String(seller?.shippingOriginCountry ?? "US")}/></label></div><label>State or region<input name="shippingOriginRegion" maxLength={80} defaultValue={String(seller?.shippingOriginRegion ?? "")}/></label><label>Short seller description<textarea name="sellerDescription" maxLength={1000} defaultValue={String(seller?.description ?? "")}/></label></section>
-    <section><h2>Photos</h2><p>Upload up to 8 original JPEG, PNG, or WebP photos, 10 MB each. Do not reuse another seller’s photos.</p>{images.length > 0 && <div className="listing-images">{images.map((image) => <div key={image.id}><Image src={image.url} alt={image.alt} width={220} height={180} unoptimized/><button type="button" onClick={() => void removeImage(image.id)}>Remove</button></div>)}</div>}<label className="file-input">Add photos<input type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={(event) => setFiles([...event.target.files ?? []].slice(0, 8 - images.length))}/></label>{files.length > 0 && <p>{files.length} photo{files.length === 1 ? "" : "s"} ready to upload with this draft.</p>}</section>
-    <section className="listing-submit"><div><h2>Payouts and review</h2><p>{stripeReady ? "Stripe payouts are ready. Submitted listings are reviewed before going live." : "You can keep drafting now. Complete secure Stripe-hosted payout onboarding before submission."}</p>{!stripeReady && <button className="button outline small" type="button" disabled={busy} onClick={() => void startOnboarding()}>Complete Stripe onboarding</button>}</div>{message && <p className="admin-message" role="status">{message}</p>}{error && <p className="form-error" role="alert">{error}</p>}<div className="row-actions"><button className="button outline" type="submit" value="save" disabled={busy}>{busy ? "Saving…" : "Save draft"}</button><button className="button dark" type="submit" value="submit" disabled={busy || !stripeReady}>{busy ? "Saving…" : "Submit for review"}</button></div></section>
-  </form><p><Link className="text-link" href="/account?view=listings">Back to My Listings</Link></p></div>;
+  async function reorderImages(imageIds: string[]) {
+    if (!productId) return;
+    setError("");
+    const response = await fetch("/api/listings/images", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ productId, imageIds }),
+    });
+    const body = (await response.json()) as { error?: string };
+    if (!response.ok) {
+      const nextError = body.error || "The photo order could not be saved.";
+      setError(nextError);
+      throw new Error(nextError);
+    }
+    setPendingCover(null);
+    setPublished(false);
+    setImages((current) => {
+      const byId = new Map(current.map((image) => [image.id, image]));
+      const next = imageIds.map((id) => byId.get(id)!);
+      setPrimaryImageUrl(next[0]?.url ?? null);
+      return next;
+    });
+  }
+
+  function setAllListingSections(open: boolean) {
+    formRef.current
+      ?.querySelectorAll<HTMLDetailsElement>(".listing-section")
+      .forEach((section) => {
+        section.open = open;
+      });
+  }
+
+  const selectedShipFromAddress = shipFromAddresses.find(
+    (address) => address.id === shipFromAddressId,
+  );
+
+  const evidenceImages = [...images, ...files.map(file => ({ alt: photoAltForViews(getSelectedPhotoViews(file), file.name) }))];
+  const progress = listingEditorProgress(values, evidenceImages);
+  const text = (key: string) => String(values[key] ?? "").trim();
+  const photoSummary = `${images.length} uploaded${files.length ? ` · ${files.length} pending` : ""} · ${progress.photo.complete ? "Required views covered" : `${progress.photo.missing.length} photo requirement${progress.photo.missing.length === 1 ? "" : "s"} missing`}`;
+  const catalogTitle = String(catalogSummary.title || [catalogSummary.modelManufacturer, catalogSummary.vehicleMake, catalogSummary.vehicleModel].filter(Boolean).join(" "));
+  function openPreview() {
+    if (!formRef.current || busy || photoBusy) return;
+    const current = { ...values, ...Object.fromEntries(new FormData(formRef.current)) };
+    if (selectedShipFromAddress) {
+      current.shippingOriginRegion = selectedShipFromAddress.region ?? "";
+      current.shippingOriginCountry = selectedShipFromAddress.country;
+    }
+    const pendingImages = files.map((file, index) => {
+      const url = URL.createObjectURL(file);
+      previewUrls.current.push(url);
+      return { id: `pending-${index}`, url, alt: photoAltForViews(getSelectedPhotoViews(file), file.name) };
+    });
+    setPreview(buildListingPreview({ values: current, catalog: { ...product, ...catalogSummary, id: productId }, seller, images, primaryImageUrl, pendingImages, pendingCoverUrl: pendingCover ? pendingImages[files.indexOf(pendingCover)]?.url : undefined }));
+  }
+  function closePreview() {
+    setPreview(null);
+    previewUrls.current.forEach(url => URL.revokeObjectURL(url));
+    previewUrls.current = [];
+  }
+  const remaining = [
+    ...(!progress.conditionComplete ? [{ section: "condition", label: "Complete condition disclosures", field: Object.keys(progress.conditionErrors)[0] }] : []),
+    ...(!progress.photo.complete ? [{ section: "condition", label: `Photos: ${progress.photo.missing.join(", ")}`, field: "images" }] : []),
+    ...(!progress.priceComplete ? [{ section: "price", label: "Enter price and quantity" }] : []),
+    ...(!progress.packageComplete || !progress.addressComplete ? [{ section: "shipping", label: "Complete package and ship-from details" }] : []),
+    ...(!progress.profileComplete ? [{ section: "shipping", label: "Complete your reusable seller profile", field: "sellerDescription" }] : []),
+    ...(!stripeReady ? [{ section: "review", label: "Connect your payout account" }] : []),
+    ...(!acceptedSellerTerms ? [{ section: "review", label: "Accept Seller Terms", field: "sellerTermsVersion" }] : []),
+  ];
+  function openSection(section: string, field?: string) {
+    const target = formRef.current?.querySelector<HTMLDetailsElement>(`#listing-${section}`);
+    if (target) { target.open = true; target.scrollIntoView({ block: "start", behavior: "smooth" }); }
+    if (field && formRef.current) focusListingError(formRef.current, { [field]: "Complete this field" }, field);
+    else target?.querySelector<HTMLElement>("summary")?.focus({ preventScroll: true });
+  }
+
+  return (
+    <div className="listing-shell collector-listing-shell">
+      {collectionReturnTo && <div className="collection-selling-setup"><p>This listing is for the model saved in your collection. Complete the condition, photos and shipping details, then publish it. Once it is active, return to enable your chosen availability.</p><Link href={collectionReturnTo + (productId ? `&listing=${encodeURIComponent(productId)}` : "")}>Return to collection setup</Link></div>}
+      <div className="page-title listing-editor-intro">
+        <h1>{productId ? "Edit your listing" : "Sell a Model"}</h1>
+        <p>{marketplaceFeeBps / 100}% marketplace fee + actual payment processing. No listing or monthly fees.</p>
+      </div>
+
+      <form ref={formRef} className="listing-form collector-editor" onSubmit={save} noValidate onChange={(event) => {
+        if ((event.target as HTMLElement).closest(".compact-photo-editor")) return;
+        setDirty(true); setPublished(false); queueMicrotask(readValues);
+        const field = event.target;
+        if (!(field instanceof HTMLInputElement || field instanceof HTMLSelectElement || field instanceof HTMLTextAreaElement)) return;
+        if (!fieldErrors[field.name]) return;
+        const message = listingInputError(field);
+        setFieldErrors(current => {
+          const next = { ...current };
+          if (message) next[field.name] = message;
+          else delete next[field.name];
+          return next;
+        });
+      }}>
+        {Object.keys(fieldErrors).length > 0 && <div className="form-error listing-error-summary" role="alert">
+          <p>Please check the highlighted fields before continuing.</p>
+          <ul>{Object.entries(fieldErrors).map(([name, message]) => <li key={name}>
+            <button type="button" className="text-action" onClick={() => { if (formRef.current) focusListingError(formRef.current, fieldErrors, name); }}>{listingFieldLabel(name)}: {message}</button>
+          </li>)}</ul>
+        </div>}
+        {error && <p ref={errorRef} tabIndex={-1} className="form-error" role="alert">{error}</p>}
+        <div data-listing-field="catalogProductId" tabIndex={-1} {...listingFieldProps(fieldErrors, "catalogProductId")}>
+        <CatalogModelPicker collectorRecovery onModelChange={model => { setCatalogSummary(model); setDirty(true); }} initial={product} listingSaved={Boolean(productId)} initialQuery={[prefill.manufacturer, prefill.make, prefill.model, prefill.scale].filter(Boolean).join(" ")} disabled={busy} onReady={(ready) => {
+          setCatalogReady(ready);
+          if (ready) setFieldErrors(current => {
+            const next = { ...current };
+            delete next.catalogProductId;
+            return next;
+          });
+        }} />
+        <ListingFieldError errors={fieldErrors} name="catalogProductId" />
+        </div>
+        <fieldset className="catalog-listing-fields" hidden={!catalogReady} disabled={!catalogReady || busy}>
+        <div className="listing-section-controls">
+          <p>Save draft to keep your edits.</p>
+          <div>
+            <button className="text-action" type="button" onClick={() => setAllListingSections(true)}>Expand all</button>
+            <button className="text-action" type="button" onClick={() => setAllListingSections(false)}>Collapse all</button>
+          </div>
+        </div>
+
+        <details className="listing-section" id="listing-model">
+          <summary>
+            <span>
+              <span className="step-label">1 · The model</span>
+              <span className="listing-section-title">Model</span><span className="listing-section-progress">Catalog linked · Optional title and story</span>
+            </span>
+          </summary>
+          <div className="listing-section-content">
+          <label>Listing title (optional)<input name="title" maxLength={200} placeholder="Uses the catalog model name if blank" defaultValue={String(product.title ?? "")} /></label>
+          <label>Seller SKU (optional)<input name="sellerSku" maxLength={100} placeholder="Your own inventory reference" defaultValue={String(product.sellerSku ?? "")} /></label>
+          <label>Additional context or model story (optional)<textarea name="description" maxLength={4000} rows={4} defaultValue={String(product.description ?? "")} /></label>
+          </div>
+        </details>
+
+        <details className="listing-section" id="listing-condition" open>
+          <summary>
+            <span>
+              <span className="step-label">2 · Photos &amp; condition</span>
+              <span className="listing-section-title">Photos &amp; condition</span>
+              <span className="listing-section-progress">{text("modelCondition") ? formatCondition(text("modelCondition")) : "Condition needed"} · {text("originalBoxStatus") ? `Box ${formatCondition(text("originalBoxStatus")).toLowerCase()}` : "Box status needed"}</span>
+              <span className="listing-section-progress" data-incomplete={!progress.photo.complete}>{photoSummary} · {progress.conditionComplete ? "Disclosures complete" : "Disclosures needed"}</span>
+            </span>
+          </summary>
+          <div className="listing-section-content">
+          <RequiredPhotoChecklist product={product} images={evidenceImages} />
+          <div data-listing-field="images" tabIndex={-1} {...listingFieldProps(fieldErrors, "images")}>
+            <ListingFieldError errors={fieldErrors} name="images" />
+            <ProductImageFields productId={productId || undefined} images={images} primaryImageUrl={primaryImageUrl} files={files} disabled={busy}
+              onFilesChange={changedFiles} onImagesChange={setImages} onLabelsChange={() => setPublished(false)}
+              onBusyChange={value => { photoBusyRef.current = value; setPhotoBusy(value); }}
+              pendingCover={pendingCover} onCoverFileChange={file => { changedFiles([file, ...files.filter(item => item !== file)]); setPendingCover(file); }}
+              onRemove={productId ? removeImage : undefined} onRemoveLegacy={productId ? removeLegacyImage : undefined} onReorder={productId ? reorderImages : undefined} />
+          </div>
+          <CollectibleListingFields product={product} includeIdentity={false} includeLegacyNotes errors={fieldErrors} />
+          </div>
+        </details>
+
+        <details className="listing-section" id="listing-price">
+          <summary>
+            <span>
+              <span className="step-label">3 · Price</span>
+              <span className="listing-section-title">Price</span><span className="listing-section-progress">{progress.priceComplete ? `$${Number(text("price").replace(/^\$/, "")).toFixed(2)} · Quantity ${text("quantity")}` : "Enter a valid price and quantity"}</span>
+            </span>
+          </summary>
+          <div className="listing-section-content">
+          <div className="form-row">
+            <label>Price (USD)<input name="price" {...listingFieldProps(fieldErrors, "price")} inputMode="decimal" required defaultValue={product.priceCents == null ? "" : (Number(product.priceCents) / 100).toFixed(2)} /><ListingFieldError errors={fieldErrors} name="price" /></label>
+            <label>Quantity<input name="quantity" {...listingFieldProps(fieldErrors, "quantity")} type="number" min={1} max={100} required defaultValue={String(product.inventoryQuantity ?? 1)} /><ListingFieldError errors={fieldErrors} name="quantity" /></label>
+          </div>
+          <SellerFeeDisclosure marketplaceFeeBps={marketplaceFeeBps} price={text("price")} />
+          </div>
+        </details>
+
+        <details className="listing-section" id="listing-shipping">
+          <summary>
+            <span>
+              <span className="step-label">4 · Shipping</span>
+              <span className="listing-section-title">Shipping</span><span className="listing-section-progress">{progress.addressComplete ? "Address complete" : "Address needed"} · {progress.packageComplete ? "Package complete" : "Package details needed"} · {progress.profileComplete ? "Seller profile complete" : "Seller profile needed"}</span>
+            </span>
+          </summary>
+          <div className="listing-section-content">
+          <p>Enter the final box size and packed weight. Your preferred size is already filled in.</p>
+          <div className="parcel-grid">
+            <label>Length (in)<input name="packageLength" {...listingFieldProps(fieldErrors, "packageLength")} inputMode="decimal" required defaultValue={String(product.packageLength ?? seller?.defaultPackageLength ?? "12")} /><ListingFieldError errors={fieldErrors} name="packageLength" /></label>
+            <label>Width (in)<input name="packageWidth" {...listingFieldProps(fieldErrors, "packageWidth")} inputMode="decimal" required defaultValue={String(product.packageWidth ?? seller?.defaultPackageWidth ?? "9")} /><ListingFieldError errors={fieldErrors} name="packageWidth" /></label>
+            <label>Height (in)<input name="packageHeight" {...listingFieldProps(fieldErrors, "packageHeight")} inputMode="decimal" required defaultValue={String(product.packageHeight ?? seller?.defaultPackageHeight ?? "6")} /><ListingFieldError errors={fieldErrors} name="packageHeight" /></label>
+            <label>Weight (lb)<input name="packageWeight" {...listingFieldProps(fieldErrors, "packageWeight")} inputMode="decimal" required defaultValue={String(product.packageWeight ?? seller?.defaultPackageWeight ?? "2")} /><ListingFieldError errors={fieldErrors} name="packageWeight" /></label>
+          </div>
+          <label className="consent-check compact-check">
+            <input type="checkbox" name="rememberPackageDefaults" defaultChecked={!productId} />
+            <span>Use these package details as the starting point for my next listing.</span>
+          </label>
+          <p>Your ship-from address, packed dimensions, weight, and the buyer’s destination determine carrier rates at checkout. Handling and return policies come from your saved seller settings.</p>
+          <p>Saved addresses are private and are used only for carrier rates and labels.</p>
+          <label>
+            Ship-from address
+            <select name="shipFromAddressId" {...listingFieldProps(fieldErrors, "shipFromAddressId")} value={shipFromAddressId} onChange={(event) => setShipFromAddressId(event.target.value)}>
+              {shipFromAddresses.map((address) => (
+                <option key={address.id} value={address.id}>
+                  {address.label}{address.isDefault ? " · Default" : ""} - {address.city}, {address.region || address.country}
+                </option>
+              ))}
+              <option value="new">+ Add a new address</option>
+            </select>
+            <ListingFieldError errors={fieldErrors} name="shipFromAddressId" />
+          </label>
+
+          {selectedShipFromAddress ? (
+            <div className="saved-address-card">
+              <strong>{selectedShipFromAddress.label}</strong>
+              <span>{selectedShipFromAddress.street1}{selectedShipFromAddress.street2 ? `, ${selectedShipFromAddress.street2}` : ""}</span>
+              <span>{selectedShipFromAddress.city}, {selectedShipFromAddress.region} {selectedShipFromAddress.postalCode}</span>
+              <span>{countryName(selectedShipFromAddress.country)}</span>
+              <input type="hidden" name="shippingOriginStreet1" value={selectedShipFromAddress.street1} />
+              <input type="hidden" name="shippingOriginStreet2" value={selectedShipFromAddress.street2 ?? ""} />
+              <input type="hidden" name="shippingOriginCity" value={selectedShipFromAddress.city} />
+              <input type="hidden" name="shippingOriginRegion" value={selectedShipFromAddress.region ?? ""} />
+              <input type="hidden" name="shippingOriginPostalCode" value={selectedShipFromAddress.postalCode} />
+              <input type="hidden" name="shippingOriginCountry" value={selectedShipFromAddress.country} />
+              <input type="hidden" name="shippingOriginPhone" value={selectedShipFromAddress.phone} />
+            </div>
+          ) : (
+            <div className="new-address-fields">
+              <label>Address name (optional)<input name="shipFromAddressLabel" maxLength={80} placeholder="Home, office, storage unit…" defaultValue="Home" autoComplete="off" /></label>
+              <AddressFields ref={addressRef} fieldNames={SHIP_FROM_FIELD_NAMES} initialValues={shipFromAddressValues(seller)} includePhone disabled={busy} />
+            </div>
+          )}
+
+          <details className="seller-profile-details">
+            <summary>Seller profile {progress.profileComplete ? "complete" : "needs details"} · Edit</summary>
+            <p>Saving these shared seller details updates your profile on every listing.</p>
+            <div>
+              <label>Seller display name<input name="sellerDisplayName" {...listingFieldProps(fieldErrors, "sellerDisplayName")} required maxLength={120} defaultValue={String(seller?.storeName ?? displayName)} /><ListingFieldError errors={fieldErrors} name="sellerDisplayName" /></label>
+              <label>Short seller description<textarea name="sellerDescription" {...listingFieldProps(fieldErrors, "sellerDescription")} maxLength={1000} rows={3} defaultValue={String(seller?.description ?? "")} /><ListingFieldError errors={fieldErrors} name="sellerDescription" /></label>
+              <label>Specialty<input name="sellerSpecialty" {...listingFieldProps(fieldErrors, "sellerSpecialty")} maxLength={300} defaultValue={String(seller?.specialty ?? "")} placeholder="The scales, makers or themes you collect"/><ListingFieldError errors={fieldErrors} name="sellerSpecialty" /></label>
+              <label>How you pack models<textarea name="sellerPackingApproach" {...listingFieldProps(fieldErrors, "sellerPackingApproach")} maxLength={1000} rows={3} defaultValue={String(seller?.packingApproach ?? "")} placeholder="How you protect the model, its box and accessories"/><ListingFieldError errors={fieldErrors} name="sellerPackingApproach" /></label>
+              <p>A useful introduction (at least 30 characters), specialty, and packing approach (at least 20 characters) are required before publishing. Your state or region is public; street addresses stay private. You can save a draft first.</p>
+            </div>
+          </details>
+          </div>
+        </details>
+
+        <details className="listing-section" id="listing-review" open={Boolean(paymentSetup)}>
+          <summary>
+            <span>
+              <span className="step-label">5 · Review</span>
+              <span className="listing-section-title">Review &amp; publish</span><span className="listing-section-progress">{remaining.length ? `${remaining.length} step${remaining.length === 1 ? "" : "s"} remaining` : "Ready to publish"}</span>
+            </span>
+          </summary>
+          <div className="listing-section-content listing-submit">
+          <div className="listing-review-summary">
+            <div><h3>{text("title") || catalogTitle || "Your listing"}</h3><p>{/^\d+(\.\d{1,2})?$/.test(text("price")) ? `$${Number(text("price")).toFixed(2)}` : "Price needed"} · {images.length + files.length} photos · Model condition: {formatCondition(text("modelCondition")) || "Not entered"}</p></div>
+            <button type="button" className="button dark" disabled={busy || photoBusy} onClick={openPreview}>Preview listing</button>
+            <p className="field-note">See the buyer page with your current edits and photo order. Purchase actions are inactive in preview.</p>
+          </div>
+          <div className="listing-remaining"><h3>{remaining.length ? "Before you publish" : "Ready to publish"}</h3>{remaining.length > 0 && <ul>{remaining.map(item => <li key={item.label}><button className="text-action" type="button" onClick={() => openSection(item.section, item.field)}>{item.label}</button></li>)}</ul>}</div>
+          <div>
+            <p>{stripeReady ? "Your payout account is connected. Publish when your listing is ready." : "Connect your payout account to receive money from your sales. We’ll save your draft and photos before opening secure setup with Stripe, then bring you back to this listing."}</p>
+            <label className="consent-check">
+              <input type="checkbox" name="sellerTermsVersion" {...listingFieldProps(fieldErrors, "sellerTermsVersion")} checked={acceptedSellerTerms} onChange={(event) => setAcceptedSellerTerms(event.target.checked)} />
+              <span>I agree to the current <Link href="/seller-terms">Seller Terms</Link>, including deductions for marketplace commission and actual payment processing, fulfillment rules, and return obligations.</span>
+            </label>
+            <ListingFieldError errors={fieldErrors} name="sellerTermsVersion" />
+            {!stripeReady && <button className="button outline small" type="button" disabled={busy || !acceptedSellerTerms} onClick={() => { if (formRef.current) return saveListing(formRef.current, "connect"); }}>{busy ? "Saving draft…" : "Connect payout account"}</button>}
+          </div>
+          {product.status === "pending_review" && <p>This older submission is not live yet. You can publish it directly once the requirements above are complete.</p>}
+          {product.status === "active" && <p>Saving as a draft takes this listing off sale. Choose Publish listing to make your changes live.</p>}
+          <p>Publishing makes this listing available to buyers immediately. Buyers can report a problem with a listing.</p>
+          </div>
+        </details>
+        </fieldset>
+        {catalogReady && <div className="listing-action-bar" aria-label="Save and publish listing">
+          <div className="listing-save-status"><strong role="status">{busy ? "Saving draft and photos…" : photoBusy ? "Saving photo changes…" : dirty ? "Unsaved changes" : savedAt ? `Saved at ${savedAt}` : productId ? "Saved draft loaded" : "Draft not yet saved"}</strong>
+          <button type="button" className="text-action" onClick={() => openSection("review")}>{published ? "Listing is live" : remaining.length ? `${remaining.length} step${remaining.length === 1 ? "" : "s"} to review · View` : "Review & publish"}</button></div>
+          <div className="row-actions"><button className="button outline" type="submit" value="save" disabled={busy || photoBusy}>{busy ? "Saving…" : "Save draft"}</button><button className="button dark" type="submit" value="publish" disabled={busy || photoBusy || published}>{busy ? "Saving…" : "Publish listing"}</button></div>
+          {message && <p className="admin-message" role="status">{message}{published && publishedSlug && <> <Link className="text-link" href={`/products/${publishedSlug}`}>View live listing</Link></>}</p>}
+        </div>}
+      </form>
+      {preview && <ListingBuyerPreview product={preview} onClose={closePreview} />}
+      <p><Link className="text-link" href="/account?view=listings">Back to My Listings</Link></p>
+    </div>
+  );
 }

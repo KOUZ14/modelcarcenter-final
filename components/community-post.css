@@ -1,0 +1,71 @@
+.community-post.conversation-post { overflow: visible; }
+.community-post.post-detail-card { content-visibility: visible; contain-intrinsic-size: none; }
+.conversation-post .post-content { padding: 18px; }
+.conversation-post > header { padding: 16px 18px; }
+.conversation-post .post-caption { margin: 10px 0 16px; }
+.conversation-post .post-menu summary { display: grid; place-items: center; min-width: 44px; min-height: 44px; padding: 6px; }
+.conversation-post footer.post-actions { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); align-items: start; gap: 4px; padding-top: 8px; margin-top: 14px; }
+.post-actions > .community-action { min-width: 0; }
+.conversation-post .post-actions > button,
+.conversation-post .post-actions > a,
+.conversation-post .post-actions > .community-action > button { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 5px; width: 100%; min-height: 56px; padding: 7px 2px; border: 0; border-radius: 4px; background: transparent; color: var(--ink); font: inherit; font-size: 13px; line-height: 1.2; text-align: center; cursor: pointer; }
+.conversation-post .post-actions :is(button, a):hover { background: var(--paper); }
+.post-action-icon { display: flex; align-items: center; gap: 5px; min-height: 20px; }
+.post-action-icon svg { width: 19px; height: 19px; }
+.post-actions button:disabled { opacity: .6; cursor: wait; }
+.conversation-post .post-share-status { margin: 10px 0 0; font-size: 13px; }
+.post-share-link { display: grid; gap: 6px; margin-top: 10px; font-size: 13px; }
+.post-share-link input { width: 100%; min-width: 0; padding: 10px; border: 1px solid var(--line); font: inherit; }
+.tagged-model.post-model-tag { align-items: center; justify-content: start; gap: 12px; padding: 12px; }
+.post-model-tag > img { width: 64px; height: 48px; object-fit: contain; flex-shrink: 0; background: white; }
+.post-model-tag .model-tag-copy { display: grid; min-width: 0; gap: 5px; white-space: normal; }
+.post-model-tag strong { font-size: 14px; line-height: 1.4; overflow-wrap: anywhere; }
+.model-tag-metadata,
+.post-model-tag .model-tag-metadata { display: flex; flex-wrap: wrap; gap: 4px 10px; color: var(--muted); font-size: 13px; line-height: 1.4; white-space: normal; }
+.model-tag-metadata > span,
+.post-model-tag .model-tag-metadata > span { font-size: inherit; white-space: normal; overflow-wrap: anywhere; }
+.model-tag-metadata > span + span::before { content: "·"; margin-right: 10px; }
+.post-model-tag .model-tag-link { font-size: 12px; font-weight: 600; white-space: normal; }
+.post-model-dialog .post-model-identity { display: flex; align-items: center; gap: 18px; margin-block: 18px; }
+.post-model-identity > img { width: 112px; height: 84px; object-fit: contain; flex-shrink: 0; }
+.post-model-identity > div { min-width: 0; }
+.post-model-dialog .post-model-identity h2 { font-size: 24px; line-height: 1.2; margin: 0 0 10px; overflow-wrap: anywhere; }
+.comment-section.conversation-discussion { margin: 24px auto 40px; }
+.conversation-discussion > h2 { margin: 0 0 16px; font-size: 24px; }
+.conversation-discussion .comment-composer { padding: 16px; border: 1px solid var(--line); background: white; margin-bottom: 18px; }
+.conversation-discussion .comment-requirements { margin: 0 0 12px; color: var(--muted); font-size: 14px; line-height: 1.5; }
+.conversation-discussion .comment-composer > label { display: block; margin: 0 0 8px; font-size: 14px; font-weight: 600; }
+.conversation-discussion textarea { min-height: 92px; margin: 0 0 10px; padding: 12px; resize: vertical; font: inherit; font-size: 16px; line-height: 1.5; scroll-margin-block: 24px 90px; }
+.comment-composer-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; }
+.comment-composer-actions .button { min-height: 44px; padding: 12px 16px; }
+.comment-composer-actions button:disabled { opacity: .6; cursor: default; }
+.conversation-discussion .comment-draft-status { color: var(--muted); font-size: 12px; line-height: 1.5; margin: 10px 0 0; }
+.conversation-discussion .comment-clear { min-height: 44px; font: inherit; font-size: 13px; cursor: pointer; }
+.discussion-comments { border-top: 1px solid var(--line); }
+.discussion-comment { display: flex; align-items: start; gap: 10px; padding: 14px 0 2px; border-bottom: 1px solid var(--line); }
+.comment-avatar { display: grid; place-items: center; width: 32px; height: 32px; margin-top: 2px; flex-shrink: 0; border-radius: 50%; background: #e9e7e2; font-size: 13px; font-weight: 700; }
+.comment-avatar img { width: 100%; height: 100%; border-radius: inherit; object-fit: cover; }
+.comment-content { min-width: 0; flex: 1; }
+.comment-content > header { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; min-height: 26px; font-size: 14px; line-height: 1.4; overflow-wrap: anywhere; }
+.comment-content time { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.comment-content > p { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.55; }
+.conversation-discussion .comment-content .comment-reply { min-height: 44px; min-width: 44px; padding: 8px 0; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.comment-menu { margin-top: -6px; flex-shrink: 0; }
+.comment-menu > summary { display: grid; place-items: center; width: 44px; height: 44px; padding: 0; }
+.comment-menu > div { width: min(250px, calc(100vw - 48px)); padding: 12px; }
+.comment-menu textarea { min-height: 90px; }
+.conversation-discussion .form-error { font-size: 14px; line-height: 1.5; }
+.conversation-discussion :focus-visible,
+.conversation-post :focus-visible,
+.post-model-dialog :focus-visible { outline: 3px solid #2673c1; outline-offset: 3px; }
+@media (max-width: 480px) {
+  .conversation-post .post-content { padding: 14px; }
+  .conversation-post > header { padding: 12px 14px; }
+  .post-model-tag > img { width: 52px; height: 44px; }
+  .tagged-model.post-model-tag { gap: 10px; padding: 10px; }
+  .post-model-dialog { padding: 28px 20px 22px; }
+  .post-model-dialog .post-model-identity { gap: 12px; }
+  .post-model-identity > img { width: 80px; height: 64px; }
+  .post-model-dialog .post-model-identity h2 { font-size: 22px; }
+  .conversation-discussion .comment-composer { padding: 14px; }
+}

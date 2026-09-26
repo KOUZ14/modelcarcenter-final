@@ -1,6 +1,6 @@
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { getDb } from "@/db";
-import { collectorProfiles, orders, sellers, user as authUsers } from "@/db/schema";
+import { collectorProfiles, user as authUsers } from "@/db/schema";
 import { requireCollectorApi } from "@/lib/collector-auth";
 import {
   deleteCollectorAccount,
@@ -10,10 +10,11 @@ import {
   saveAccountCart,
   setWishlistItem,
 } from "@/lib/collector-store";
-import { sendShipmentEmail } from "@/lib/email";
 import { readJsonObject, routeError } from "@/lib/http";
 import { cleanText, optionalHttpUrl, requiredString, ValidationError } from "@/lib/validation";
 import { deactivateCollectorListing } from "@/lib/listings";
+import { shipOwnedStoreOrder } from "@/lib/store";
+import { saveVerifiedPurchaseFeedback } from "@/lib/reputation";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +32,14 @@ export async function GET(request: Request) {
       authenticated: true,
       user: collector.user,
       profile: collector.profile,
+      store:
+        collector.seller?.sellerType === "professional"
+          ? {
+              id: collector.seller.id,
+              name: collector.seller.storeName,
+              status: collector.seller.status,
+            }
+          : null,
       wishlist,
       cart,
     });
@@ -94,7 +103,13 @@ export async function POST(request: Request) {
       return Response.json({ ok: true, profile: { ...collector.profile, ...values } });
     }
     if (action === "ship_sale") {
-      return Response.json({ ok: true, ...await shipOwnedSale(collector.user.id, payload) });
+      return Response.json({ ok: true, ...await shipOwnedStoreOrder(collector.user.id, payload) });
+    }
+    if (action === "seller_feedback") {
+      return Response.json({
+        ok: true,
+        ...(await saveVerifiedPurchaseFeedback(collector.user.id, payload)),
+      });
     }
     if (action === "deactivate_listing") {
       await deactivateCollectorListing(collector.user.id, requiredString(payload.productId, "productId", 100));
@@ -102,6 +117,10 @@ export async function POST(request: Request) {
     }
     if (action === "delete_account") {
       if (payload.confirm !== "DELETE") throw new ValidationError("Type DELETE to confirm account deletion.");
+      if (collector.seller?.sellerType === "professional")
+        throw new ValidationError(
+          "Contact support to close or transfer a professional store account.",
+        );
       await deleteCollectorAccount(collector.user.id);
       return Response.json({ ok: true, deleted: true });
     }
@@ -113,29 +132,9 @@ export async function POST(request: Request) {
 
 function parseCartItems(value: unknown) {
   if (!Array.isArray(value)) return [];
-  return value.slice(0, 25).map((entry) => {
+  if (value.length > 25) throw new ValidationError("Your cart can hold up to 25 products. Check out a seller before adding more.");
+  return value.map((entry) => {
     const item = entry && typeof entry === "object" ? entry as Record<string, unknown> : {};
     return { productId: String(item.productId ?? ""), quantity: Number(item.quantity) };
   });
-}
-
-async function shipOwnedSale(userId: string, payload: Record<string, unknown>) {
-  const orderId = requiredString(payload.orderId, "orderId", 100);
-  const carrier = requiredString(payload.carrier, "carrier", 100);
-  const trackingNumber = requiredString(payload.trackingNumber, "trackingNumber", 200);
-  const rows = await getDb().select({ order: orders, sellerStatus: sellers.status })
-    .from(orders).innerJoin(sellers, eq(orders.sellerId, sellers.id))
-    .where(and(eq(orders.id, orderId), eq(sellers.ownerUserId, userId))).limit(1);
-  const row = rows[0];
-  if (!row || row.order.paymentStatus !== "paid") throw new ValidationError("Only your paid sales can be marked shipped.");
-  if (row.sellerStatus === "suspended") throw new ValidationError("This seller is suspended. Contact Model Car Center support.");
-  await getDb().update(orders).set({
-    carrier,
-    trackingNumber,
-    fulfillmentStatus: "shipped",
-    shippedAt: row.order.shippedAt ?? new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  }).where(and(eq(orders.id, orderId), eq(orders.sellerId, row.order.sellerId)));
-  const email = await sendShipmentEmail({ buyerEmail: row.order.buyerEmail, orderNumber: row.order.orderNumber, carrier, trackingNumber });
-  return { emailSent: email.sent };
 }
