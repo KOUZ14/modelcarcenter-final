@@ -92,6 +92,30 @@ test("account views expose real activity, actionable counts and concise order su
     assert.match(unavailable, /href="\/wishlist"/);
     assert.equal((render("listings").match(/>Sell a Model</g) || []).length, 1);
   });
+  await t.test("listing cards keep draft actions private and offer live controls only for published listings", () => {
+    const listing = { id: "my-listing", slug: "mclaren-f1", title: "UT Models Mclaren F1 LM Orange 1:18", status: "draft", priceCents: 100, currency: "usd", inventoryQuantity: 1, reservedQuantity: 0, primaryImageUrl: "/car.png" };
+    const draft = render("listings", { listings: [listing] });
+    assert.match(draft, />Continue editing<\/a>/);
+    assert.match(draft, /href="\/sell\/model\?id=my-listing"/);
+    assert.match(draft, />Not published</);
+    assert.match(draft, /\$1.00/);
+    assert.match(draft, /1 in stock/);
+    assert.doesNotMatch(draft, /0 reserved|Deactivate|Take off sale|href="\/products\//);
+    const live = render("listings", { listings: [{ ...listing, status: "active", inventoryQuantity: 3, reservedQuantity: 1 }] });
+    assert.match(live, />Edit listing<\/a>/);
+    assert.match(live, />View listing<\/a>/);
+    assert.match(live, /href="\/products\/mclaren-f1"/);
+    assert.match(live, />Take off sale<\/button>/);
+    assert.match(live, /1 reserved/);
+    for (const status of ["inactive", "pending_review", "rejected", "sold_out"]) {
+      const html = render("listings", { listings: [{ ...listing, status, primaryImageUrl: null }] });
+      assert.match(html, /No photo yet/);
+      assert.doesNotMatch(html, /Take off sale|href="\/products\//);
+    }
+    const rejected = render("listings", { listings: [{ ...listing, status: "rejected", rejectionReason: "Disclose the chipped paint." }] });
+    assert.match(rejected, />Fix listing<\/a>/);
+    assert.match(rejected, /Marketplace note<\/strong>Disclose the chipped paint/);
+  });
 });
 
 test("saved previews are scoped to the buyer, sorted by save date, and omit private or suspended listings", async t => {

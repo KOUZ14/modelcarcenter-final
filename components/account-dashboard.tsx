@@ -521,7 +521,7 @@ function Listings({
     }
   }
   return (
-    <div className="garage-section">
+    <div className="garage-section account-listings">
       <div className="panel-heading">
         <div>
           <p className="eyebrow">Selling</p>
@@ -554,56 +554,9 @@ function Listings({
           </div>
         )}
       {rows.length ? (
-        <div className="garage-list">
+        <div className="account-listing-list">
           {rows.map((listing) => (
-            <article key={String(listing.id)}>
-              {Boolean(listing.primaryImageUrl) && (
-                <Image
-                  className="listing-thumb"
-                  src={String(listing.primaryImageUrl)}
-                  alt=""
-                  width={112}
-                  height={84}
-                  unoptimized
-                />
-              )}
-              <div>
-                <span className={`status ${String(listing.status)}`}>
-                  {listingStatusLabel(String(listing.status))}
-                </span>
-                <b>
-                  {formatMoney(
-                    Number(listing.priceCents),
-                    String(listing.currency),
-                  )}
-                </b>
-              </div>
-              <h3>{String(listing.title)}</h3>
-              <p>
-                {String(listing.inventoryQuantity)} in inventory ·{" "}
-                {String(listing.reservedQuantity)} reserved
-              </p>
-              {Boolean(listing.rejectionReason) && (
-                <p className="form-error">
-                  Marketplace note: {String(listing.rejectionReason)}
-                </p>
-              )}
-              <div className="row-actions">
-                <Link href={`/sell/model?id=${String(listing.id)}`}>Edit</Link>
-                {String(listing.status) !== "inactive" && (
-                  <button
-                    onClick={() =>
-                      void action({
-                        action: "deactivate_listing",
-                        productId: listing.id,
-                      }).then(() => location.reload())
-                    }
-                  >
-                    Deactivate
-                  </button>
-                )}
-              </div>
-            </article>
+            <AccountListingCard key={`${listing.id}:${listing.status}`} listing={listing} action={action} />
           ))}
         </div>
       ) : (
@@ -618,6 +571,58 @@ function Listings({
       )}
     </div>
   );
+}
+
+function AccountListingCard({ listing, action }: {
+  listing: GarageData["listings"][number];
+  action(payload: Record<string, unknown>): Promise<unknown>;
+}) {
+  const [takenOffSale, setTakenOffSale] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const router = useRouter();
+  const status = takenOffSale ? "inactive" : String(listing.status);
+  const live = status === "active";
+  const title = String(listing.title || "Untitled listing");
+  const editHref = `/sell/model?id=${encodeURIComponent(String(listing.id))}`;
+  const editLabel = status === "draft" ? "Continue editing" : status === "rejected" ? "Fix listing" : ["inactive", "pending_review"].includes(status) ? "Edit & publish" : "Edit listing";
+  const stock = Number(listing.inventoryQuantity) || 0;
+  const reserved = Number(listing.reservedQuantity) || 0;
+  const statusNote = ["draft", "pending_review"].includes(status) ? "Not published" : status === "inactive" ? "Off sale" : "";
+
+  async function takeOffSale() {
+    if (busy) return;
+    setBusy(true); setError("");
+    try {
+      await action({ action: "deactivate_listing", productId: listing.id });
+      setTakenOffSale(true);
+      router.refresh();
+    } catch (reason) {
+      setError(reason instanceof Error && reason.message ? reason.message : "Could not take this listing off sale. Please try again.");
+    } finally { setBusy(false); }
+  }
+
+  return <article className="account-listing-card" aria-label={title} aria-busy={busy}>
+    <div className="account-listing-photo">
+      {listing.primaryImageUrl ? <Image src={String(listing.primaryImageUrl)} alt="" width={160} height={120} unoptimized /> : <span>No photo yet</span>}
+    </div>
+    <div className="account-listing-heading">
+      <div className="account-listing-status"><span className={`status ${status}`}>{listingStatusLabel(status)}</span>{statusNote && <span>{statusNote}</span>}</div>
+      <h3><Link href={editHref}>{title}</Link></h3>
+    </div>
+    <div className="account-listing-details">
+      <strong>{formatMoney(Number(listing.priceCents), String(listing.currency || "usd"))}</strong>
+      <p>{stock > 0 ? `${stock} in stock` : "Out of stock"}{reserved > 0 && <span> · {reserved} reserved</span>}</p>
+    </div>
+    {Boolean(listing.rejectionReason) && <p className="account-listing-note"><strong>Marketplace note</strong>{String(listing.rejectionReason)}</p>}
+    <div className="account-listing-actions">
+      <Link className={`button ${live ? "outline" : "dark"} small`} href={editHref} aria-label={`${editLabel}: ${title}`}>{editLabel}</Link>
+      {live && Boolean(listing.slug) && <Link className="account-listing-link" href={`/products/${encodeURIComponent(String(listing.slug))}`} aria-label={`View listing: ${title}`}>View listing</Link>}
+      {live && <button className="account-listing-link account-listing-pause" type="button" disabled={busy} onClick={() => void takeOffSale()} aria-label={`Take off sale: ${title}`}>{busy ? "Taking off sale…" : "Take off sale"}</button>}
+    </div>
+    {takenOffSale && <p className="account-listing-feedback" role="status">Listing taken off sale. You can edit and publish it again.</p>}
+    {error && <p className="account-listing-feedback form-error" role="alert">{error}</p>}
+  </article>;
 }
 
 function Sales({
