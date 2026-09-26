@@ -6,20 +6,39 @@ import { pathToFileURL } from "node:url";
 import { build } from "esbuild";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { photoViewsFromAlt, photoAltForViews, listingPhotoEvidence, requiredPhotoViews } from "../lib/listing-evidence.ts";
+import { ambiguousPhotoLabels, photoViewsFromAlt, photoAltForViews, listingPhotoEvidence, requiredPhotoViews } from "../lib/listing-evidence.ts";
 import { parseCollectibleDetails, assertCollectibleListingReady } from "../lib/validation.ts";
 import { listingEditorProgress } from "../lib/listing-editor-progress.ts";
 
 const condition = { modelCondition: "near_mint", packagingCondition: "excellent", originalBoxStatus: "included", coaStatus: "not_included", missingParts: "None known", defects: "None known", restorationCustomization: "None known", accessories: "" };
 const photos = ["front", "rear", "left", "right", "top", "underside", "packaging"].map((view, i) => ({ id: `p${i}`, url: `/photo${i}.jpg`, alt: photoAltForViews([view], "Actual item") }));
 
-test("photo coverage aggregates independent viewpoints and retains legacy labels", () => {
-  assert.deepEqual(photoViewsFromAlt("Front view · Both sides · Top and base - Actual item"), ["front", "left", "right", "top", "underside"]);
+test("photo coverage counts explicit viewpoints without expanding ambiguous legacy labels", () => {
+  assert.deepEqual(photoViewsFromAlt("Front view · Both sides · Top and base - Actual item"), ["front"]);
   const incomplete = listingPhotoEvidence(condition, photos.filter(photo => photo.id !== "p3"));
   assert.deepEqual(incomplete.missing, ["Right side"]);
   assert.equal(listingPhotoEvidence(condition, photos).complete, true);
   assert.deepEqual(photoViewsFromAlt(photoAltForViews(["left", "details"], "My item")), ["left", "details"]);
   assert.equal(listingPhotoEvidence({ ...condition, defects: "Chipped paint" }, photos).complete, false);
+});
+
+test("legacy grouped labels require confirmation even when other photos cover every required view", () => {
+  const legacy = { alt: "Both sides · Top and base — Actual item" };
+  assert.deepEqual(ambiguousPhotoLabels(legacy.alt), ["Both sides", "Top and base"]);
+  assert.deepEqual(photoViewsFromAlt(legacy.alt), []);
+  const unconfirmed = [...photos, legacy];
+  const evidence = listingPhotoEvidence(condition, unconfirmed);
+  assert.equal(evidence.complete, false);
+  assert.deepEqual(evidence.unconfirmedPhotos, [8]);
+  assert.match(evidence.missing.join(" "), /Confirm legacy labels on photo 8/);
+  assert.throws(() => assertCollectibleListingReady(condition, unconfirmed), error => /Confirm legacy labels/.test(error.fields.images));
+  const confirmed = { alt: photoAltForViews(["left"], "Actual item") };
+  assert.equal(listingPhotoEvidence(condition, [...photos, confirmed]).complete, true);
+  assert.deepEqual(photoViewsFromAlt(confirmed.alt), ["left"]);
+  const oldClient = photoAltForViews(["front", "sides", "base"], "Old upload");
+  assert.deepEqual(ambiguousPhotoLabels(oldClient), ["Both sides", "Top and base"]);
+  assert.deepEqual(photoViewsFromAlt(oldClient), ["front"]);
+  assert.deepEqual(ambiguousPhotoLabels("Left side - Description mentioning Both sides"), []);
 });
 
 test("physical packaging grade survives a factory seal and optional accessories stay optional", () => {
@@ -59,6 +78,9 @@ test("editor renders one photo-label panel, five steps, live fees and a private-
   assert.equal((html.match(/class="photo-view-labels"/g) || []).length, 1);
   assert.ok(html.indexOf('class="listing-action-bar"') > html.lastIndexOf('</details>'), "Save and submit are outside every collapsible section");
   assert.ok(html.indexOf('Views buyers need') < html.indexOf('Add photos'));
+  assert.match(html, /Enlarge photo 1/);
+  assert.match(html, /Wrong linked model/);
+  assert.match(html, /Start a new listing \(new tab\)/);
   assert.doesNotMatch(html, /Both sides|Top and base|Fill common|Connect payment method/);
   const fee = renderToStaticMarkup(React.createElement(ui.SellerFeeDisclosure, { marketplaceFeeBps: 850, price: "125.00" }));
   assert.match(fee, /\$10.63/); assert.match(fee, /\$114.37/); assert.doesNotMatch(fee, /\$200.00|2.9%/);

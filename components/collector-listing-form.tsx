@@ -415,20 +415,11 @@ export function CollectorListingForm({
   }
 
   return (
-    <div className="listing-shell">
+    <div className="listing-shell collector-listing-shell">
       {collectionReturnTo && <div className="collection-selling-setup"><p>This listing is for the model saved in your collection. Complete the condition, photos and shipping details, then submit it for review. Once it is active, return to enable your chosen availability.</p><Link href={collectionReturnTo + (productId ? `&listing=${encodeURIComponent(productId)}` : "")}>Return to collection setup</Link></div>}
-      <div className="page-title">
-        <p className="eyebrow">Sell from your collection</p>
+      <div className="page-title listing-editor-intro">
         <h1>{productId ? "Edit your listing" : "Sell a Model"}</h1>
-        <p>
-          Your seller details, ship-from addresses, and preferred package size
-          are remembered for your next listing.
-        </p>
-        <p>
-          <b>{marketplaceFeeBps / 100}% Model Car Center marketplace fee.</b>{" "}
-          You also pay actual payment processing, deducted from your proceeds.
-          No listing or monthly fees.
-        </p>
+        <p>{marketplaceFeeBps / 100}% marketplace fee + actual payment processing. No listing or monthly fees.</p>
       </div>
 
       <form ref={formRef} className="listing-form collector-editor" onSubmit={save} noValidate onChange={(event) => {
@@ -453,7 +444,7 @@ export function CollectorListingForm({
         </div>}
         {error && <p ref={errorRef} tabIndex={-1} className="form-error" role="alert">{error}</p>}
         <div data-listing-field="catalogProductId" tabIndex={-1} {...listingFieldProps(fieldErrors, "catalogProductId")}>
-        <CatalogModelPicker onModelChange={model => { setCatalogSummary(model); setDirty(true); }} initial={product} listingSaved={Boolean(productId)} initialQuery={[prefill.manufacturer, prefill.make, prefill.model, prefill.scale].filter(Boolean).join(" ")} disabled={busy} onReady={(ready) => {
+        <CatalogModelPicker collectorRecovery onModelChange={model => { setCatalogSummary(model); setDirty(true); }} initial={product} listingSaved={Boolean(productId)} initialQuery={[prefill.manufacturer, prefill.make, prefill.model, prefill.scale].filter(Boolean).join(" ")} disabled={busy} onReady={(ready) => {
           setCatalogReady(ready);
           if (ready) setFieldErrors(current => {
             const next = { ...current };
@@ -465,7 +456,7 @@ export function CollectorListingForm({
         </div>
         <fieldset className="catalog-listing-fields" hidden={!catalogReady} disabled={!catalogReady || busy}>
         <div className="listing-section-controls">
-          <p>Open the section you need. Save draft to keep your changes. Closing a section does not save them.</p>
+          <p>Save draft to keep your edits.</p>
           <div>
             <button className="text-action" type="button" onClick={() => setAllListingSections(true)}>Expand all</button>
             <button className="text-action" type="button" onClick={() => setAllListingSections(false)}>Collapse all</button>

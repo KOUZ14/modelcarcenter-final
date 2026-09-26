@@ -299,12 +299,12 @@ test("collector moderation only reviews pending submissions and gates approval o
 
 test("listing image validation enforces count, size, declared MIME, and file signature", () => {
   assert.equal(
-    validateListingImageBatch({ currentCount: 7, incomingSizes: [10] }),
+    validateListingImageBatch({ currentCount: 8, incomingSizes: Array(12).fill(10) }),
     null,
   );
   assert.match(
-    validateListingImageBatch({ currentCount: 8, incomingSizes: [10] }),
-    /up to 8/,
+    validateListingImageBatch({ currentCount: 20, incomingSizes: [10] }),
+    /up to 20/,
   );
   assert.match(
     validateListingImageBatch({

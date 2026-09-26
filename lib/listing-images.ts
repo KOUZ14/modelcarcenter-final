@@ -1,4 +1,4 @@
-export const MAX_LISTING_IMAGES = 8;
+export const MAX_LISTING_IMAGES = 20;
 export const MAX_LISTING_IMAGE_BYTES = 10 * 1024 * 1024;
 
 export function detectListingImageType(

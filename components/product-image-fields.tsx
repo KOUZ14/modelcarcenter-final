@@ -2,7 +2,8 @@
 
 import Image from "next/image";
 import { useEffect, useRef, useState } from "react";
-import { getSelectedPhotoViews, photoAltForViews, photoViews, photoViewsFromAlt, setSelectedPhotoViews, type PhotoView } from "@/lib/listing-evidence";
+import { ambiguousPhotoLabels, getSelectedPhotoViews, photoAltForViews, photoViews, photoViewsFromAlt, setSelectedPhotoViews, type PhotoView } from "@/lib/listing-evidence";
+import { MAX_LISTING_IMAGES, MAX_LISTING_IMAGE_BYTES } from "@/lib/listing-images";
 
 export type EditableProductImage = { id: string; url: string; alt: string; sortOrder?: number };
 
@@ -30,8 +31,10 @@ export function ProductImageFields({ images, primaryImageUrl, files, disabled = 
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [labelOverrides, setLabelOverrides] = useState<Record<string, PhotoView[]>>({});
+  const [legacyReview, setLegacyReview] = useState<Record<string, PhotoView[]>>({});
   const labelsRef = useRef<HTMLFieldSetElement>(null);
   const overflowRef = useRef<HTMLDetailsElement>(null);
+  const previewRef = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const dismiss = (event: PointerEvent) => {
       const menu = overflowRef.current;
@@ -49,9 +52,11 @@ export function ProductImageFields({ images, primaryImageUrl, files, disabled = 
   ];
   const active = photos.find(photo => photo.key === selected) ?? photos[0];
   const index = active ? photos.indexOf(active) : -1;
-  const views = active?.file ? getSelectedPhotoViews(active.file) : active?.image ? labelOverrides[active.image.id] ?? photoViewsFromAlt(active.image.alt) : [];
+  const legacyLabels = active?.image && !Object.hasOwn(labelOverrides, active.image.id) ? ambiguousPhotoLabels(active.image.alt) : [];
+  const needsConfirmation = legacyLabels.length > 0;
+  const views = active?.file ? getSelectedPhotoViews(active.file) : active?.image ? labelOverrides[active.image.id] ?? legacyReview[active.image.id] ?? photoViewsFromAlt(active.image.alt) : [];
   const locked = disabled || busy;
-  const available = Math.max(0, 8 - photos.length);
+  const available = Math.max(0, MAX_LISTING_IMAGES - photos.length);
   const isCover = (photo: typeof active) => pendingCover ? photo?.file === pendingCover : photo === photos[0];
 
   async function run(task: () => Promise<void>, success: string) {
@@ -99,22 +104,30 @@ export function ProductImageFields({ images, primaryImageUrl, files, disabled = 
     <label className="file-input">{available ? "Add photos" : "Photo limit reached"}
       <input type="file" accept="image/jpeg,image/png,image/webp" multiple disabled={locked || available === 0} onChange={event => {
         const chosen = Array.from(event.target.files ?? []);
-        const valid = chosen.filter(file => ["image/jpeg", "image/png", "image/webp"].includes(file.type) && file.size <= 10 * 1024 * 1024);
+        const valid = chosen.filter(file => ["image/jpeg", "image/png", "image/webp"].includes(file.type) && file.size > 0 && file.size <= MAX_LISTING_IMAGE_BYTES);
         setError(valid.length !== chosen.length ? "Use JPEG, PNG, or WebP photos of 10 MB or less." : chosen.length > available ? `Only ${available} more photos fit. Extra files were not added.` : "");
         const next = valid.slice(0, available);
         onFilesChange([...files, ...next]); if (next[0]) setSelected(next[0]);
         event.currentTarget.value = "";
       }} />
     </label>
-    <p className="field-note">Up to 8 photos · JPEG, PNG or WebP · 10 MB each. Select a thumbnail to edit its labels and order.</p>
+    <p className="field-note">{photos.length} of {MAX_LISTING_IMAGES} photos · JPEG, PNG or WebP · 10 MB each. Include extra close-ups of details, defects and repairs.</p>
     <div className="photo-thumbnail-grid" aria-label="Listing photos">
       {photos.map((photo, i) => <button key={photo.image?.id ?? (photo.file ? `${photo.file.name}-${photo.file.lastModified}-${i}` : "legacy")} type="button" className="photo-thumbnail" aria-pressed={active === photo} aria-label={`Edit labels for photo ${i + 1}${isCover(photo) ? ", cover" : ""}`} disabled={locked} onClick={() => { setSelected(photo.key); setNotice(""); }}>
         <PhotoImage url={photo.url} file={photo.file} alt={`Photo ${i + 1}`} />
-        <span>{isCover(photo) ? "Cover" : `Photo ${i + 1}`}{photo.file ? " · New" : ""}</span>
+        <span>{isCover(photo) ? "Cover" : `Photo ${i + 1}`}{photo.file ? " · New" : ""}{photo.image && !Object.hasOwn(labelOverrides, photo.image.id) && ambiguousPhotoLabels(photo.alt).length > 0 ? " · Review labels" : ""}</span>
       </button>)}
     </div>
     {active && <div className="selected-photo-editor">
       <div className="selected-photo-heading"><strong>Photo {index + 1}{isCover(active) ? " · Cover" : ""}</strong><span>{active.file ? "Pending upload" : "Uploaded"}</span></div>
+      <button type="button" className="selected-photo-preview" onClick={() => previewRef.current?.showModal()} aria-label={`Enlarge photo ${index + 1}`}>
+        <PhotoImage url={active.url} file={active.file} alt={`Selected photo ${index + 1}`} />
+        <span>View full screen</span>
+      </button>
+      <dialog ref={previewRef} className="photo-preview-dialog" aria-label={`Photo ${index + 1} full-screen preview`}>
+        <div className="photo-preview-dialog-header"><strong>Photo {index + 1}</strong><button type="button" className="button outline small" onClick={() => previewRef.current?.close()}>Close preview</button></div>
+        <PhotoImage url={active.url} file={active.file} alt={`Photo ${index + 1}, enlarged`} />
+      </dialog>
       <div className="photo-editor-actions">
         <button type="button" className="text-action" disabled={locked || active.key === "legacy"} onClick={() => labelsRef.current?.focus()}>Edit labels</button>
         <button type="button" className="text-action" disabled={locked || isCover(active) || (Boolean(active.file) && images.length > 0 && !onCoverFileChange) || (!active.file && !onReorder)} onClick={() => {
@@ -135,7 +148,13 @@ export function ProductImageFields({ images, primaryImageUrl, files, disabled = 
       </div>
       {active.key === "legacy" ? <p>Add labeled actual-item photos to replace this older cover.</p> : <fieldset ref={labelsRef} tabIndex={-1} className="photo-view-labels" disabled={locked || (!active.file && !productId)}>
         <legend>What does photo {index + 1} show?</legend>
-        <div>{photoViews.map(view => <label key={view.key}><input type="checkbox" checked={views.includes(view.key)} onChange={event => void label(event.target.checked ? [...views, view.key] : views.filter(key => key !== view.key))} /><span>{view.label}{view.key === "details" ? " (optional)" : ""}</span></label>)}</div>
+        {needsConfirmation && <p className="photo-label-review" role="status">Review needed: this photo was labeled “{legacyLabels.join("” and “")}”. These grouped labels do not count toward coverage. Inspect the photo, select only the views it shows, then confirm.</p>}
+        <div>{photoViews.map(view => <label key={view.key}><input type="checkbox" checked={views.includes(view.key)} onChange={event => {
+          const next = event.target.checked ? [...views, view.key] : views.filter(key => key !== view.key);
+          if (needsConfirmation && active.image) setLegacyReview(current => ({ ...current, [active.image!.id]: next }));
+          else void label(next);
+        }} /><span>{view.label}{view.key === "details" ? " (optional)" : ""}</span></label>)}</div>
+        {needsConfirmation && <button type="button" className="button outline small" onClick={() => void label(views)}>Confirm photo labels</button>}
       </fieldset>}
     </div>}
     {files.length > 0 && <p className="field-note">{files.length} new photo{files.length === 1 ? "" : "s"} will upload when you save.</p>}

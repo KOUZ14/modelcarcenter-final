@@ -35,20 +35,25 @@ export function requiredPhotoViews(listing: EvidenceListing): PhotoView[] {
   return views;
 }
 
+function labelsFromAlt(alt = "") { return alt.split(/ [\u2014-] /)[0].split(" · "); }
+
+export function ambiguousPhotoLabels(alt = "") {
+  return labelsFromAlt(alt).filter(label => label === "Both sides" || label === "Top and base");
+}
+
 export function photoViewsFromAlt(alt = ""): PhotoView[] {
-  const labels = alt.split(/ [\u2014-] /)[0].split(" · ");
-  // Preserve coverage supplied by the old grouped labels without offering them
-  // for new photos. Sellers can refine these into individual views when editing.
+  const labels = labelsFromAlt(alt);
+  // Only unambiguous legacy labels count. Grouped views need seller review.
   if (labels.includes("Front view")) labels.push("Front");
   if (labels.includes("Rear view")) labels.push("Rear");
-  if (labels.includes("Both sides")) labels.push("Left side", "Right side");
-  if (labels.includes("Top and base")) labels.push("Top", "Underside");
   return photoViews.filter(view => labels.includes(view.label)).map(view => view.key);
 }
 
 export function photoAltForViews(views: readonly string[], description: string) {
-  const expanded = [...views, ...(views.includes("sides") ? ["left", "right"] : []), ...(views.includes("base") ? ["top", "underside"] : [])];
-  const labels = photoViews.filter(view => expanded.includes(view.key)).map(view => view.label);
+  const labels: string[] = photoViews.filter(view => views.includes(view.key)).map(view => view.label);
+  // Preserve ambiguity from older upload clients instead of inventing coverage.
+  if (views.includes("sides")) labels.push("Both sides");
+  if (views.includes("base")) labels.push("Top and base");
   return labels.length ? `${labels.join(" · ")} - ${description}` : description;
 }
 
@@ -58,7 +63,9 @@ export function listingPhotoEvidence(listing: EvidenceListing, images: EvidenceI
   const minimumPhotos = isFactorySealed(listing.packagingCondition) ? 2 : 4;
   const missing: string[] = required.filter(key => !provided.has(key)).map(key => photoViews.find(view => view.key === key)!.label);
   if (images.length < minimumPhotos) missing.unshift(`At least ${minimumPhotos} actual-item photos`);
-  return { required, missing, complete: missing.length === 0, minimumPhotos };
+  const unconfirmedPhotos = images.flatMap((image, index) => ambiguousPhotoLabels(image.alt).length ? [index + 1] : []);
+  if (unconfirmedPhotos.length) missing.push(`Confirm legacy labels on photo${unconfirmedPhotos.length === 1 ? "" : "s"} ${unconfirmedPhotos.join(", ")}`);
+  return { required, missing, complete: missing.length === 0, minimumPhotos, unconfirmedPhotos };
 }
 
 // File identity survives reordering in the upload form. Labels are sent with that file.

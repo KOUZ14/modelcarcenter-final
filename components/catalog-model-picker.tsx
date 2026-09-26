@@ -9,10 +9,11 @@ type InitialModel = {
   vehicleModel?: unknown; scale?: unknown; color?: unknown; productNumber?: unknown; primaryImageUrl?: unknown;
 };
 
-export function CatalogModelPicker({ initial, disabled, listingSaved, initialQuery = "", onReady, onModelChange }: {
+export function CatalogModelPicker({ initial, disabled, listingSaved, initialQuery = "", onReady, onModelChange, collectorRecovery = false }: {
   initial?: InitialModel | null;
   disabled?: boolean;
   listingSaved?: boolean;
+  collectorRecovery?: boolean;
   initialQuery?: string;
   onReady(ready: boolean): void;
   onModelChange?(model: Record<string, unknown>): void;
@@ -77,18 +78,24 @@ export function CatalogModelPicker({ initial, disabled, listingSaved, initialQue
   }
 
   return <section className="catalog-model-picker" aria-label="Find your model">
-    <p className="step-label">Model catalog</p>
     {summary ? <>
       <div className="catalog-identification">
         {typeof summary.primaryImageUrl === "string" && summary.primaryImageUrl ? <Image src={summary.primaryImageUrl} alt="Model identification photo" width={96} height={72} unoptimized /> : <span className="catalog-photo-placeholder" aria-label="No reference photo">{String(summary.scale ?? "Model")}</span>}
-        <div><p className="eyebrow">Linked catalog model</p><h2>{summaryTitle}</h2></div>
+        <div><p className="eyebrow">Linked catalog model</p><h2>{summaryTitle}</h2>
+          <p className="catalog-identification-meta">{String(summary.scale ?? "")} · {String(summary.color || "Color not specified")}<br />Manufacturer reference: {String(selected?.manufacturerSku || newModel?.manufacturerSku || initial?.productNumber || "Not recorded")}</p>
+        </div>
       </div>
-      <p>{String(summary.scale ?? "")} · {String(summary.color || "Color not specified")} · Manufacturer reference: {String(selected?.manufacturerSku || newModel?.manufacturerSku || initial?.productNumber || "Not recorded")}</p>
-      <p>{newModel && !listingSaved ? "This model will be added to the shared MCC catalog when you save your listing." : "Your listing uses this shared catalog model. Add your price, quantity and condition below."}</p>
+      {newModel && !listingSaved && <p>This model will be added to the shared MCC catalog when you save your listing.</p>}
       {(lockedId || selected) && <input type="hidden" name="catalogProductId" value={lockedId || selected!.id} />}
       {newModel && Object.entries(newModel).map(([name, value]) => <input key={name} type="hidden" name={name} value={value} />)}
-      <a className="text-action" href={`mailto:support@modelcarcenter.com?subject=${encodeURIComponent(`Incorrect catalog details: ${summaryTitle}`)}&body=${encodeURIComponent(`Catalog model: ${lockedId || selected?.id || summaryTitle}\nDetails to correct: `)}`}>Report incorrect catalog details</a>
-      {!lockedId && !listingSaved && <button className="text-action" type="button" disabled={disabled} onClick={() => { setSelected(null); setNewModel(null); setCandidate(null); setSimilar([]); onReady(false); }}>Change model</button>}
+      <div className="catalog-correction-actions">
+        {!lockedId && !listingSaved ? <button className="text-action" type="button" disabled={disabled} onClick={() => { setSelected(null); setNewModel(null); setCandidate(null); setSimilar([]); onReady(false); }}>Change linked model</button> : <details className="catalog-model-recovery"><summary>Wrong linked model?</summary>
+          <p>The linked model is fixed for this listing. Start a new listing to choose a different model. Photos and listing details must be added again.</p>
+          {collectorRecovery ? <><p>Keep this draft until your replacement is ready. Your seller and shipping preferences are remembered. If this listing is already active, use Deactivate in My Listings to take it off sale.</p>
+          <div><a href="/sell/model" target="_blank" rel="noopener noreferrer">Start a new listing (new tab)</a><a href="/account?view=listings" target="_blank" rel="noopener noreferrer">My Listings (new tab)</a></div></> : <p>Create the replacement from your inventory, then deactivate the incorrect listing if it is on sale.</p>}
+        </details>}
+        <a className="text-action" href={`mailto:support@modelcarcenter.com?subject=${encodeURIComponent(`Incorrect catalog details: ${summaryTitle}`)}&body=${encodeURIComponent(`Catalog model: ${lockedId || selected?.id || summaryTitle}\nDetails to correct: `)}`}>Report incorrect catalog details</a>
+      </div>
     </> : <>
       <h2>Find your model</h2>
       <p>Search the MCC catalog first. Models added by other sellers are available to use even when sold out.</p>
