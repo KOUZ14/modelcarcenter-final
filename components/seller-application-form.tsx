@@ -56,7 +56,7 @@ export function SellerApplicationForm({ marketplaceFeeBps }: { marketplaceFeeBps
       <SellerFeeDisclosure marketplaceFeeBps={marketplaceFeeBps} />
     </details>
     <AdultConsent />
-    <label className="consent-check"><input name="sellerTermsVersion" type="checkbox" value={POLICY_VERSION} required /><span>I am authorized to apply for this seller and agree to the <Link href="/seller-terms">Seller Terms</Link>, including deductions for marketplace commission and actual payment processing. I acknowledge the <Link href="/privacy">Privacy Policy</Link>.</span></label>
+    <label className="consent-check"><input name="sellerTermsVersion" type="checkbox" value={POLICY_VERSION} required /><span>I am authorized to apply for this seller and agree to the <Link href="/seller-terms">Seller Terms</Link>, including deductions for marketplace commission and payment processing. I acknowledge the <Link href="/privacy">Privacy Policy</Link>.</span></label>
     {state === "error" && <p className="form-error" role="alert">{error}</p>}
     <button className="button dark" type="submit" disabled={state === "loading"}>{state === "loading" ? "Submitting…" : <>Submit store application <Icon name="arrow" /></>}</button>
   </form>;

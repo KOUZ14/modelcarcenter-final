@@ -448,7 +448,7 @@ export function CollectorListingForm({
       {collectionReturnTo && <div className="collection-selling-setup"><p>This listing is for the model saved in your collection. Complete the condition, photos and shipping details, then publish it. Once it is active, return to enable your chosen availability.</p><Link href={collectionReturnTo + (productId ? `&listing=${encodeURIComponent(productId)}` : "")}>Return to collection setup</Link></div>}
       <div className="page-title listing-editor-intro">
         <h1>{productId ? "Edit your listing" : "Sell a Model"}</h1>
-        <p>{marketplaceFeeBps / 100}% marketplace fee + actual payment processing. No listing or monthly fees.</p>
+        <p>{marketplaceFeeBps / 100}% marketplace fee + payment processing. No listing or monthly fees.</p>
       </div>
 
       <form ref={formRef} className="listing-form collector-editor" onSubmit={save} noValidate onChange={(event) => {
@@ -632,7 +632,7 @@ export function CollectorListingForm({
             <p>{stripeReady ? "Your payout account is connected. Publish when your listing is ready." : "Connect your payout account to receive money from your sales. We’ll save your draft and photos before opening secure setup with Stripe, then bring you back to this listing."}</p>
             <label className="consent-check">
               <input type="checkbox" name="sellerTermsVersion" {...listingFieldProps(fieldErrors, "sellerTermsVersion")} checked={acceptedSellerTerms} onChange={(event) => setAcceptedSellerTerms(event.target.checked)} />
-              <span>I agree to the current <Link href="/seller-terms">Seller Terms</Link>, including deductions for marketplace commission and actual payment processing, fulfillment rules, and return obligations.</span>
+              <span>I agree to the current <Link href="/seller-terms">Seller Terms</Link>, including deductions for marketplace commission and payment processing, fulfillment rules, and return obligations.</span>
             </label>
             <ListingFieldError errors={fieldErrors} name="sellerTermsVersion" />
             {!stripeReady && <button className="button outline small" type="button" disabled={busy || !acceptedSellerTerms} onClick={() => { if (formRef.current) return saveListing(formRef.current, "connect"); }}>{busy ? "Saving draft…" : "Connect payout account"}</button>}

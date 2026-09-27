@@ -763,7 +763,7 @@ function ProductEditor({
             <label>Full item price (USD)<input name="price" inputMode="decimal" required value={price} onChange={e => setPrice(e.target.value)} /></label>
             <label>{availabilityType === "preorder" ? "Quantity available to preorder" : "Inventory quantity"}<input name="inventoryQuantity" type="number" min={availabilityType === "preorder" ? 1 : product?.reservedQuantity ?? 0} max={100000} required defaultValue={product?.preorder?.capacity ?? product?.inventoryQuantity ?? 1} /></label>
           </div>
-          <p className="form-note">You pay {feePercent(marketplaceFeeBps)} commission on the item subtotal, plus actual payment processing on the full customer payment (including shipping and tax). Both are deducted from your proceeds. <Link href="/seller-terms#fees">Fee and payout terms</Link></p>
+          <p className="form-note">You pay {feePercent(marketplaceFeeBps)} commission on the item subtotal, plus payment processing on the full customer payment (including shipping and tax). Both are deducted from your proceeds. <Link href="/seller-terms#fees">Fee and payout terms</Link></p>
           <fieldset className="availability-fields">
             <legend>Availability</legend>
             <div className="form-row">
@@ -1231,7 +1231,7 @@ function StoreSettings({
                 checked={acceptedSellerTerms}
                 onChange={(event) => setAcceptedSellerTerms(event.target.checked)}
               />
-              <span>I am authorized to accept the <Link href="/seller-terms">Seller Terms</Link> for this store, including deductions for marketplace commission and actual payment processing.</span>
+              <span>I am authorized to accept the <Link href="/seller-terms">Seller Terms</Link> for this store, including deductions for marketplace commission and payment processing.</span>
             </label>
             <button
               className="button dark small"
