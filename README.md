@@ -4,23 +4,28 @@ Model Car Center is a collector-first marketplace for collectible model cars fro
 
 `find → buy → save → hunt → sell → fulfill`
 
-The original professional-seller flow remains intact: seller applications, founder approval, CSV inventory, Stripe Connect, checkout, webhooks, fulfillment, refunds, and Model Hunt administration continue to use the same underlying seller/product/order architecture.
+The professional-seller flow uses the same seller/product/order architecture: seller applications, founder approval, Stripe Connect, checkout, webhooks, refunds, and Model Hunt administration remain intact, while approved stores can self-manage inventory and fulfillment.
 
 ## Capabilities
 
+The [20-item site checklist audit](docs/site-checklist-audit.md) records privacy, consent, email, accessibility, and business-information checks. [Asset provenance](docs/asset-provenance.md) tracks the evidence still needed for images and branding. Public business information is configured with `BUSINESS_LEGAL_NAME`, `BUSINESS_MAILING_ADDRESS`, and `BUSINESS_JURISDICTION`; these must contain verified values. Optional community, Model Hunt, and restock emails are withheld until business name and mailing address are set. New community campaigns must use `sendCommunityUpdateEmail` so current subscriptions, postal details, and unsubscribe links are applied.
+
 - Passwordless collector accounts powered by Better Auth email magic links, 10-minute hashed verification tokens, secure cookie sessions, and Resend delivery
 - A protected **My Garage** for cross-device wishlists and carts, Model Hunts, orders, collector listings, sales, profile settings, and account deletion
+- A protected **Store Console** for approved professional sellers with store-scoped inventory CRUD, CSV imports, order fulfillment, storefront settings, and sales analytics
 - Conservative email-based claiming of legacy guest orders and Model Hunts: only a verified matching account can claim an unowned record
-- Conflict-aware guest-to-account migration: wishlists are deduplicated, same-seller carts merge, and different-seller carts require an explicit choice
+- Guest-to-account migration deduplicates wishlists and merges cart items across sellers without replacing existing items
 - D1-backed accounts, sessions, profiles, carts, wishlists, catalog, sellers, applications, Model Hunts, reservations, orders, snapshots, and Stripe event deduplication
 - Search across collector-relevant fields, filters, sorting, and pagination
 - Public product and seller storefront routes with truthful inventory, shipping, return, and professional/collector seller information
-- Single-seller carts enforced for both guests and signed-in collectors
-- Guest Stripe-hosted Checkout using Connect destination charges and a configurable application fee
+- Multi-seller carts with seller shipping totals, one delivery address, and one payment for selected sellers; unselected items remain in the cart
+- Guest Stripe-hosted Checkout using Connect separate charges and delivery-gated transfers for each seller order
+- Seller-approved combined shipping quotes before payment, with buyer requests and seller responses in Messages
 - Collector listing drafts, structured condition/details, R2 photo uploads, founder moderation, rejection feedback, and controlled edits/deactivation
 - Collector Stripe-hosted payout onboarding and a seller-only sales/fulfillment view
 - Atomic inventory reservation, release on expiration/failure, and webhook-only paid-order finalization
 - Stripe-hosted seller onboarding, capability status tracking, full refunds with transfer and fee reversal
+- Shippo carrier-rate comparison, protected 4×6 label purchase, package dimensions, high-value insurance/signature enforcement, tracking timelines, and same-recipient combined shipping
 - Resend transactional email for authentication, paid orders, shipments, onboarding, listing review, and confirmed Model Hunt matches
 - Founder-only ChatGPT-authenticated admin with an explicit email allowlist
 - Founder listing-review queue with approve/reject controls and seller suspension
@@ -28,7 +33,7 @@ The original professional-seller flow remains intact: seller applications, found
 - Development-only demo seed; production is never automatically populated
 - Sitemap, robots rules, product metadata/structured data, accessible forms, and working policy routes
 
-The marketplace intentionally does not include multi-vendor checkout, reviews, offers, auctions, messaging, or automated Shopify/eBay synchronization.
+The marketplace intentionally does not include offers, auctions, or automated Shopify/eBay synchronization.
 
 ## Prerequisites
 
@@ -36,6 +41,7 @@ The marketplace intentionally does not include multi-vendor checkout, reviews, o
 - npm
 - Bash, GNU `timeout`, `flock`, `curl`, and `sha256sum` for the repository's Sites validation scripts (WSL2 is recommended on Windows)
 - A Stripe account with Connect enabled for marketplace test mode
+- A Shippo account and test API token for fulfillment development
 - A Resend account and verified sender/domain for live email
 - OpenAI Sites access for hosted D1, R2, and deployment
 
@@ -51,9 +57,31 @@ npm run dev
 
 Open the exact local URL printed by Vite (normally `http://localhost:5173`).
 
+For a loopback `SITE_URL`, Vite uses its port and exits if that port is occupied. To use another port, set it in `.env.local` (for example, `SITE_URL=http://localhost:5174`) and restart the dev server. Keep any explicit `--port` argument in sync with `SITE_URL` so authentication, email links, and checkout returns use the same origin.
+
 The seed command is safe for development only. It inserts one seller and four products whose names begin with `[DEMO]`. It is never called by the application, build, migration, or production deployment.
 
-On native Windows, use WSL2 for the scripted workflow. If running Vite directly from PowerShell, ensure Node 22+ is on `PATH`, then run `npx vite`.
+On native Windows, ensure Node 22.13+ is on `PATH`, then run `npm run dev` in PowerShell. The build and database scripts still require Bash/WSL2.
+
+### Updates while developing
+
+Leave `npm run dev` running and save your `.tsx`, `.ts`, or `.css` changes. Vite applies hot updates or reloads the page automatically. Refresh the browser with `Ctrl+R` if you need to refetch data; there is no need to restart the server for ordinary page, component, style, or API edits. Use `Ctrl+Shift+R` if the browser is displaying stale assets.
+
+Restart after changing environment values, installing dependencies, or changing server configuration if Vite has not already restarted itself. Do not use `--force` for routine starts: it discards the dependency optimization cache.
+
+For WSL checkouts on a Windows drive (`/mnt/c/...`), Vite polls for saved edits every 500 ms because Windows editor events can be missed. Generated files, runtime snapshots, and local database state are excluded from watching to reduce startup work and unnecessary reloads. For faster startup, run Node directly on Windows for a `C:\...` checkout, or keep a WSL checkout in `~/projects/...` and edit it through your editor's WSL integration. Keep one dev server per checkout and avoid running a full build alongside it when measuring performance. See [Vite's WSL guidance](https://vite.dev/config/server-options#server-watch).
+
+### WSL dependency-cache errors
+
+For WSL checkouts under `/mnt/c` (or another mounted Windows drive), the Vite configuration stores optimized dependencies in a user- and checkout-specific `/tmp/model-car-center-vite-*` directory on the Linux filesystem. This avoids Windows directory locks when Vite replaces its dependency cache. Other environments use Vite's default cache location.
+
+If a running server reports `EACCES` while renaming `deps_rsc`, followed by a missing optimized dependency such as `defu.js`, stop that project's dev server with `Ctrl+C` and restart it once with:
+
+```bash
+npm run dev -- --force
+```
+
+The new cache location bypasses the old `node_modules/.vite` cache; no dependency reinstall is needed. Keep one dev server running per checkout. For best WSL filesystem performance, keep the checkout itself under the Linux home directory, such as `~/projects/modelcarcenter-final`.
 
 ## Environment variables
 
@@ -62,19 +90,31 @@ Copy `.env.example` to `.env.local`. Never commit real values.
 | Variable | Purpose |
 | --- | --- |
 | `SITE_URL` | Public origin used in Checkout returns, email links, canonical URLs, and sitemap |
+| `MARKETPLACE_MODE` | `test` for development; `live` for real operation. Live checkout returns 503 until live credentials, email, and distinct webhook secrets pass configuration checks. |
 | `BETTER_AUTH_SECRET` | High-entropy secret (at least 32 characters) used to sign collector sessions and auth state |
-| `SUPPORT_EMAIL` | Customer-facing support address |
+| `SUPPORT_EMAIL` | Customer-facing support and email reply-to address; use `support@modelcarcenter.com` |
 | `ADMIN_EMAILS` | Comma-separated ChatGPT-authenticated emails allowed into `/admin` |
 | `ADMIN_DEV_BYPASS` | Explicit local-only bypass; ignored when `NODE_ENV=production` |
 | `STRIPE_SECRET_KEY` | Platform secret key; test key during development |
 | `STRIPE_WEBHOOK_SECRET` | Signing secret for `/api/stripe/webhook` |
+| `STRIPE_CONNECT_WEBHOOK_SECRET` | Separate signing secret for `/api/stripe/webhook-connect`; must match a connected-account endpoint in the same Stripe mode |
 | `STRIPE_API_VERSION` | Pinned Stripe API version; default `2026-02-25.clover` |
-| `MARKETPLACE_FEE_BPS` | Commission on item subtotal in basis points (`1000` = 10%) |
+| `COLLECTOR_MARKETPLACE_FEE_BPS` | Collector marketplace commission on item subtotal in basis points; default `850` (8.5%) |
+| `PROFESSIONAL_MARKETPLACE_FEE_BPS` | Standard professional-store commission on item subtotal; default `700` (7%) |
+| `FOUNDING_SELLER_MARKETPLACE_FEE_BPS` | Active founding professional-store commission; default `500` (5%) |
+| `FOUNDING_SELLER_PROMOTION_MONTHS` | Length of an admin-assigned founding promotion; default `6` months |
 | `CHECKOUT_EXPIRATION_MINUTES` | Reservation/Checkout lifetime, 30–1440 minutes |
 | `SHIPPING_COUNTRIES` | Comma-separated ISO two-letter countries, default `US` |
 | `STRIPE_AUTOMATIC_TAX` | Enables Stripe automatic tax when `true`; no custom tax calculation exists |
+| `SHIPPO_API_KEY` | Server-only Shippo token; use `shippo_test_...` during development |
+| `SHIPPO_API_VERSION` | Pinned Shippo API version; default `2018-02-08` |
+| `SHIPPO_WEBHOOK_SECRET` | Random secret embedded in the private Shippo tracking-webhook URL |
+| `SHIPPO_INSURANCE_THRESHOLD_CENTS` | Item value that automatically requires carrier insurance; default `25000` ($250) |
+| `SHIPPO_SIGNATURE_THRESHOLD_CENTS` | Item value that automatically requires standard signature confirmation; default `75000` ($750) |
+| `SHIPPO_QUOTE_EXPIRATION_MINUTES` | Local rate-selection window; default `20` minutes |
+| `SHIPPO_MAX_LABEL_COST_CENTS` | Hard server-side purchase limit per label; default `10000` ($100) |
 | `RESEND_API_KEY` | Resend API key |
-| `EMAIL_FROM` | Verified sender, such as `Model Car Center <orders@example.com>` |
+| `EMAIL_FROM` | Verified sender; use `Model Car Center <support@modelcarcenter.com>` |
 
 Hosted runtime values are configured through OpenAI Sites rather than committed env files.
 
@@ -84,7 +124,31 @@ Collector accounts use Better Auth's D1-compatible Drizzle adapter and magic-lin
 
 For local sign-in, configure `SITE_URL`, `BETTER_AUTH_SECRET`, `RESEND_API_KEY`, and `EMAIL_FROM`. When Resend is not configured in development, the email layer logs that delivery was skipped, so a real magic-link round trip requires a development Resend key and verified sender.
 
+During development, a loopback `SITE_URL` also trusts `localhost`, `127.0.0.1`, and `[::1]` with the same protocol and port, so either local browser address can submit the sign-in form. Magic links still use `SITE_URL` as their canonical address. Production trusts only the configured site origin.
+
 Authentication and authorization are separate. Collector listing, image, and fulfillment endpoints derive the user from the server session and then constrain database reads/writes to that user's seller or product. Browser-supplied user IDs, emails, seller IDs, prices, and payout destinations are never trusted as authorization.
+
+## Professional store accounts
+
+Approved professional sellers use the same passwordless magic-link authentication at `/sign-in`, then work from `/store`. On the first verified sign-in, the app links the account only when exactly one unowned professional seller record has the same normalized contact email. It never claims collector sellers, already-owned stores, ambiguous duplicate-email records, or records for an unverified account.
+
+The Store Console provides:
+
+- Seller-scoped product creation and editing, stock changes that cannot drop below reserved inventory, publishing/unpublishing, and archival
+- In-stock and preorder sales modes with required expected release dates, paid-order release snapshots, automatic ship-by recalculation, and buyer release-update email
+- Durable one-time restock alerts on sold-out product pages; inventory increases reactivate sold-out listings and notify active subscribers
+- CSV preview and seller-SKU upsert importing using the canonical inventory template; new imports start as drafts and updates preserve the existing product status
+- Paid-order details and shipping-address access for the owning store, carrier rates and labels, handling reminders, tracking events, and manual-tracking fallback
+- Lifetime sales, order, fee, unit, inventory-value, low-stock, rolling six-month, and top-product analytics calculated only from that seller's records
+- Storefront profile, shipping, and return-policy settings; contact-email changes, refunds, payout remediation, suspensions, and store closure remain founder/support actions
+
+Professional stores can create and edit drafts before onboarding is complete, but products can become active only while the seller is active and Stripe reports both charges and payouts enabled. Suspended accounts retain read-only access. Store inventory "deletion" is archival so order snapshots and in-flight reservation references remain intact.
+
+### Availability lifecycle
+
+Preorder inventory is an allocation: checkout charges the buyer in full, reserves the requested units exactly like in-stock inventory, and shows the expected release date on the product page, cart, Stripe line item, confirmation email, buyer account, and seller order. Mixed carts use the latest preorder release date as the fulfillment anchor. When a seller changes a preorder date or switches the product to in stock, affected paid orders receive an email and their ship-by deadline is recalculated.
+
+Sold-out product pages remain public so collectors can save the model or register an email alert. Raising available inventory above zero reactivates a sold-out listing and attempts each active alert once. Successfully delivered alerts are marked notified; skipped or failed email deliveries remain active for a later retry. Every alert email includes a tokenized unsubscribe link.
 
 ## Database and D1
 
@@ -112,13 +176,39 @@ OpenAI Sites provisions the real D1 resource from the `DB` declaration and appli
 
 Migration `0001_spicy_prism.sql` adds auth/session/profile, persistent cart/wishlist, account ownership, collector seller/listing, moderation, and R2 image metadata without rebuilding or deleting existing V1 tables. Apply migrations before testing account routes against an existing database.
 
+Migration `0007_sudden_jimmy_woo.sql` adds seller ship-from/package defaults, short-lived rate quotes, purchased shipments, combined-order links, and deduplicated tracking events. Apply it before opening the Store Console shipping workflow.
+
+Migration `0008_damp_eternity.sql` adds collector package dimensions, professional-store calculated/flat/free modes, buyer checkout-rate quotes, and immutable selected-service snapshots on reservations and orders.
+
+## Shippo fulfillment
+
+Shippo calls occur only on the server. The browser never receives the API token or an arbitrary Shippo label URL. Collector sellers use calculated checkout shipping from their listing package data. Professional stores choose calculated, flat-rate, or free shipping in Store settings. For calculated shipping, the buyer receives up to three server-selected carrier choices and the chosen rate is bound to the authoritative cart before Stripe Checkout starts.
+
+Authenticated sellers can request fulfillment rates only for their own paid, unfulfilled orders. The server filters those rates to the buyer-selected service or an objectively equal/faster service; a slower downgrade is rejected for both Shippo labels and manual tracking attestations. A label purchase accepts only a rate ID captured in that owner’s unexpired quote; the quote is atomically claimed before purchase and cannot be reused.
+
+Before requesting rates, complete the ship-from address, carrier phone, and default package dimensions in **Store Console → Settings**. Package values can be adjusted per shipment. The server calculates declared value from authoritative order subtotals and automatically adds insurance and standard signature confirmation at the configured thresholds. Sellers cannot turn those protections off in the browser.
+
+Address forms share United States address autocomplete, a state dropdown, optional apartment/unit entry, and field-level validation. To enable suggestions, configure `GOOGLE_PLACES_API_KEY` with a server-side key for [Places API (New)](https://developers.google.com/maps/documentation/places/web-service/get-api-key), with billing enabled and the key restricted to that API. Set a usage quota in Google Cloud. The key is never exposed to the browser. Suggestions use a debounced, US-restricted search and a session token shared with the selected address lookup. No autocomplete responses are cached. Without a key, on lookup failure, or when no suggestion matches, customers and sellers can enter the full address manually. Existing international ship-from addresses retain their country and editable region. Use the normal Sites environment settings for the hosted key; keep local keys in `.env.local`.
+
+Combined shipping is available for up to ten open orders only when seller, currency, normalized buyer email, and normalized delivery address all match. One Shippo transaction and tracking number is then linked to every included order.
+
+Label creation moves orders to `processing`; it does not satisfy the handling deadline. Orders become `shipped` only after Shippo reports carrier transit, and `delivered` after a delivery event. Sellers can manually refresh tracking from the order view. For automatic events, create a Shippo `track_updated` webhook pointing to:
+
+Verified-purchase feedback does not unlock when an order is merely marked `shipped`. Publishing is allowed after the carrier changes the order to `delivered`, with a 14-calendar-day fallback from `shipped_at` so a missing final carrier scan cannot block the buyer indefinitely. The same delivery eligibility rule protects the write endpoint and filters public seller reputation.
+
+```text
+https://YOUR_DOMAIN/api/shippo/webhook?token=YOUR_SHIPPO_WEBHOOK_SECRET
+```
+
+Use a test webhook with a `shippo_test_...` token. The handler rejects live events when the integration is in test mode. Rotate `SHIPPO_WEBHOOK_SECRET` if the webhook URL is exposed.
+
 ### Account deletion and retained records
 
-Account deletion revokes the collector's sessions, removes the Better Auth user/profile through foreign-key cascades, suspends the associated collector seller, and deactivates its listings. Paid orders remain as immutable transaction records; their `buyer_user_id` becomes null while order snapshots and fulfillment data are retained for operational, accounting, dispute, and legal needs. Uploaded listing media is not automatically erased because retained transaction/listing records may still reference it; support can handle an appropriate deletion request after retention obligations are satisfied.
+Account deletion first removes newsletter subscriptions, restock alerts, and Model Hunts linked to the collector's user ID or verified email (including matching guest records). It then revokes the collector's sessions, removes the Better Auth user/profile through foreign-key cascades, suspends the associated collector seller, and deactivates its listings. Paid orders remain as immutable transaction records; their `buyer_user_id` becomes null while order snapshots and fulfillment data are retained for operational, accounting, dispute, and legal needs. Uploaded listing media is not automatically erased because retained transaction/listing records may still reference it; support can handle an appropriate deletion request after retention obligations are satisfied.
 
 ## R2 listing images
 
-The logical Sites R2 binding is `IMAGES`. Collector uploads accept JPEG, PNG, and WebP only, validate both declared MIME type and file signature, allow up to eight images per listing, and cap each image at 10 MB. Objects use unpredictable keys under `listings/<seller>/<product>/...`; D1 stores only metadata and the private bucket key. `/media/*` streams those objects with immutable cache metadata and content-type hardening.
+The logical Sites R2 binding is `IMAGES`. Collector listings, professional Store Console products, and founder-admin products accept direct JPEG, PNG, and WebP uploads instead of image URL fields. Uploads validate both declared MIME type and file signature, allow up to eight images per listing, and cap each image at 10 MB. Objects use unpredictable keys under `listings/<seller>/<product>/...`; D1 stores only metadata and the private bucket key. `/media/*` streams those objects with immutable cache metadata and content-type hardening.
 
 For local development, ensure the `IMAGES` binding is available through the Sites/Vite environment before testing uploads. In production, Sites provisions the bucket declared in `.openai/hosting.json`.
 
@@ -129,12 +219,14 @@ For local development, ensure the `IMAGES` binding is available through the Site
 - **Sell from your collection** opens the authenticated collector listing flow at `/sell/model`.
 - **Apply as a professional seller** keeps the original application and founder-managed inventory workflow.
 
-Collector listings save as drafts. A collector can upload photos and edit the draft, but submission is gated on complete Stripe Connect charges/payout capability and at least one image. Submitted listings enter `pending_review` and are not public. The founder approves or rejects them in `/admin`; rejected listings preserve a review note for the collector. Editing a live collector listing returns it to review. Sellers can fulfill only their own paid orders, and suspension blocks seller actions.
+Collector listings save as drafts. A collector can upload photos and edit the draft, but submission is gated on complete Stripe Connect charges/payout capability, every collectible-grade disclosure, all six photo-checklist confirmations, and at least four original images. Submitted listings enter `pending_review` and are not public. The founder approves or rejects them in `/admin`; rejected listings preserve a review note for the collector. Editing a live collector listing returns it to review. Sellers can fulfill only their own paid orders, and suspension blocks seller actions.
+
+Every new listing records model condition separately from packaging condition, original-box status, missing parts, defects, restoration/customization, material, product number, edition/serial, COA status, accessories, and provenance. Missing-parts, defects, restoration/customization, and accessories fields require an explicit disclosure such as `None known`; provenance and identifiers remain optional when they do not exist. The same standard applies to collector, professional-store, admin, and CSV-created drafts before they can become active.
 
 ## Stripe Connect and Checkout
 
 1. Complete Stripe's Connect platform setup in test mode.
-2. Configure platform responsibility and branding appropriate for destination charges.
+2. Configure platform responsibility and branding appropriate for separate charges and transfers.
 3. Add `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, and the marketplace settings to `.env.local` and the Sites runtime.
 4. Submit a seller application through `/sell`.
 5. In `/admin`, approve the application and select **Send onboarding**. The server creates a connected account and sends a single-use Stripe-hosted onboarding link.
@@ -142,7 +234,17 @@ Collector listings save as drafts. A collector can upload photos and edit the dr
 
 Individual collectors start the same Stripe-hosted onboarding from My Garage. They never enter bank or identity data into Model Car Center. Their draft cannot be submitted, and an admin cannot approve it, until Stripe reports both charges and payouts enabled.
 
-Checkout is server-authoritative. The browser sends only product IDs and quantities. The server reloads active products and the active seller from D1, checks available inventory, calculates shipping and the application fee, reserves inventory transactionally, then creates a finite Stripe Checkout Session. Stripe receives `application_fee_amount` and `transfer_data[destination]` for a destination charge.
+Checkout is server-authoritative. The browser sends product IDs, quantities, one delivery address, and a shipping selection for each selected seller. The server reloads current products and sellers from D1, checks inventory and each seller's fee program, and reserves all selected inventory in one transaction. A checkout group links one finite Stripe Checkout Session to a reservation and order for each seller. Commission is calculated against each seller's item subtotal. Stripe line-item metadata associates actual shipping and taxes with each seller order; processing fees are apportioned to seller orders with exact cent totals. Transfers are released separately after each shipment's delivery review window. Client-supplied prices and fees are ignored, and older single-seller checkout sessions remain supported.
+
+Migration `0021_consolidated_checkout.sql` adds checkout groups, combined shipping requests, and per-reservation order uniqueness. Apply it before running the updated checkout routes. It preserves existing orders and reservations.
+
+Signed-in buyers buying at least two models from one seller can request a combined shipping quote from their cart. The seller receives an email and can quote a total price, carrier, service, and transit estimate or decline in Messages. Buyers receive an email when the seller responds. Requests expire after seven days; quotes expire after 48 hours and bind the buyer, current items, quantities, prices, package/origin details, and exact delivery address. A request does not reserve inventory. Buyers can wait, explicitly select standard shipping, or leave the seller unselected while paying for other sellers. Accepted quotes are claimed atomically with inventory and become reusable when an unpaid checkout is cancelled, provided the quote is still valid.
+
+Application refunds carry an order ID and an explicit remaining order amount, so refunding one seller never refunds sibling orders. Refunds created directly in Stripe without an order reference are allocated across remaining seller balances. A dispute on the shared charge holds every associated seller payout until resolved.
+
+The V1 marketplace rates are 8.5% for collector sellers and 7% for professional stores. An admin can explicitly designate a professional store for the 5% founding rate; the stored six-month start/end window is evaluated on every checkout, then expires automatically back to 7% without deleting the seller's founding history. Orders retain `marketplace_fee_bps` and `platform_fee_cents`, so later pricing changes never rewrite historical fees. There are no listing, monthly, subscription, or account-opening fees for V1.
+
+Marketplace commission and payment processing are separate. With the current separate-charges-and-transfers flow Stripe assesses processing fees to the Model Car Center platform, not the connected seller. Completed orders record the actual Stripe processing fee when Stripe returns the expanded balance transaction, the seller proceeds, and the transfer lifecycle; seller interfaces do not invent a processing amount when it is unavailable.
 
 ### Webhook setup
 
@@ -160,12 +262,16 @@ Subscribe to:
 - `checkout.session.expired`
 - `account.updated` (connected-account events)
 - `charge.refunded`
+- `refund.updated`
+- `refund.failed`
+- `transfer.updated`
+- `transfer.reversed`
 
 For local forwarding:
 
 ```bash
 stripe listen \
-  --events checkout.session.completed,checkout.session.async_payment_succeeded,checkout.session.async_payment_failed,checkout.session.expired,account.updated,charge.refunded \
+  --events checkout.session.completed,checkout.session.async_payment_succeeded,checkout.session.async_payment_failed,checkout.session.expired,account.updated,charge.refunded,refund.updated,refund.failed,transfer.updated,transfer.reversed \
   --forward-to localhost:5173/api/stripe/webhook
 ```
 
@@ -173,14 +279,20 @@ Put the CLI's `whsec_...` value in `STRIPE_WEBHOOK_SECRET`. It is different from
 
 Use Stripe test mode and test payment methods until every seller/account, webhook, reservation, email, refund, and fulfillment path has been exercised. The success page does not create orders; it waits for the verified webhook-created order.
 
-Full admin refunds are available only for paid, unrefunded orders. The server uses Stripe idempotency, reverses the seller transfer, refunds the application fee, and optionally restocks inventory after Stripe reports success. Partial refunds and disputes remain in the Stripe Dashboard for V1.
+Full admin refunds are available for orders with a remaining paid balance. Resolution cases support full and partial refunds. The server uses Stripe idempotency and either cancels an unreleased seller transfer or proportionally reverses a released transfer. Legacy destination-charge orders continue to reverse the destination transfer and refund the application fee.
+
+## Resolution notifications
+
+Customer Support updates queue transactional email for the affected party when a case is opened, the seller responds, either party adds evidence, a return is authorized, a case is escalated, or a refund is recorded. Escalations also notify the monitored support inbox. Each message links directly to the shared case timeline.
+
+The worker checks once an hour for active seller-response, buyer-evidence, buyer-escalation, and return-shipment deadlines that are less than 24 hours away. It also releases eligible seller transfers three calendar days after carrier-confirmed delivery, while leaving any order with an active case on hold. Reminder records, case-event emails, transfers, and reversals are idempotent and failed financial operations are retried.
 
 ## Resend
 
 1. Verify the sender domain in Resend.
 2. Create an API key and set `RESEND_API_KEY`.
-3. Set `EMAIL_FROM` to an address on the verified domain.
-4. Set `SUPPORT_EMAIL` to the monitored support inbox.
+3. Set `EMAIL_FROM` to `Model Car Center <support@modelcarcenter.com>`.
+4. Set `SUPPORT_EMAIL` to the monitored `support@modelcarcenter.com` inbox. All notification replies are routed there.
 
 When Resend is absent in development, the email abstraction logs a clear skipped-email message and returns `sent: false`. Admin actions that require a real notification, such as notifying a Model Hunt collector, do not mark the collector notified when email is unavailable.
 
@@ -210,17 +322,20 @@ The admin provides:
 Download the canonical template from the admin import tab. The columns are:
 
 ```text
-seller_sku,title,description,scale,model_manufacturer,vehicle_make,vehicle_model,vehicle_year,color,condition,price,inventory_quantity,image_urls,keywords
+seller_sku,title,description,scale,model_manufacturer,vehicle_make,vehicle_model,vehicle_year,color,model_condition,packaging_condition,original_box,missing_parts,defects,restoration_customization,material,product_number,edition_serial,coa,accessories,provenance,price,inventory_quantity,availability_type,release_date,keywords
 ```
 
 - Select the seller before upload.
-- `seller_sku`, title, scale, manufacturer, vehicle make/model, condition, price, and inventory are required.
+- `seller_sku`, title, scale, manufacturer, vehicle make/model, collectible conditions/disclosures, material, price, and inventory are required.
 - `price` is decimal currency and is normalized to integer cents.
-- `condition` is `new`, `used`, `preowned`, or `other`.
-- Multiple image URLs are separated with `|` or `;` and must use HTTP(S).
+- `availability_type` is optional and defaults to `in_stock`; use `preorder` with a `release_date` in `YYYY-MM-DD` format.
+- `model_condition` is `mint`, `near_mint`, `excellent`, `good`, `fair`, or `poor`.
+- `packaging_condition` is `sealed`, `mint`, `excellent`, `good`, `fair`, `poor`, or `not_included`; `original_box` is `included`, `not_included`, or `reproduction`.
+- `coa` is `included`, `not_included`, or `not_applicable`.
+- Add product photos from the product editor after the import. Photos are uploaded directly; sellers do not need to host them elsewhere.
 - The importer reports row-level errors and makes no changes until the preview is clean and committed.
-- The unique key is seller + seller SKU. A later import updates that product and replaces its image list; it does not silently duplicate the SKU.
-- New imported products start as drafts and must be activated by the founder.
+- The unique key is seller + seller SKU. A later import updates that product while preserving its uploaded photos; it does not silently duplicate the SKU.
+- New imported products start as drafts. Before activation, add at least four photos and confirm the full photo checklist in the product editor.
 
 ## Quality checks
 
@@ -231,18 +346,35 @@ npm run build
 npm run validate:artifact
 ```
 
-Tests cover search normalization, availability, server totals, fee calculation, the single-seller rule, Model Hunt validation, CSV validation/upsert planning, Stripe signature and event idempotency logic, inventory reservation/release/completion, safe auth redirects, resource ownership, seller-only fulfillment, wishlist deduplication, guest-data merging, verified legacy-record claims, moderation gates, image validation, and the built marketplace artifact.
+Tests cover search normalization, product availability modes, preorder release validation and ship anchors, server totals, fee calculation, consolidated checkout with separate seller orders, Model Hunt validation, CSV validation/upsert planning, Stripe signature and event idempotency logic, inventory reservation/release/completion, safe auth redirects, resource ownership, seller-only fulfillment, wishlist deduplication, guest-data merging, verified legacy-record claims, moderation gates, image validation, high-value shipping rules, package validation, combined-shipping identity, handling reminders, tracking-state mapping, and the built marketplace artifact.
 
 ## Production launch checklist
 
+The public production origin is `https://modelcarcenter.com`. Set `SITE_URL`
+to that exact origin and `MARKETPLACE_MODE=live` in Sites runtime settings.
+Redeploy a saved version after changing runtime settings. Preserve existing
+authentication secrets; rotating them invalidates sessions.
+
+`/admin` → **Production** reports configuration checks without exposing secrets.
+`GET /api/health` checks the commerce database tables and returns a minimal,
+uncached status. In live mode, missing prerequisites produce HTTP 503 and
+checkout is blocked before inventory reservation or Stripe session creation.
+Neither check certifies provider activation, webhook delivery, tax setup, or
+successful fulfillment. Those require the operational checks below.
+
+Do not copy test connected-account IDs into live onboarding or replace webhook
+secrets with randomly generated values. Register each endpoint in Stripe live
+mode and use that endpoint's actual signing secret. Signed webhook events with
+a mode different from the configured Stripe API key are rejected.
+
 Before moving from test keys to live operation:
 
-1. Have counsel approve the launch-draft terms, privacy, return, and seller-terms pages.
+1. Confirm the published Marketplace Terms, Privacy Policy, Returns & Refunds Policy, Shipping Policy, Cookie & Local Storage Policy, and Seller Terms with counsel before opening live transactions.
 2. Configure the production Sites `DB` and `IMAGES` bindings and apply all committed migrations; do not seed demo inventory.
 3. Generate and securely configure a production-only `BETTER_AUTH_SECRET`; confirm that `SITE_URL` exactly matches the public HTTPS origin.
 4. Verify magic-link delivery, expiration, replay resistance, sign-out, protected-route redirects, and account deletion using a real production-domain inbox.
-5. Configure live Stripe Connect, platform branding, live secret key, live webhook endpoint, live webhook secret, commission, shipping countries, and optional automatic tax.
-6. Onboard a professional seller and a collector seller in Stripe live mode; confirm charges/payouts, listing moderation, destination charges, fees, and seller-only fulfillment.
+5. Configure live Stripe Connect and Shippo, platform branding, live secret keys, both webhook endpoints/secrets, commission, shipping countries, high-value thresholds, and optional automatic tax.
+6. Onboard a professional seller and a collector seller in Stripe live mode; confirm charges/payouts, listing moderation, delivery-gated transfers, fees, and seller-only fulfillment.
 7. Verify the Resend production domain and sender.
 8. Set production `SUPPORT_EMAIL` and `ADMIN_EMAILS`; keep `ADMIN_DEV_BYPASS` false or unset.
 9. Confirm R2 upload, media delivery, deletion, cache headers, MIME/signature rejection, and the eight-image/10-MB limits.

@@ -1,0 +1,1 @@
+ALTER TABLE `tax_profiles` ADD `business_started_at` text;

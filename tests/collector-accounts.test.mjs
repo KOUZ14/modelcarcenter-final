@@ -3,18 +3,20 @@ import test from "node:test";
 import {
   canApproveCollectorListing,
   canClaimGuestRecord,
+  canClaimProfessionalStore,
   canFulfillSellerOrder,
-  cartMergeDecision,
   isCollectorListingAwaitingReview,
   mergeCartItems,
   ownsProduct,
   safeReturnPath,
   uniqueWishlistIds,
 } from "../lib/account-rules.ts";
+import { buildStoreAnalytics } from "../lib/store-rules.ts";
 import {
   detectListingImageType,
   MAX_LISTING_IMAGE_BYTES,
   validateListingImageBatch,
+  validateListingImageOrder,
 } from "../lib/listing-images.ts";
 import {
   collectorAuthPolicy,
@@ -90,10 +92,9 @@ test("wishlist merging removes duplicates and invalid identifiers", () => {
   assert.deepEqual(uniqueWishlistIds(["p1", "p1", "", 42, "p2"]), ["p1", "p2"]);
 });
 
-test("guest cart merging combines one seller and surfaces cross-seller conflicts", () => {
+test("guest cart merging preserves every seller and combines duplicate products", () => {
   const saved = [cartItem("p1", "seller-a", 2)];
   const guest = [cartItem("p1", "seller-a", 3), cartItem("p2", "seller-a", 1)];
-  assert.equal(cartMergeDecision(saved, guest), "merge");
   assert.deepEqual(
     mergeCartItems(saved, guest)?.map(({ productId, quantity }) => ({
       productId,
@@ -104,11 +105,9 @@ test("guest cart merging combines one seller and surfaces cross-seller conflicts
       { productId: "p2", quantity: 1 },
     ],
   );
-  assert.equal(
-    cartMergeDecision(saved, [cartItem("p3", "seller-b")]),
-    "conflict",
-  );
-  assert.equal(mergeCartItems(saved, [cartItem("p3", "seller-b")]), null);
+  assert.deepEqual(mergeCartItems(saved, [cartItem("p3", "seller-b")]), [...saved, cartItem("p3", "seller-b")]);
+  assert.equal(saved[0].quantity, 2, "Merging must not mutate the saved cart");
+  assert.equal(mergeCartItems(saved, [{ ...cartItem("p1", "seller-a", 3), availableQuantity: 4 }])[0].quantity, 4);
 });
 
 test("legacy records are claimable only by a verified matching email and only once", () => {
@@ -149,6 +148,105 @@ test("legacy records are claimable only by a verified matching email and only on
     }),
     false,
   );
+});
+
+test("professional stores are claimed only by a verified matching contact email", () => {
+  const base = {
+    authenticatedEmail: "Owner@Store.example",
+    emailVerified: true,
+    storeEmail: "owner@store.example",
+    storeType: "professional",
+    currentOwnerUserId: null,
+  };
+  assert.equal(canClaimProfessionalStore(base), true);
+  assert.equal(
+    canClaimProfessionalStore({ ...base, emailVerified: false }),
+    false,
+  );
+  assert.equal(
+    canClaimProfessionalStore({ ...base, storeType: "collector" }),
+    false,
+  );
+  assert.equal(
+    canClaimProfessionalStore({
+      ...base,
+      authenticatedEmail: "other@store.example",
+    }),
+    false,
+  );
+  assert.equal(
+    canClaimProfessionalStore({ ...base, currentOwnerUserId: "owner-1" }),
+    false,
+  );
+});
+
+test("store analytics include paid sales and seller-scoped inventory health", () => {
+  const analytics = buildStoreAnalytics(
+    [
+      {
+        id: "paid-1",
+        paymentStatus: "paid",
+        fulfillmentStatus: "unfulfilled",
+        subtotalCents: 30_000,
+        platformFeeCents: 3_000,
+        createdAt: "2026-08-10T12:00:00.000Z",
+      },
+      {
+        id: "refunded-1",
+        paymentStatus: "refunded",
+        fulfillmentStatus: "cancelled",
+        subtotalCents: 90_000,
+        platformFeeCents: 9_000,
+        createdAt: "2026-08-11T12:00:00.000Z",
+      },
+    ],
+    [
+      {
+        orderId: "paid-1",
+        productTitleSnapshot: "Porsche 911",
+        quantity: 2,
+        unitPriceCents: 15_000,
+      },
+      {
+        orderId: "refunded-1",
+        productTitleSnapshot: "Refunded model",
+        quantity: 1,
+        unitPriceCents: 90_000,
+      },
+    ],
+    [
+      {
+        status: "active",
+        inventoryQuantity: 3,
+        reservedQuantity: 1,
+        priceCents: 15_000,
+      },
+      {
+        status: "draft",
+        inventoryQuantity: 10,
+        reservedQuantity: 0,
+        priceCents: 2_000,
+      },
+    ],
+    new Date("2026-08-19T00:00:00.000Z"),
+  );
+  assert.equal(analytics.paidOrders, 1);
+  assert.equal(analytics.unfulfilledOrders, 1);
+  assert.equal(analytics.unitsSold, 2);
+  assert.equal(analytics.grossSalesCents, 30_000);
+  assert.equal(analytics.netSalesCents, 27_000);
+  assert.equal(analytics.activeListings, 1);
+  assert.equal(analytics.lowStock, 1);
+  assert.equal(analytics.inventoryValueCents, 50_000);
+  assert.deepEqual(analytics.topProducts, [
+    { title: "Porsche 911", units: 2, revenueCents: 30_000 },
+  ]);
+  assert.deepEqual(analytics.monthlySales.at(-1), {
+    key: "2026-08",
+    label: "Aug 2026",
+    orders: 1,
+    grossCents: 30_000,
+  });
 });
 
 test("collector moderation only reviews pending submissions and gates approval on payouts", () => {
@@ -201,12 +299,12 @@ test("collector moderation only reviews pending submissions and gates approval o
 
 test("listing image validation enforces count, size, declared MIME, and file signature", () => {
   assert.equal(
-    validateListingImageBatch({ currentCount: 7, incomingSizes: [10] }),
+    validateListingImageBatch({ currentCount: 8, incomingSizes: Array(12).fill(10) }),
     null,
   );
   assert.match(
-    validateListingImageBatch({ currentCount: 8, incomingSizes: [10] }),
-    /up to 8/,
+    validateListingImageBatch({ currentCount: 20, incomingSizes: [10] }),
+    /up to 20/,
   );
   assert.match(
     validateListingImageBatch({
@@ -232,6 +330,29 @@ test("listing image validation enforces count, size, declared MIME, and file sig
   );
 });
 
+test("listing photo order accepts every saved photo exactly once", () => {
+  assert.equal(
+    validateListingImageOrder(["front", "rear", "side"], [
+      "side",
+      "front",
+      "rear",
+    ]),
+    null,
+  );
+  assert.match(
+    validateListingImageOrder(["front", "rear"], ["front"]),
+    /every saved photo/,
+  );
+  assert.match(
+    validateListingImageOrder(["front", "rear"], ["front", "front"]),
+    /only once/,
+  );
+  assert.match(
+    validateListingImageOrder(["front", "rear"], ["front", "other"]),
+    /not part of this listing/,
+  );
+});
+
 test("the account migration is additive and detaches retained records on deletion", async () => {
   const migration = await readFile(
     new URL("../drizzle/0001_spicy_prism.sql", import.meta.url),
@@ -246,4 +367,32 @@ test("the account migration is additive and detaches retained records on deletio
     migration,
     /sellers` ADD `owner_user_id` text REFERENCES user\(id\) ON DELETE SET NULL/i,
   );
+});
+
+test("buyer-owned orders surface the protected shipment timeline in My Garage", async () => {
+  const [collectorStore, accountDashboard, shipmentTimeline] = await Promise.all([
+    readFile(new URL("../lib/collector-store.ts", import.meta.url), "utf8"),
+    readFile(
+      new URL("../components/account-dashboard.tsx", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../components/shipment-timeline.tsx", import.meta.url),
+      "utf8",
+    ),
+  ]);
+
+  assert.match(collectorStore, /eq\(orders\.buyerUserId, userId\)/);
+  assert.match(collectorStore, /innerJoin\(shipments,/);
+  assert.match(collectorStore, /shipmentForBuyerOrder/);
+  assert.match(
+    accountDashboard,
+    /<ShipmentTimeline shipment=\{order\.shipment\}/,
+  );
+  assert.match(shipmentTimeline, /Estimated delivery/);
+  assert.match(shipmentTimeline, /Package state/);
+  assert.match(shipmentTimeline, /Insurance/);
+  assert.match(shipmentTimeline, /Signature/);
+  assert.match(shipmentTimeline, /Tracking timeline/);
+  assert.doesNotMatch(accountDashboard, /api\/shipping\/label/);
 });

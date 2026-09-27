@@ -4,6 +4,9 @@
   "main": "worker/index.ts",
   "compatibility_date": "2026-08-18",
   "compatibility_flags": ["nodejs_compat"],
+  "triggers": {
+    "crons": ["0 * * * *"]
+  },
   "d1_databases": [
     {
       "binding": "DB",

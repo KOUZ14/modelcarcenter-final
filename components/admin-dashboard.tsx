@@ -1,10 +1,26 @@
 "use client";
 
 import Link from "next/link";
+import { CatalogModelPicker } from "@/components/catalog-model-picker";
 import Image from "next/image";
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { adminSections } from "@/components/admin-frame";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { adminTimestamp, awaitingShipment, overdueShipment, orderItemProblem } from "@/lib/admin-order-rules";
 import { modelHuntMatches } from "@/lib/business";
 import { formatMoney as money } from "@/lib/format";
+import { taxDate, taxTaskTiming } from "@/lib/tax-admin";
+import { ProductionReadiness } from "@/components/production-readiness";
+import type { ReadinessCheck } from "@/lib/production-readiness";
+import {
+  EditableProductImage,
+  ProductImageFields,
+} from "@/components/product-image-fields";
+import { uploadProductPhotoFiles } from "@/lib/upload-client";
+import {
+  CollectibleListingFields,
+  RequiredPhotoChecklist,
+} from "@/components/collectible-listing-fields";
 
 type AdminData = Record<string, unknown> & { section?: string };
 const tabs = [
@@ -13,35 +29,52 @@ const tabs = [
   "products",
   "import",
   "hunts",
+  "community",
   "orders",
+  "tax",
+  "resolution",
+  "production",
 ] as const;
 
-export function AdminDashboard({ adminEmail }: { adminEmail: string }) {
-  const [tab, setTab] = useState<(typeof tabs)[number]>("overview");
+export function AdminDashboard() {
+  const params = useSearchParams();
+  const requestedTab = params.get("section") || "overview";
+  const tab = tabs.includes(requestedTab as (typeof tabs)[number]) ? requestedTab as (typeof tabs)[number] : "overview";
   const [data, setData] = useState<AdminData>({});
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [actionLink, setActionLink] = useState("");
   const apiSection = tab === "import" ? "products" : tab;
+  const activeSection = useRef(apiSection);
+  const loadSequence = useRef(0);
   const load = useCallback(async () => {
+    if (activeSection.current !== apiSection) return false;
+    const sequence = ++loadSequence.current;
     try {
-      const response = await fetch(`/api/admin?section=${apiSection}`);
+      const response = await fetch(`/api/admin?section=${apiSection}`, { cache: "no-store" });
       const body = (await response.json()) as AdminData & { error?: string };
       if (!response.ok)
         throw new Error(body.error || "Admin data unavailable.");
+      if (sequence !== loadSequence.current || activeSection.current !== apiSection) return false;
       setData(body);
+      setError("");
+      return true;
     } catch (reason) {
+      if (sequence !== loadSequence.current || activeSection.current !== apiSection) return false;
       setError(
         reason instanceof Error ? reason.message : "Admin data unavailable.",
       );
+      return false;
     } finally {
-      setLoading(false);
+      if (sequence === loadSequence.current && activeSection.current === apiSection) setLoading(false);
     }
   }, [apiSection]);
   useEffect(() => {
-    queueMicrotask(() => void load());
-  }, [load]);
+    activeSection.current = apiSection;
+    queueMicrotask(() => { setMessage(""); setError(""); setActionLink(""); void load(); });
+    return () => { loadSequence.current += 1; };
+  }, [apiSection, load]);
   async function action(payload: Record<string, unknown>) {
     setMessage("");
     setError("");
@@ -61,11 +94,22 @@ export function AdminDashboard({ adminEmail }: { adminEmail: string }) {
           ? body.emailSent
             ? "Onboarding link created and emailed to the seller."
             : "Onboarding link created, but email is not configured. Send the link manually."
-          : "Saved successfully.",
+          : payload.action === "seed_tax_calendar"
+            ? `Calendar saved: ${body.created ?? 0} added, ${body.updated ?? 0} refreshed.`
+            : payload.action === "preview_import"
+              ? "Validation complete. Review the preview; no inventory has changed."
+              : body.pending === true
+                ? "Refund request submitted. Processing is still pending; refresh the order to verify completion."
+                : body.emailSent === false
+                  ? "Saved, but the notification was not sent. Check email configuration before retrying delivery."
+                  : "Saved successfully.",
       );
       if (typeof body.onboardingUrl === "string")
         setActionLink(body.onboardingUrl);
-      await load();
+      const refreshed = await load();
+      if (!refreshed && activeSection.current === apiSection) {
+        setMessage("Saved, but the latest data could not be loaded. Refresh to verify the update.");
+      }
       return body;
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Action failed.");
@@ -73,46 +117,15 @@ export function AdminDashboard({ adminEmail }: { adminEmail: string }) {
     }
   }
   return (
-    <div className="admin-shell">
-      <header className="admin-header">
-        <div>
-          <Link className="brand" href="/">
-            <span className="brand-mark">MCC</span>
-            <span className="brand-name">
-              MODEL CAR <b>CENTER</b>
-            </span>
-          </Link>
-          <span>Founder admin</span>
-        </div>
-        <div>
-          <span>{adminEmail}</span>
-          <a href="/signout-with-chatgpt?return_to=/">Sign out</a>
-        </div>
-      </header>
-      <nav className="admin-tabs" aria-label="Admin sections">
-        {tabs.map((item) => (
-          <button
-            key={item}
-            className={tab === item ? "active" : ""}
-            onClick={() => {
-              setLoading(true);
-              setTab(item);
-              setMessage("");
-              setError("");
-              setActionLink("");
-            }}
-          >
-            {item === "hunts" ? "Model Hunts" : item}
-          </button>
-        ))}
-      </nav>
-      <main className="admin-main">
+    <>
         <div className="admin-title">
           <p className="eyebrow">Founder-operated V1</p>
           <h1>
             {tab === "hunts"
               ? "Model Hunts"
-              : tab[0].toUpperCase() + tab.slice(1)}
+              : tab === "tax"
+                ? "Tax & compliance"
+              : adminSections.find(([id]) => id === tab)?.[1] || tab}
           </h1>
         </div>
         {message && (
@@ -133,13 +146,12 @@ export function AdminDashboard({ adminEmail }: { adminEmail: string }) {
             {error}
           </p>
         )}
-        {loading ? (
-          <div className="catalog-status">Loading…</div>
+        {loading || data.section !== apiSection ? (
+          <div className="catalog-status">{error ? <button className="button outline small" onClick={() => void load()}>Retry loading</button> : "Loading…"}</div>
         ) : (
-          <AdminSection tab={tab} data={data} action={action} />
+          <AdminSection key={`${tab}:${params.get("filter") || ""}:${params.get("q") || ""}`} tab={tab} data={data} action={action} />
         )}
-      </main>
-    </div>
+    </>
   );
 }
 
@@ -153,11 +165,15 @@ function AdminSection({
   action(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
 }) {
   if (tab === "overview") return <Overview data={data} />;
+  if (tab === "production") return <ProductionReadiness checks={(data.checks as ReadinessCheck[]) ?? []} configurationReady={data.configurationReady === true} checkedAt={String(data.checkedAt || "")} />;
   if (tab === "sellers") return <Sellers data={data} action={action} />;
   if (tab === "products") return <Products data={data} action={action} />;
   if (tab === "import") return <Importer data={data} action={action} />;
   if (tab === "hunts") return <Hunts data={data} action={action} />;
-  return <Orders data={data} action={action} />;
+  if (tab === "community") return <Community data={data} />;
+  if (tab === "orders") return <Orders data={data} action={action} />;
+  if (tab === "tax") return <TaxCenter data={data} action={action} />;
+  return <ResolutionCases data={data} action={action} />;
 }
 
 function Overview({ data }: { data: AdminData }) {
@@ -167,16 +183,24 @@ function Overview({ data }: { data: AdminData }) {
       string,
       Array<{ label: string | null; count: number }>
     >) ?? {};
+  const attention = [
+    ["applications", "Pending applications", "sellers&filter=pending"],
+    ["unfulfilledOrders", "Awaiting shipment", "orders&filter=awaiting"],
+    ["overdueShipments", "Overdue shipments", "orders&filter=overdue"],
+    ["urgentDisputes", "Disputes due within 3 days", "orders&filter=disputes"],
+    ["paymentExceptions", "Payment exceptions", "orders&filter=exceptions"],
+    ["missingOrderItems", "Orders missing items", "orders&filter=missing_items"],
+    ["failedNotifications", "Preorder notifications needing retry", "preorders"],
+    ["openListingReports", "Open listing reports", "community"],
+  ];
   return (
     <>
-      <div className="metric-grid">
-        {Object.entries(counts).map(([key, value]) => (
-          <article key={key}>
-            <span>{key.replace(/([A-Z])/g, " $1")}</span>
-            <b>{value}</b>
-          </article>
-        ))}
-      </div>
+      <h2>Needs your attention</h2>
+      <p className="admin-muted">Current open work across all records, including clearly marked test orders.</p>
+      <div className="admin-attention-grid">{attention.map(([key, label, destination]) => <Link key={key} href={["preorders", "community"].includes(destination) ? `/admin/${destination}` : `/admin?section=${destination}`}><span>{label}</span><strong>{counts[key] ?? 0}</strong><small>Open queue</small></Link>)}</div>
+      <h2>Marketplace activity</h2>
+      <p className="admin-muted">Paid orders and subscribers are lifetime totals. Demand below includes open Model Hunts.</p>
+      <div className="metric-grid">{[["activeProducts", "Active listings"], ["activeSellers", "Active sellers"], ["paidOrders", "Paid orders - all time"], ["signups", "Subscribers - all time"]].map(([key, label]) => <article key={key}><span>{label}</span><b>{counts[key] ?? 0}</b></article>)}</div>
       <div className="demand-grid">
         {Object.entries(demand).map(([key, rows]) => (
           <section key={key}>
@@ -208,14 +232,26 @@ type Seller = {
   slug: string;
   status: string;
   stripeAccountId?: string | null;
+  stripeRequirementsDue?: string;
+  stripeVerifiedAt?: string | null;
+  unresolvedOrders?: number;
   stripeChargesEnabled: boolean;
   stripePayoutsEnabled: boolean;
   defaultShippingCents: number;
+  handlingTimeBusinessDays: number;
   description: string;
   websiteUrl?: string | null;
   logoUrl?: string | null;
   shippingPolicySummary: string;
   returnPolicySummary: string;
+  sellerType?: string;
+  ownerUserId?: string | null;
+  isFoundingSeller: boolean;
+  foundingRateStartsAt?: string | null;
+  foundingRateEndsAt?: string | null;
+  marketplaceFeeBps: number;
+  standardMarketplaceFeeBps: number;
+  foundingPromotionActive: boolean;
 };
 function Sellers({
   data,
@@ -226,14 +262,26 @@ function Sellers({
 }) {
   const applications =
     (data.applications as Array<Record<string, string | number>>) ?? [];
-  const sellerRows = (data.sellers as Seller[]) ?? [];
+  const params = useSearchParams();
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [applicationFilter, setApplicationFilter] = useState(params.get("filter") || "pending");
+  const sellerRows = ((data.sellers as Seller[]) ?? []).filter(seller => (!statusFilter || seller.status === statusFilter) && `${seller.storeName} ${seller.contactEmail}`.toLowerCase().includes(query.toLowerCase()));
   const [editing, setEditing] = useState<Seller | null>(null);
   return (
     <div className="admin-stack">
+      {editing && (
+        <SellerEditor key={editing.id || "new"}
+          seller={editing}
+          onClose={() => setEditing(null)}
+          action={action}
+        />
+      )}
       <section className="admin-panel">
         <h2>Seller applications</h2>
+        <div className="admin-queue-filters"><label>Application status<select value={applicationFilter} onChange={e => setApplicationFilter(e.target.value)}><option value="">All applications</option><option value="pending">Pending review</option><option value="approved">Approved</option><option value="rejected">Rejected</option></select></label></div>
         {applications.length ? (
-          <div className="admin-table-wrap">
+          <div className="admin-table-wrap admin-mobile-records" role="region" aria-label="Scrollable records" tabIndex={0}>
             <table>
               <thead>
                 <tr>
@@ -245,7 +293,7 @@ function Sellers({
                 </tr>
               </thead>
               <tbody>
-                {applications.map((app) => (
+                {applications.filter(app => !applicationFilter || app.status === applicationFilter).map((app) => (
                   <tr key={String(app.id)}>
                     <td>
                       <b>{app.storeName}</b>
@@ -268,30 +316,7 @@ function Sellers({
                     </td>
                     <td>{app.status}</td>
                     <td>
-                      {app.status === "pending" && (
-                        <div className="row-actions">
-                          <button
-                            onClick={() =>
-                              void action({
-                                action: "approve_application",
-                                applicationId: app.id,
-                              })
-                            }
-                          >
-                            Approve
-                          </button>
-                          <button
-                            onClick={() =>
-                              void action({
-                                action: "reject_application",
-                                applicationId: app.id,
-                              })
-                            }
-                          >
-                            Reject
-                          </button>
-                        </div>
-                      )}
+                      <ApplicationReview application={app} activity={(data.activity as AdminActivity[]) ?? []} action={action} />
                     </td>
                   </tr>
                 ))}
@@ -312,11 +337,14 @@ function Sellers({
             Create seller
           </button>
         </div>
-        <div className="admin-table-wrap">
+        <div className="admin-queue-filters"><label>Search sellers<input value={query} onChange={e => setQuery(e.target.value)} placeholder="Store or email" /></label><label>Status<select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}><option value="">All statuses</option>{["active", "approved", "onboarding", "suspended"].map(status => <option key={status}>{status}</option>)}</select></label></div>
+        <div className="admin-table-wrap admin-mobile-records" role="region" aria-label="Scrollable records" tabIndex={0}>
           <table>
             <thead>
               <tr>
                 <th>Seller</th>
+                <th>Type / rate</th>
+                <th>Founding program</th>
                 <th>Stripe</th>
                 <th>Shipping</th>
                 <th>Actions</th>
@@ -333,12 +361,61 @@ function Sellers({
                     <span className={`status ${seller.status}`}>
                       {seller.status}
                     </span>
+                    {seller.sellerType !== "collector" && (
+                      <small>
+                        {seller.ownerUserId
+                          ? "Store account linked"
+                          : "Awaiting store sign-in"}
+                      </small>
+                    )}
                   </td>
                   <td>
-                    {seller.stripeAccountId || "Not created"}
+                    <b>
+                      {seller.sellerType === "collector"
+                        ? "Collector"
+                        : "Professional store"}
+                    </b>
                     <br />
-                    Charges {seller.stripeChargesEnabled ? "✓" : "—"} · Payouts{" "}
-                    {seller.stripePayoutsEnabled ? "✓" : "—"}
+                    Standard {feePercent(seller.standardMarketplaceFeeBps)}
+                    <br />
+                    <span className="status active">
+                      Current {feePercent(seller.marketplaceFeeBps)}
+                    </span>
+                  </td>
+                  <td>
+                    {seller.isFoundingSeller ? (
+                      <>
+                        <b>
+                          {seller.foundingPromotionActive
+                            ? "Active"
+                            : "Founding history retained"}
+                        </b>
+                        <br />
+                        <small>
+                          {shortDate(seller.foundingRateStartsAt)} –{" "}
+                          {shortDate(seller.foundingRateEndsAt)}
+                        </small>
+                      </>
+                    ) : seller.sellerType === "professional" ? (
+                      <button
+                        onClick={() =>
+                          void action({
+                            action: "assign_founding_seller",
+                            sellerId: seller.id,
+                          })
+                        }
+                      >
+                        Assign 6-month rate
+                      </button>
+                    ) : (
+                      <small>Not eligible</small>
+                    )}
+                  </td>
+                  <td>
+                    <b>{seller.stripeChargesEnabled && seller.stripePayoutsEnabled ? "Payments ready" : seller.stripeAccountId ? "Setup needs attention" : "Not connected"}</b>
+                    <p>Charges: {seller.stripeChargesEnabled ? "enabled" : "disabled"} · Payouts: {seller.stripePayoutsEnabled ? "enabled" : "disabled"}</p>
+                    <details><summary>Account details</summary><p>{seller.stripeAccountId || "No account ID"}</p><p>Requirements: {seller.stripeRequirementsDue || (seller.stripeVerifiedAt ? "None recorded at the last admin verification" : "Not checked - refresh Stripe to retrieve requirements")}.</p><p>Last admin verification: {seller.stripeVerifiedAt ? shortDateTime(seller.stripeVerifiedAt) : "Not recorded"}</p></details>
+                    <Link href={`/admin?section=orders&filter=awaiting&q=${encodeURIComponent(seller.storeName)}`}>{seller.unresolvedOrders ?? 0} orders awaiting shipment</Link>
                   </td>
                   <td>{money(seller.defaultShippingCents)}</td>
                   <td>
@@ -404,16 +481,20 @@ function Sellers({
           </table>
         </div>
       </section>
-      {editing && (
-        <SellerEditor
-          seller={editing}
-          onClose={() => setEditing(null)}
-          action={action}
-        />
-      )}
+
     </div>
   );
 }
+type AdminActivity = { id: string; action: string; record_id: string; actor: string; detail: string; created_at: string };
+function ApplicationReview({ application, activity, action }: { application: Record<string, string | number>; activity: AdminActivity[]; action(payload: Record<string, unknown>): Promise<Record<string, unknown>> }) {
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState("");
+  const history = activity.filter(row => row.record_id === application.id);
+  return <details><summary>Review application</summary><p>Submitted {shortDateTime(String(application.createdAt))}</p><p>{application.storeName} · {application.contactName} · {application.email}</p><p>{application.currentSellingChannels} · {application.approximateInventorySize} models</p><p>{application.message || "No applicant note."}</p><p>Terms accepted: {application.sellerTermsAcceptedAt ? shortDateTime(String(application.sellerTermsAcceptedAt)) : "Not recorded"}</p><h3>Review history</h3>{history.length ? history.map(row => <p key={row.id}>{shortDateTime(row.created_at)} · {row.actor} · {row.action.replaceAll("_", " ")}<br/>{JSON.parse(row.detail).note}</p>) : <p>No decision notes recorded. Current status: {application.status}. Last updated {shortDateTime(String(application.updatedAt))}.</p>}
+    {application.status === "pending" && <form className="admin-form" onSubmit={async event => { event.preventDefault(); const form = new FormData(event.currentTarget); setBusy(true); try { await action({ action: form.get("decision"), applicationId: application.id, note }); } catch { /* Error is shown by the dashboard. */ } finally { setBusy(false); } }}><label>Decision notes<textarea required minLength={3} maxLength={2000} value={note} onChange={e => setNote(e.target.value)} /></label><label>Decision<select name="decision"><option value="approve_application">Approve</option><option value="reject_application">Reject</option></select></label><button className="button dark small" disabled={busy}>Record decision</button></form>}
+  </details>;
+}
+
 function emptySeller(): Seller {
   return {
     id: "",
@@ -425,9 +506,16 @@ function emptySeller(): Seller {
     stripeChargesEnabled: false,
     stripePayoutsEnabled: false,
     defaultShippingCents: 0,
+    handlingTimeBusinessDays: 3,
     description: "",
     shippingPolicySummary: "",
     returnPolicySummary: "",
+    sellerType: "professional",
+    ownerUserId: null,
+    isFoundingSeller: false,
+    marketplaceFeeBps: 0,
+    standardMarketplaceFeeBps: 0,
+    foundingPromotionActive: false,
   };
 }
 function SellerEditor({
@@ -439,17 +527,23 @@ function SellerEditor({
   onClose(): void;
   action(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
 }) {
+  const [saving, setSaving] = useState(false);
+  const editorRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { editorRef.current?.focus(); editorRef.current?.scrollIntoView({ block: "start" }); }, []);
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    await action({
-      action: "save_seller",
-      ...Object.fromEntries(new FormData(event.currentTarget).entries()),
-      id: seller.id,
-    });
-    onClose();
+    if (saving) return;
+    const form = new FormData(event.currentTarget);
+    setSaving(true);
+    try {
+      const result = await action({ action: "save_seller", ...Object.fromEntries(form.entries()), defaultShippingCents: dollarsToCents(String(form.get("defaultShipping"))), id: seller.id });
+      if (result.ok) onClose();
+    } catch { /* The dashboard displays the error and retains this form. */ }
+    finally { setSaving(false); }
+
   }
   return (
-    <div className="admin-panel">
+    <div className="admin-panel admin-focus-panel" ref={editorRef} tabIndex={-1}>
       <h2>{seller.id ? "Edit" : "Create"} seller</h2>
       <form className="admin-form" onSubmit={submit}>
         <div className="form-row">
@@ -503,16 +597,30 @@ function SellerEditor({
           Description
           <textarea name="description" defaultValue={seller.description} />
         </label>
-        <label>
-          Default shipping, cents
-          <input
-            name="defaultShippingCents"
-            type="number"
-            min="0"
-            required
-            defaultValue={seller.defaultShippingCents}
-          />
-        </label>
+        <div className="form-row">
+          <label>
+            Default shipping (USD)
+            <input
+              name="defaultShipping"
+              step="0.01"
+              type="number"
+              min="0"
+              required
+              defaultValue={(seller.defaultShippingCents / 100).toFixed(2)}
+            />
+          </label>
+          <label>
+            Handling time, business days
+            <input
+              name="handlingTimeBusinessDays"
+              type="number"
+              min="1"
+              max="10"
+              required
+              defaultValue={seller.handlingTimeBusinessDays}
+            />
+          </label>
+        </div>
         <label>
           Shipping summary
           <textarea
@@ -528,7 +636,7 @@ function SellerEditor({
           />
         </label>
         <div className="row-actions">
-          <button className="button dark small">Save seller</button>
+          <button className="button dark small" disabled={saving}>{saving ? "Saving..." : "Save seller"}</button>
           <button type="button" onClick={onClose}>
             Cancel
           </button>
@@ -539,6 +647,8 @@ function SellerEditor({
 }
 
 type AdminProduct = {
+  catalogProductId?: string | null;
+  conditionNotes?: string;
   id: string;
   sellerId: string;
   sellerName: string;
@@ -553,10 +663,30 @@ type AdminProduct = {
   vehicleYear?: string | null;
   color?: string | null;
   condition?: string;
+  modelCondition: string;
+  packagingCondition: string;
+  originalBoxStatus: string;
+  missingParts: string;
+  defects: string;
+  restorationCustomization: string;
+  material: string;
+  productNumber?: string | null;
+  editionSerial?: string | null;
+  coaStatus: string;
+  accessories: string;
+  provenance: string;
+  photoFrontChecked: boolean;
+  photoRearChecked: boolean;
+  photoSidesChecked: boolean;
+  photoBaseChecked: boolean;
+  photoPackagingChecked: boolean;
+  photoIssuesChecked: boolean;
   keywords?: string;
   priceCents: number;
   inventoryQuantity: number;
   reservedQuantity: number;
+  availabilityType: "in_stock" | "preorder";
+  releaseDate: string | null;
   status: string;
   primaryImageUrl?: string | null;
   rejectionReason?: string | null;
@@ -565,7 +695,7 @@ type AdminProduct = {
   sellerStatus?: string;
   stripeChargesEnabled?: boolean;
   stripePayoutsEnabled?: boolean;
-  images?: Array<{ id: string; url: string; alt: string }>;
+  images?: EditableProductImage[];
 };
 function Products({
   data,
@@ -576,7 +706,10 @@ function Products({
 }) {
   const sellerRows =
     (data.sellers as Array<{ id: string; name: string }>) ?? [];
-  const [query, setQuery] = useState("");
+  const params = useSearchParams();
+  const [query, setQuery] = useState(params.get("q") || "");
+  const [statusFilter, setStatusFilter] = useState(params.get("filter") || "");
+  const [sort, setSort] = useState("updated");
   const [sellerFilter, setSellerFilter] = useState("");
   const [editing, setEditing] = useState<AdminProduct | null>(null);
   const visible = useMemo(
@@ -584,53 +717,24 @@ function Products({
       ((data.products as AdminProduct[]) ?? []).filter(
         (product) =>
           (!sellerFilter || product.sellerId === sellerFilter) &&
+          (!statusFilter || (statusFilter === "missing_photo" ? !product.primaryImageUrl && !product.images?.length : product.status === statusFilter)) &&
           `${product.title} ${product.sellerSku} ${product.vehicleMake} ${product.vehicleModel}`
             .toLowerCase()
             .includes(query.toLowerCase()),
-      ),
-    [data.products, query, sellerFilter],
+      ).sort((a, b) => sort === "title" ? a.title.localeCompare(b.title) : sort === "price" ? a.priceCents - b.priceCents : sort === "stock" ? a.inventoryQuantity - b.inventoryQuantity : 0),
+    [data.products, query, sellerFilter, statusFilter, sort],
   );
-  const awaitingReview = visible.filter(
-    (product) => product.sellerType === "collector" && product.status === "pending_review",
-  );
-  function reject(productId: string) {
-    const reason = window.prompt("Optional rejection reason for the collector:") ?? "";
-    void action({ action: "product_review", productId, decision: "reject", reason });
-  }
   return (
     <div className="admin-stack">
-      <section className="admin-panel">
-        <div className="panel-heading">
-          <div>
-            <p className="eyebrow">Manual moderation</p>
-            <h2>Collector Listings Awaiting Review</h2>
-          </div>
-          <b>{awaitingReview.length}</b>
-        </div>
-        {awaitingReview.length ? (
-          <div className="review-grid">
-            {awaitingReview.map((product) => (
-              <article key={product.id}>
-                {product.images?.[0] && (
-                  <Image src={product.images[0].url} alt={product.images[0].alt} width={240} height={190} unoptimized />
-                )}
-                <div>
-                  <span className="status pending_review">Awaiting Review</span>
-                  <h3>{product.title}</h3>
-                  <p>{product.scale} · {product.modelManufacturer} · {product.condition}</p>
-                  <p>{product.sellerName} · {product.sellerEmail}</p>
-                  <p>{money(product.priceCents)} · {product.inventoryQuantity} available</p>
-                  <div className="row-actions">
-                    <button onClick={() => void action({ action: "product_review", productId: product.id, decision: "approve" })}>Approve</button>
-                    <button onClick={() => reject(product.id)}>Reject</button>
-                    <button onClick={() => void action({ action: "product_status", productId: product.id, status: "inactive" })}>Suspend listing</button>
-                  </div>
-                </div>
-              </article>
-            ))}
-          </div>
-        ) : <p>No collector listings are waiting for review.</p>}
-      </section>
+      {editing && (
+        <ProductEditor key={editing.id || "new"}
+          product={editing}
+          sellers={sellerRows}
+          action={action}
+          onClose={() => setEditing(null)}
+        />
+      )}
+      <section className="admin-panel"><h2>Listing reports</h2><p>Sellers publish directly. Investigate reported problems and take listings off sale when needed.</p><Link className="button outline small" href="/admin/community">Review listing reports</Link></section>
       <section className="admin-panel">
         <div className="panel-heading">
           <h2>Products</h2>
@@ -645,9 +749,11 @@ function Products({
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search products"
+            aria-label="Search products by title or SKU"
+            placeholder="Search products or SKU"
           />
           <select
+            aria-label="Filter products by seller"
             value={sellerFilter}
             onChange={(e) => setSellerFilter(e.target.value)}
           >
@@ -659,7 +765,9 @@ function Products({
             ))}
           </select>
         </div>
-        <div className="admin-table-wrap">
+        <div className="admin-queue-filters"><label>Listing status<select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}><option value="">All statuses</option>{["active", "draft", "inactive", "sold_out", "pending_review"].map(value => <option key={value} value={value}>{value === "pending_review" ? "unpublished (legacy)" : value.replaceAll("_", " ")}</option>)}<option value="missing_photo">Missing photos</option></select></label><label>Sort by<select value={sort} onChange={e => setSort(e.target.value)}><option value="updated">Recently updated</option><option value="title">Product name</option><option value="price">Price: low to high</option><option value="stock">Stock: low to high</option></select></label></div>
+        <p className="admin-muted">{visible.length} listings shown - Latest 250 listings loaded</p>
+        <div className="admin-table-wrap admin-mobile-records" role="region" aria-label="Scrollable records" tabIndex={0}>
           <table>
             <thead>
               <tr>
@@ -675,21 +783,23 @@ function Products({
               {visible.map((product) => (
                 <tr key={product.id}>
                   <td>
+                    {(product.primaryImageUrl || product.images?.[0]?.url) && <Image className="admin-product-thumbnail" src={product.primaryImageUrl || product.images![0].url} width={64} height={52} alt="" unoptimized />}
                     <b>{product.title}</b>
                     <br />
                     {product.sellerSku} · {product.scale} ·{" "}
                     {product.modelManufacturer}
                   </td>
-                  <td>{product.sellerName}</td>
-                  <td>{money(product.priceCents)}</td>
+                  <td data-label="Seller">{product.sellerName}</td>
+                  <td data-label="Price">{money(product.priceCents)}</td>
                   <td>
                     {product.inventoryQuantity} total /{" "}
                     {product.reservedQuantity} reserved
                   </td>
                   <td>
                     <span className={`status ${product.status}`}>
-                      {product.status}
+                      {product.status.replaceAll("_", " ")}
                     </span>
+                    {!product.primaryImageUrl && !product.images?.length && <p className="admin-warning">Missing photos</p>}
                   </td>
                   <td>
                     <div className="row-actions">
@@ -727,14 +837,7 @@ function Products({
           </table>
         </div>
       </section>
-      {editing && (
-        <ProductEditor
-          product={editing}
-          sellers={sellerRows}
-          action={action}
-          onClose={() => setEditing(null)}
-        />
-      )}
+
     </div>
   );
 }
@@ -750,9 +853,27 @@ function emptyProduct(sellerId: string): AdminProduct {
     modelManufacturer: "",
     vehicleMake: "",
     vehicleModel: "",
+    modelCondition: "",
+    packagingCondition: "",
+    originalBoxStatus: "",
+    missingParts: "",
+    defects: "",
+    restorationCustomization: "",
+    material: "",
+    coaStatus: "",
+    accessories: "",
+    provenance: "",
+    photoFrontChecked: false,
+    photoRearChecked: false,
+    photoSidesChecked: false,
+    photoBaseChecked: false,
+    photoPackagingChecked: false,
+    photoIssuesChecked: false,
     priceCents: 0,
     inventoryQuantity: 1,
     reservedQuantity: 0,
+    availabilityType: "in_stock",
+    releaseDate: null,
     status: "draft",
   };
 }
@@ -767,19 +888,136 @@ function ProductEditor({
   action(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
   onClose(): void;
 }) {
+  const editorRef = useRef<HTMLElement>(null);
+  useEffect(() => { editorRef.current?.focus(); editorRef.current?.scrollIntoView({ block: "start" }); }, []);
+  const [catalogReady, setCatalogReady] = useState(Boolean(product.id || product.catalogProductId));
+  const [busy, setBusy] = useState(false);
+  const [productId, setProductId] = useState(product.id);
+  const [files, setFiles] = useState<File[]>([]);
+  const [images, setImages] = useState(product.images ?? []);
+  const [primaryImageUrl, setPrimaryImageUrl] = useState(
+    product.primaryImageUrl ?? null,
+  );
+  const [primaryUploadFinished, setPrimaryUploadFinished] = useState(false);
+  const [imageError, setImageError] = useState("");
+  const [availabilityType, setAvailabilityType] = useState<
+    "in_stock" | "preorder"
+  >(product.availabilityType ?? "in_stock");
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    await action({
-      action: "save_product",
-      ...Object.fromEntries(new FormData(event.currentTarget).entries()),
-      id: product.id,
+    if (!catalogReady) { setImageError("Choose a catalog model first."); return; }
+    setBusy(true);
+    setImageError("");
+    try {
+      const form = new FormData(event.currentTarget);
+      form.delete("images");
+      const result = await action({
+        action: "save_product",
+        ...Object.fromEntries(form.entries()),
+        id: productId,
+        priceCents: dollarsToCents(String(form.get("price"))),
+      });
+      const savedProductId = String(result.productId ?? "");
+      setProductId(savedProductId);
+      if (files.length && savedProductId) {
+        let nextImages = images;
+        await uploadProductPhotoFiles({
+          endpoint: "/api/admin/images",
+          productId: savedProductId,
+          files,
+          makePrimary: !primaryUploadFinished,
+          onUploaded(uploaded, processedCount) {
+            nextImages = [...nextImages, ...uploaded];
+            setImages(nextImages);
+            setFiles(files.slice(processedCount));
+            if (processedCount === 1) {
+              setPrimaryUploadFinished(true);
+              setPrimaryImageUrl(uploaded[0]?.url ?? null);
+            }
+          },
+        });
+        window.location.reload();
+        return;
+      }
+      onClose();
+    } catch (reason) {
+      setImageError(
+        reason instanceof Error ? reason.message : "The product could not be saved.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function removeImage(imageId: string) {
+    if (!productId) return;
+    setImageError("");
+    const response = await fetch("/api/admin/images", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ productId, imageId }),
     });
-    onClose();
+    const body = (await response.json()) as { error?: string };
+    if (!response.ok) {
+      const message = body.error || "The photo could not be removed.";
+      setImageError(message);
+      throw new Error(message);
+    }
+    setImages((current) => {
+      const removed = current.find((image) => image.id === imageId);
+      const next = current.filter((image) => image.id !== imageId);
+      setPrimaryImageUrl((primary) =>
+        removed?.url === primary ? next[0]?.url ?? null : primary,
+      );
+      return next;
+    });
+  }
+  async function removeLegacyImage() {
+    if (!productId) return;
+    setImageError("");
+    const response = await fetch("/api/admin/images", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ productId, removeLegacyPrimary: true }),
+    });
+    const body = (await response.json()) as { error?: string };
+    if (!response.ok) {
+      const message = body.error || "The photo could not be removed.";
+      setImageError(message);
+      throw new Error(message);
+    }
+    setPrimaryImageUrl(images[0]?.url ?? null);
+  }
+  async function reorderImages(imageIds: string[]) {
+    if (!productId) return;
+    setImageError("");
+    const response = await fetch("/api/admin/images", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ productId, imageIds }),
+    });
+    const body = (await response.json()) as { error?: string };
+    if (!response.ok) {
+      const message = body.error || "The photo order could not be saved.";
+      setImageError(message);
+      throw new Error(message);
+    }
+    setImages((current) => {
+      const byId = new Map(current.map((image) => [image.id, image]));
+      const next = imageIds.map((id, index) => ({
+        ...byId.get(id)!,
+        sortOrder: index,
+      }));
+      setPrimaryImageUrl(next[0]?.url ?? null);
+      return next;
+    });
   }
   return (
-    <section className="admin-panel">
+    <section className="admin-panel admin-focus-panel" ref={editorRef} tabIndex={-1}>
       <h2>{product.id ? "Edit" : "Create"} product</h2>
+      {product.availabilityType === "preorder" && <p className="admin-warning">Preorder stock and release changes are managed in <Link href="/admin/preorders">Preorder operations</Link>.</p>}
       <form className="admin-form" onSubmit={submit}>
+          {product.id && !product.catalogProductId ? <div className="admin-warning"><b>{product.title}</b><p>Catalog association is missing. Listing details are shown below; resolve the catalog record before saving.</p></div> : <CatalogModelPicker initial={product} listingSaved={Boolean(productId)} disabled={busy} onReady={setCatalogReady} />}
+          <fieldset className="catalog-listing-fields" hidden={!catalogReady} disabled={!catalogReady || busy}>
         <div className="form-row">
           <label>
             Seller
@@ -797,8 +1035,8 @@ function ProductEditor({
           </label>
         </div>
         <label>
-          Title
-          <input name="title" required defaultValue={product.title} />
+          Listing title (optional)
+          <input name="title" defaultValue={product.title} />
         </label>
         <label>
           Description
@@ -807,103 +1045,88 @@ function ProductEditor({
             defaultValue={product.description ?? ""}
           />
         </label>
+        <label>Condition notes<textarea name="conditionNotes" maxLength={2000} defaultValue={product.conditionNotes ?? ""} /></label>
+        <CollectibleListingFields product={product} includeIdentity={false} />
         <div className="form-row">
           <label>
-            Scale
-            <input name="scale" required defaultValue={product.scale} />
-          </label>
-          <label>
-            Model manufacturer
+            Price (USD)
             <input
-              name="modelManufacturer"
-              required
-              defaultValue={product.modelManufacturer}
-            />
-          </label>
-        </div>
-        <div className="form-row">
-          <label>
-            Vehicle make
-            <input
-              name="vehicleMake"
-              required
-              defaultValue={product.vehicleMake}
-            />
-          </label>
-          <label>
-            Vehicle model
-            <input
-              name="vehicleModel"
-              required
-              defaultValue={product.vehicleModel}
-            />
-          </label>
-        </div>
-        <div className="form-row">
-          <label>
-            Vehicle year
-            <input
-              name="vehicleYear"
-              defaultValue={product.vehicleYear ?? ""}
-            />
-          </label>
-          <label>
-            Color
-            <input name="color" defaultValue={product.color ?? ""} />
-          </label>
-        </div>
-        <div className="form-row">
-          <label>
-            Condition
-            <select name="condition" defaultValue={product.condition ?? "new"}>
-              <option>new</option>
-              <option>preowned</option>
-              <option>used</option>
-              <option>other</option>
-            </select>
-          </label>
-          <label>
-            Price, cents
-            <input
-              name="priceCents"
+              name="price"
+              step="0.01"
               type="number"
               min="0"
               required
-              defaultValue={product.priceCents}
-            />
-          </label>
-        </div>
-        <div className="form-row">
-          <label>
-            Inventory quantity
-            <input
-              name="inventoryQuantity"
-              type="number"
-              min={product.reservedQuantity}
-              required
-              defaultValue={product.inventoryQuantity}
-            />
-          </label>
-          <label>
-            Primary image URL
-            <input
-              name="primaryImageUrl"
-              defaultValue={product.primaryImageUrl ?? ""}
+              defaultValue={(product.priceCents / 100).toFixed(2)}
             />
           </label>
         </div>
         <label>
+          Inventory quantity
+          <input
+            name="inventoryQuantity"
+            type="number"
+            min={product.reservedQuantity}
+            required
+            defaultValue={product.inventoryQuantity}
+          />
+        </label>
+        <fieldset className="availability-fields">
+          <legend>Availability</legend>
+          <div className="form-row">
+            <label>
+              Sales workflow
+              <select
+                name="availabilityType"
+                value={availabilityType}
+                onChange={(event) =>
+                  setAvailabilityType(
+                    event.target.value as "in_stock" | "preorder",
+                  )
+                }
+              >
+                <option value="in_stock">In stock</option>
+                {product.availabilityType === "preorder" && <option value="preorder">Preorder</option>}
+              </select>
+            </label>
+            <label>
+              Expected release date
+              <input
+                name="releaseDate"
+                type="date"
+                required={availabilityType === "preorder"}
+                disabled={availabilityType !== "preorder"}
+                defaultValue={product.releaseDate ?? ""}
+              />
+            </label>
+          </div>
+        </fieldset>
+        <ProductImageFields
+          images={images}
+          primaryImageUrl={primaryImageUrl}
+          files={files}
+          disabled={busy}
+          onFilesChange={setFiles}
+          onRemove={productId ? removeImage : undefined}
+          onRemoveLegacy={productId ? removeLegacyImage : undefined}
+          onReorder={productId ? reorderImages : undefined}
+        />
+        <RequiredPhotoChecklist product={product} />
+        <label>
           Keywords
           <input name="keywords" defaultValue={product.keywords ?? ""} />
         </label>
+        {imageError && <p className="form-error" role="alert">{imageError}</p>}
         <div className="row-actions">
-          <button className="button dark small">
-            Save as {product.status === "active" ? "current status" : "draft"}
+          <button className="button dark small" disabled={busy || product.availabilityType === "preorder" || Boolean(product.id && !product.catalogProductId)}>
+            {busy
+              ? "Saving…"
+              : `Save as ${product.status === "active" ? "current status" : "draft"}`}
           </button>
           <button type="button" onClick={onClose}>
             Cancel
           </button>
         </div>
+          </fieldset>
       </form>
     </section>
   );
@@ -919,6 +1142,7 @@ function Importer({
   const sellers = (data.sellers as Array<{ id: string; name: string }>) ?? [];
   const [sellerId, setSellerId] = useState("");
   const [csv, setCsv] = useState("");
+  const [fileError, setFileError] = useState("");
   const [preview, setPreview] = useState<{
     valid: Array<Record<string, unknown>>;
     errors: Array<{ row: number; errors: string[] }>;
@@ -926,6 +1150,8 @@ function Importer({
   } | null>(null);
   async function readFile(file?: File) {
     if (!file) return;
+    setFileError("");
+    if (file.size > 5_000_000) { setCsv(""); setPreview(null); setFileError("Choose a CSV no larger than 5 MB."); return; }
     setCsv(await file.text());
     setPreview(null);
   }
@@ -950,6 +1176,8 @@ function Importer({
           Download template
         </a>
       </div>
+      <details open><summary>Before importing</summary><p>CSV only, up to 5 MB and 5,000 rows. Prices use USD dollars, for example 249.95. New listings become drafts.</p><p>Required columns: seller_sku, title, scale, model_manufacturer, vehicle_make, vehicle_model, model_condition, packaging_condition, original_box, missing_parts, defects, restoration_customization, material, coa, accessories, price, inventory_quantity.</p><p>Matching seller SKUs update listing descriptions, condition, price, quantity and other imported fields. Blank optional cells clear those values; blanks do not mean &quot;keep existing.&quot; Shared catalog identity stays linked to the existing model. Photos and reserved stock are retained. Existing listing status is retained; restocked sold-out listings can become active.</p><p>Use product editing for a small change. Upload photos after importing; image URLs are not accepted.</p></details>
+      {fileError && <p role="alert" className="form-error">{fileError}</p>}
       <label>
         Seller
         <select
@@ -992,6 +1220,7 @@ function Importer({
             {preview.validCount} valid rows · {preview.errors.length} rows with
             errors
           </h3>
+          {preview.errors.length > 0 && <a className="button outline small" download="inventory-validation-errors.csv" href={`data:text/csv;charset=utf-8,${encodeURIComponent("row,errors\n" + preview.errors.map(item => `${item.row},"${item.errors.join("; ").replaceAll('"', '""')}"`).join("\n"))}`}>Download validation errors</a>}
           {preview.errors.length > 0 && (
             <ul className="error-list">
               {preview.errors.map((item) => (
@@ -1002,7 +1231,7 @@ function Importer({
             </ul>
           )}
           {preview.valid.length > 0 && (
-            <div className="admin-table-wrap">
+            <div className="admin-table-wrap" role="region" aria-label="Scrollable records" tabIndex={0}>
               <table>
                 <thead>
                   <tr>
@@ -1041,7 +1270,8 @@ function Importer({
             Commit {preview.validCount} rows
           </button>
         </div>
-      )}
+      )}      <details><summary>Recent imports</summary>{((data.importHistory as Array<{ id: string; created_at: string; store_name: string; actor: string; detail: string }>) ?? []).length ? (data.importHistory as Array<{ id: string; created_at: string; store_name: string; actor: string; detail: string }>).map(row => <p key={row.id}>{shortDateTime(row.created_at)} · {row.store_name} · {row.actor}<br/>{row.detail}</p>) : <p>No imports recorded since activity tracking was enabled.</p>}</details>
+
     </section>
   );
 }
@@ -1056,6 +1286,12 @@ type Hunt = {
   collectorEmail: string;
   status: string;
   matchedProductId?: string | null;
+  color?: string | null;
+  conditionPreference?: string | null;
+  maxBudgetCents?: number | null;
+  notes?: string;
+  matchedAt?: string | null;
+  notifiedAt?: string | null;
   createdAt: string;
 };
 type Candidate = {
@@ -1088,7 +1324,7 @@ function Hunts({
         <select value={filter} onChange={(e) => setFilter(e.target.value)}>
           <option value="">All statuses</option>
           <option>open</option>
-          <option>possible_match</option>
+          <option value="possible_match">Possible match</option>
           <option>matched</option>
           <option>closed</option>
         </select>
@@ -1101,7 +1337,7 @@ function Hunts({
           return (
             <article key={hunt.id}>
               <div>
-                <span className={`status ${hunt.status}`}>{hunt.status}</span>
+                <span className={`status ${hunt.status}`}>{hunt.status.replaceAll("_", " ")}</span>
                 <b>{hunt.referenceCode}</b>
               </div>
               <h3>
@@ -1111,6 +1347,8 @@ function Hunts({
                 {hunt.modelManufacturer || "Any manufacturer"} ·{" "}
                 {hunt.collectorEmail}
               </p>
+              <p>Requested {shortDateTime(hunt.createdAt)}</p>
+              <details><summary>Preferences and resolution history</summary><p>Color: {hunt.color || "Any"}. Condition: {hunt.conditionPreference || "Any"}. Budget: {hunt.maxBudgetCents ? money(hunt.maxBudgetCents) : "Not specified"}.</p><p>{hunt.notes || "No additional preferences."}</p><p>Matched: {hunt.matchedAt ? shortDateTime(hunt.matchedAt) : "Not yet"}. Collector notified: {hunt.notifiedAt ? shortDateTime(hunt.notifiedAt) : "Not yet"}.</p>{((data.history as AdminActivity[]) ?? []).filter(row => row.record_id === hunt.id).map(row => <p key={row.id}>{shortDateTime(row.created_at)} - {row.action === "link_hunt" ? "Candidate linked" : "Collector notified"} by {row.actor}</p>)}</details>
               {matches.length > 0 ? (
                 <label>
                   Probable matches
@@ -1128,14 +1366,14 @@ function Hunts({
                     <option value="">Select a confirmed match</option>
                     {matches.map((product) => (
                       <option key={product.id} value={product.id}>
-                        {product.title} — {product.sellerName} —{" "}
+                        {product.title} - {product.sellerName} -{" "}
                         {money(product.priceCents, product.currency)}
                       </option>
                     ))}
                   </select>
                 </label>
               ) : (
-                <p>No normalized make/model/scale match yet.</p>
+                <p>No matching make, model and scale in active inventory yet. <Link href={`/admin?section=products&q=${encodeURIComponent(hunt.vehicleMake + " " + hunt.vehicleModel)}`}>Search inventory</Link></p>
               )}
               {hunt.matchedProductId && (
                 <button
@@ -1158,27 +1396,925 @@ function Hunts({
   );
 }
 
+type CommunitySubscriber = {
+  id: string;
+  email: string;
+  consentTimestamp: string;
+  createdAt: string;
+};
+
+function Community({ data }: { data: AdminData }) {
+  const subscribers = (data.subscribers as CommunitySubscriber[]) ?? [];
+  const [query, setQuery] = useState("");
+  const normalizedQuery = query.trim().toLowerCase();
+  const visible = normalizedQuery
+    ? subscribers.filter((subscriber) =>
+        subscriber.email.toLowerCase().includes(normalizedQuery),
+      )
+    : subscribers;
+  return (
+    <section className="admin-panel community-admin">
+      <div className="panel-heading">
+        <div>
+          <h2>Community subscribers</h2>
+          <p>
+            {subscribers.length.toLocaleString()} confirmed signup
+            {subscribers.length === 1 ? "" : "s"}, newest first.
+          </p>
+        </div>
+        <a
+          className="button dark small"
+          href="/api/admin?section=community_export"
+        >
+          Export CSV
+        </a>
+      </div>
+      <div className="admin-filters community-filters">
+        <label>
+          <span className="sr-only">Search subscriber emails</span>
+          <input
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search by email address"
+            autoComplete="off"
+          />
+        </label>
+        <span className="community-result-count" aria-live="polite">
+          Showing {visible.length.toLocaleString()} of{" "}
+          {subscribers.length.toLocaleString()}
+        </span>
+      </div>
+      {visible.length ? (
+        <div className="admin-table-wrap" role="region" aria-label="Scrollable records" tabIndex={0}>
+          <table>
+            <thead>
+              <tr>
+                <th>Email address</th>
+                <th>Joined</th>
+                <th>Consent recorded</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visible.map((subscriber) => (
+                <tr key={subscriber.id}>
+                  <td>
+                    <a href={`mailto:${subscriber.email}`}>
+                      {subscriber.email}
+                    </a>
+                  </td>
+                  <td>
+                    <time dateTime={subscriber.createdAt}>
+                      {shortDateTime(subscriber.createdAt)}
+                    </time>
+                  </td>
+                  <td>
+                    <time dateTime={subscriber.consentTimestamp}>
+                      {shortDateTime(subscriber.consentTimestamp)}
+                    </time>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="community-empty">
+          {subscribers.length
+            ? `No subscriber emails match “${query.trim()}”.`
+            : "No community signups yet."}
+        </p>
+      )}
+    </section>
+  );
+}
+
+type AdminResolutionCase = {
+  id: string;
+  caseNumber: string;
+  reason: string;
+  requestedResolution: string;
+  requestedRefundCents?: number | null;
+  details: string;
+  status: string;
+  sellerRespondBy: string;
+  buyerEvidenceBy: string;
+  buyerShipBy?: string | null;
+  returnAuthorizationNumber?: string | null;
+  resolutionSummary?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  sellerName: string;
+  order: {
+    id: string;
+    orderNumber: string;
+    buyerEmail: string;
+    buyerName: string;
+    currency: string;
+    totalCents: number;
+    refundedAmountCents: number;
+    paymentStatus: string;
+  };
+  messages: Array<{
+    id: string;
+    authorRole: string;
+    body: string;
+    createdAt: string;
+  }>;
+  files: Array<{
+    id: string;
+    kind: string;
+    uploaderRole: string;
+    originalName: string;
+    mimeType: string;
+    sizeBytes: number;
+  }>;
+};
+
+function ResolutionCases({
+  data,
+  action,
+}: {
+  data: AdminData;
+  action(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
+}) {
+  const rows = (data.cases as AdminResolutionCase[]) ?? [];
+  return (
+    <div className="order-admin-list">
+      {rows.length ? rows.map((item) => (
+        <AdminCasePanel item={item} action={action} key={item.id} />
+      )) : <div className="admin-panel">No resolution cases yet. Cases appear when a buyer requests help with an eligible order. Use order lookup to review payment, shipment, and refund records. <Link href="/admin?section=orders">Look up an order</Link> | <Link href="/protection">Buyer protection guidance</Link></div>}
+    </div>
+  );
+}
+
+function AdminCasePanel({
+  item,
+  action,
+}: {
+  item: AdminResolutionCase;
+  action(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
+}) {
+  const [decision, setDecision] = useState("resolved");
+  const [summary, setSummary] = useState("");
+  const [amount, setAmount] = useState("");
+  const closed = ["resolved", "closed", "denied"].includes(item.status);
+  const remaining = Math.max(0, item.order.totalCents - item.order.refundedAmountCents);
+  return (
+    <article className="admin-panel order-admin admin-case-panel">
+      <div className="panel-heading">
+        <div>
+          <span className={`status ${item.status}`}>{item.status.replaceAll("_", " ")}</span>
+          <h2>{item.caseNumber}</h2>
+          <p>{item.order.orderNumber} · {item.sellerName} · {item.order.buyerName || item.order.buyerEmail}</p>
+        </div>
+        <div><small>Remaining paid balance</small><br /><b>{money(remaining, item.order.currency)}</b></div>
+      </div>
+      <div className="admin-case-grid">
+        <section>
+          <h3>Claim</h3>
+          <p><b>{item.reason.replaceAll("_", " ")}</b> · requested {item.requestedResolution.replaceAll("_", " ")}</p>
+          <p>{item.details}</p>
+          <small>Opened {shortDate(item.createdAt)} · seller response due {shortDate(item.sellerRespondBy)} · buyer evidence due {shortDate(item.buyerEvidenceBy)}</small>
+          {item.returnAuthorizationNumber && <p><b>{item.returnAuthorizationNumber}</b> · return due {shortDate(item.buyerShipBy)}</p>}
+        </section>
+        <section>
+          <h3>Private files</h3>
+          <div className="admin-case-files">
+            {item.files.map((file) => <a key={file.id} href={`/api/resolution/files/${file.id}`} target="_blank" rel="noreferrer">{file.kind === "return_label" ? "Return label" : "Evidence"}: {file.originalName} <small>({file.uploaderRole})</small></a>)}
+            {!item.files.length && <p>No files.</p>}
+          </div>
+        </section>
+      </div>
+      <details className="admin-case-timeline">
+        <summary>Review shared timeline ({item.messages.length})</summary>
+        {item.messages.map((message) => <p key={message.id}><b>{message.authorRole}</b> · {shortDate(message.createdAt)}<br />{message.body}</p>)}
+      </details>
+      {!closed ? (
+        <form className="admin-case-decision" onSubmit={(event) => {
+          event.preventDefault();
+          void action({ action: "admin_case_decision", caseId: item.id, decision, summary, amount });
+        }}>
+          <label>Outcome<select value={decision} onChange={(event) => setDecision(event.target.value)}><option value="resolved">Resolve without refund</option><option value="full_refund">Full remaining refund</option><option value="partial_refund">Partial refund</option><option value="denied">Deny claim</option></select></label>
+          {decision === "partial_refund" && <label>Refund amount<input value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="25.00" required /></label>}
+          <label>Outcome explanation<textarea value={summary} onChange={(event) => setSummary(event.target.value)} minLength={10} maxLength={2000} rows={4} required /></label>
+          <button className={decision.includes("refund") ? "danger-button" : "button dark small"}>Record final outcome</button>
+        </form>
+      ) : <div className="case-outcome"><p className="eyebrow">Final outcome</p><h3>{item.resolutionSummary || item.status}</h3></div>}
+    </article>
+  );
+}
+
+type TaxProfile = {
+  id: string;
+  businessStartedAt?: string | null;
+  businessApprovedAt?: string | null;
+  businessLaunchStatus?: "not_set" | "prelaunch" | "launched";
+  sellerPermitStatus: string;
+  marketplaceFacilitatorStatus: string;
+  stripeCaliforniaRegistrationStatus: string;
+  salesTaxFilingFrequency: string;
+  nextSalesTaxDueAt?: string | null;
+  caAccountVerifiedAt?: string | null;
+  sellerDocumentationIssued: boolean;
+  w9CollectionReady: boolean;
+  stripeTaxReportingReady: boolean;
+  incomeTaxReserveBps: number;
+  notes: string;
+  updatedAt?: string;
+};
+
+type TaxTotals = {
+  orderCount: number;
+  merchandiseCents: number;
+  shippingCents: number;
+  grossChargesCents: number;
+  taxCollectedCents: number;
+  taxOnFullyRefundedOrdersCents: number;
+  taxAfterFullRefundsCents: number;
+  refundsCents: number;
+  netCustomerCollectionsCents: number;
+  platformFeesCents: number;
+  platformFeesAfterFullRefundsCents: number;
+  stripeFeesCents: number;
+  processingFeesRecoveredCents: number;
+  sellerProceedsCents: number;
+  netSellerTransferCents: number;
+  californiaOrderCount: number;
+  californiaMerchandiseCents: number;
+  californiaShippingCents: number;
+  californiaTaxCollectedCents: number;
+  californiaTaxOnFullyRefundedOrdersCents: number;
+  californiaTaxAfterFullRefundsCents: number;
+  partialRefundReviewCount: number;
+  missingStateCount: number;
+  missingStripeFeeCount: number;
+};
+
+type TaxYearReport = {
+  year: number;
+  totals: TaxTotals;
+  months: Array<TaxTotals & { month: string; label: string }>;
+};
+
+type TaxTask = {
+  id: string;
+  calendarKey?: string | null;
+  kind: string;
+  title: string;
+  jurisdiction: string;
+  periodStart?: string | null;
+  periodEnd?: string | null;
+  dueAt: string;
+  status: string;
+  amountDueCents?: number | null;
+  amountPaidCents?: number | null;
+  confirmationReference: string;
+  notes: string;
+  filedAt?: string | null;
+  paidAt?: string | null;
+  updatedAt: string;
+};
+
+type LedgerEntry = {
+  id: string;
+  entryType: "expense" | "owner_draw" | "other_income";
+  category: string;
+  description: string;
+  vendor: string;
+  occurredAt: string;
+  amountCents: number;
+  reference: string;
+  notes: string;
+  status: "active" | "voided";
+  updatedAt: string;
+};
+
+type SellerTaxRow = {
+  id: string;
+  storeName: string;
+  sellerType: string;
+  status: string;
+  stripeAccountId?: string | null;
+  stripeChargesEnabled: boolean;
+  stripePayoutsEnabled: boolean;
+  taxInfoStatus: string;
+  taxInfoVerifiedAt?: string | null;
+  sellerTermsAcceptedAt?: string | null;
+};
+
+type TaxActivityRow = {
+  id: string;
+  summary: string;
+  actorEmail: string;
+  createdAt: string;
+};
+
+const EMPTY_TAX_TOTALS: TaxTotals = {
+  orderCount: 0,
+  merchandiseCents: 0,
+  shippingCents: 0,
+  grossChargesCents: 0,
+  taxCollectedCents: 0,
+  taxOnFullyRefundedOrdersCents: 0,
+  taxAfterFullRefundsCents: 0,
+  refundsCents: 0,
+  netCustomerCollectionsCents: 0,
+  platformFeesCents: 0,
+  platformFeesAfterFullRefundsCents: 0,
+  stripeFeesCents: 0,
+  processingFeesRecoveredCents: 0,
+  sellerProceedsCents: 0,
+  netSellerTransferCents: 0,
+  californiaOrderCount: 0,
+  californiaMerchandiseCents: 0,
+  californiaShippingCents: 0,
+  californiaTaxCollectedCents: 0,
+  californiaTaxOnFullyRefundedOrdersCents: 0,
+  californiaTaxAfterFullRefundsCents: 0,
+  partialRefundReviewCount: 0,
+  missingStateCount: 0,
+  missingStripeFeeCount: 0,
+};
+
+function TaxCenter({
+  data,
+  action: adminAction,
+}: {
+  data: AdminData;
+  action(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
+}) {
+  const params = useSearchParams();
+  const taxViews = ["readiness", "reporting", "setup", "calendar", "bookkeeping", "sellers", "activity"];
+  const view = taxViews.includes(params.get("view") || "") ? params.get("view")! : "readiness";
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
+  async function action(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (savingRef.current) return { ok: false };
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      const result = await adminAction(payload);
+      if (result.ok && payload.action === "create_ledger_entry" && typeof payload.occurredAt === "string") {
+        setYear(Number(payload.occurredAt.slice(0, 4)));
+      }
+      return result;
+    } catch {
+      // The dashboard displays the error; keep the form values for retry.
+      return { ok: false };
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  }
+  const reports = (data.reports as TaxYearReport[]) ?? [];
+  const excludedTestOrders = (data.excludedTestOrders as Array<{
+    id: string;
+    orderNumber: string;
+    year: number | null;
+    reason: string | null;
+  }>) ?? [];
+  const currentYear = Number(data.currentYear ?? new Date().getFullYear());
+  const profile = data.profile as TaxProfile;
+  const tasks = (data.tasks as TaxTask[]) ?? [];
+  const ledgerByYear =
+    (data.ledgerByYear as Array<{
+      year: number;
+      expensesCents: number;
+      ownerDrawsCents: number;
+      otherIncomeCents: number;
+    }>) ?? [];
+  const yearOptions = [
+    ...new Set([
+      currentYear,
+      ...reports.map((row) => row.year),
+      ...excludedTestOrders.flatMap((row) => row.year ? [row.year] : []),
+      ...ledgerByYear.map((row) => row.year),
+      ...((data.ledger as LedgerEntry[]) ?? []).map((row) => Number(row.occurredAt.slice(0, 4))),
+      ...tasks.map((row) => Number((row.periodStart || row.dueAt).slice(0, 4))),
+      ...(profile?.businessStartedAt ? [Number(profile.businessStartedAt.slice(0, 4))] : []),
+    ]),
+  ].sort((a, b) => b - a);
+  const [year, setYear] = useState(currentYear);
+  const report = reports.find((row) => row.year === year);
+  const excludedForYear = excludedTestOrders.filter((row) => row.year === year);
+  const totals = report?.totals ?? EMPTY_TAX_TOTALS;
+  const ledgerSummary = ledgerByYear.find((row) => row.year === year) ?? {
+    expensesCents: 0,
+    ownerDrawsCents: 0,
+    otherIncomeCents: 0,
+  };
+  const readiness =
+    (data.readiness as Array<{
+      id: string;
+      label: string;
+      detail: string;
+      ready: boolean;
+    }>) ?? [];
+  const readyCount = readiness.filter((item) => item.ready).length;
+  const marginProxy =
+    totals.platformFeesAfterFullRefundsCents +
+    totals.processingFeesRecoveredCents +
+    ledgerSummary.otherIncomeCents -
+    totals.stripeFeesCents -
+    ledgerSummary.expensesCents;
+  const reserveTarget = Math.max(
+    0,
+    Math.round((marginProxy * (profile?.incomeTaxReserveBps ?? 0)) / 10_000),
+  );
+  const ledger = ((data.ledger as LedgerEntry[]) ?? []).filter(
+    (entry) => Number(entry.occurredAt.slice(0, 4)) === year,
+  );
+  return (
+    <fieldset className="tax-center tax-controls" disabled={saving} aria-busy={saving}>
+      <legend className="sr-only">Tax and compliance controls</legend>
+      <nav className="admin-tax-nav" aria-label="Tax sections">{taxViews.map(item => <Link key={item} href={`/admin?section=tax&view=${item}`} aria-current={view === item ? "page" : undefined}>{item === "sellers" ? "Seller documentation" : item[0].toUpperCase() + item.slice(1)}</Link>)}</nav>
+      <div hidden={view !== "readiness"}>
+      <section className="tax-command-bar">
+        <div>
+          <p className="eyebrow">California sole proprietor</p>
+          <h2>Tax &amp; compliance overview</h2>
+          <p>
+            Order figures come from your checkout records. Checklist confirmations,
+            filings, payments, expenses, and owner draws are private admin records.
+          </p>
+          <p><b>Approval date:</b> {profile?.businessApprovedAt ? shortDate(profile.businessApprovedAt) : "Not recorded"} · <b>Launch status:</b> {profile?.businessLaunchStatus === "prelaunch" ? "Not launched (owner reported)" : profile?.businessLaunchStatus === "launched" ? "Launched" : "Not recorded"}</p>
+          <p><b>Business start:</b> {profile?.businessStartedAt ? shortDate(profile.businessStartedAt) : "Not recorded"}. An approval date does not establish when business operations began.</p>
+        </div>
+        <div className={`tax-readiness-score ${readyCount === readiness.length ? "ready" : "attention"}`}>
+          <span>Launch tax readiness</span>
+          <b>{readyCount}/{readiness.length}</b>
+          <small>{readyCount === readiness.length ? "All tracked controls are ready" : `${readiness.length - readyCount} controls need attention`}</small>
+        </div>
+      </section>
+
+      {profile?.businessLaunchStatus === "prelaunch" && <div className="tax-warning" role="note"><b>Before launch.</b> Estimated-tax calendar items are planning reminders for review, not confirmed unpaid bills. Your personal income and withholding still matter. A California seller’s permit also requires assigned returns even with no sales; confirm your filing frequency and due dates in CDTFA. Order reports retain any recorded payments and refunds.</div>}
+
+      <p className="admin-muted">{reports.reduce((sum, report) => sum + report.totals.orderCount, 0)} reportable paid orders - {excludedTestOrders.length} test orders excluded. <Link href="/admin?section=tax&view=reporting">Review reporting evidence</Link></p>
+      <section className="tax-readiness-grid" aria-label="Tax readiness checklist">
+        {readiness.map((item) => (
+          <article key={item.id} className={item.ready ? "ready" : "attention"}>
+            <span>{item.ready ? "Ready" : "Action needed"}</span>
+            <h3>{item.label}</h3>
+            <p>{item.detail}</p>
+            <p className="admin-muted">{["automatic-tax", "stripe-liability"].includes(item.id) ? "Evidence checked when this page loaded; no live verification recorded." : `Last account verification: ${profile?.caAccountVerifiedAt ? shortDate(profile.caAccountVerifiedAt) : "Not recorded"}`}</p>
+            {!item.ready && <Link href="/admin?section=tax&view=setup">Record confirmation or update setup</Link>}
+          </article>
+        ))}
+      </section>
+
+      </div>
+      <div hidden={view !== "reporting"}>
+      <section className="tax-section-heading">
+        <div>
+          <p className="eyebrow">Order-derived reporting</p>
+          <h2>{year} financial summary</h2>
+        </div>
+        <div className="tax-year-actions">
+          <label>
+            Reporting year
+            <select value={year} onChange={(event) => setYear(Number(event.target.value))}>
+              {yearOptions.map((option) => <option key={option}>{option}</option>)}
+            </select>
+          </label>
+          <a className="button outline small" href={`/api/admin?section=tax_export&year=${year}`}>
+            Download orders CSV
+          </a>
+        </div>
+      </section>
+
+      <div className="tax-metric-grid">
+        <TaxMetric label="California merchandise" value={money(totals.californiaMerchandiseCents, "usd")} detail={`${totals.californiaOrderCount} California orders, before refunds`} />
+        <TaxMetric label="California tax collected" value={money(totals.californiaTaxCollectedCents, "usd")} detail={`${money(totals.californiaTaxAfterFullRefundsCents, "usd")} after full refunds`} />
+        <TaxMetric label="Marketplace fees" value={money(totals.platformFeesAfterFullRefundsCents, "usd")} detail={`${money(totals.platformFeesCents, "usd")} before full-refund adjustments`} />
+        <TaxMetric label="Recorded Stripe fees" value={money(totals.stripeFeesCents, "usd")} detail={`${money(totals.processingFeesRecoveredCents, "usd")} recovered from sellers after refunds`} />
+        <TaxMetric label="Manual business expenses" value={money(ledgerSummary.expensesCents, "usd")} detail="Excludes owner draws and personal tax payments" />
+        <TaxMetric label="Operating margin proxy" value={money(marginProxy, "usd")} detail="Commission + processing recovered + other income − Stripe fees − recorded expenses" tone={marginProxy < 0 ? "warning" : undefined} />
+        <TaxMetric label="Income-tax reserve target" value={money(reserveTarget, "usd")} detail={`${((profile?.incomeTaxReserveBps ?? 0) / 100).toFixed(1)}% planning rate`} />
+        <TaxMetric label="Owner draws" value={money(ledgerSummary.ownerDrawsCents, "usd")} detail="Tracked separately; not a business expense" />
+      </div>
+
+      {(totals.partialRefundReviewCount > 0 || totals.missingStateCount > 0 || totals.missingStripeFeeCount > 0) && (
+        <div className="tax-warning" role="note">
+          <b>Reconciliation needed.</b>{" "}
+          {totals.partialRefundReviewCount > 0 && `${totals.partialRefundReviewCount} partially refunded order(s) need their Stripe Tax adjustment checked. `}
+          {totals.missingStateCount > 0 && `${totals.missingStateCount} paid order(s) have no readable destination state.`}
+          {totals.missingStripeFeeCount > 0 && ` ${totals.missingStripeFeeCount} order(s) are missing Stripe processing fees. The margin and reserve may be overstated until those fees are recorded.`}
+        </div>
+      )}
+
+      <section className="admin-panel tax-monthly-panel">
+        <div className="panel-heading">
+          <div><p className="eyebrow">Monthly reconciliation</p><h2>California filing support</h2></div>
+          <small>Orders are grouped by payment date in California time. Refunds adjust the original sale month. This is an order reconciliation view; verify refund timing and partial-refund tax in Stripe before filing. The CSV contains orders only. Orders marked as tests are excluded from tax totals and the CSV.</small>
+        </div>
+        {excludedForYear.length > 0 && (
+          <div role="note">
+            <p><b>{excludedForYear.length} test {excludedForYear.length === 1 ? "order excluded" : "orders excluded"} for {year}.</b> Order history is preserved.</p>
+            <ul>{excludedForYear.map((order) => (
+              <li key={order.id}>{order.orderNumber}{order.reason ? `: ${order.reason}` : ""}</li>
+            ))}</ul>
+          </div>
+        )}
+        <div className="admin-table-wrap" role="region" aria-label="Scrollable records" tabIndex={0}>
+          <table>
+            <thead><tr><th>Month</th><th>Orders</th><th>CA merchandise</th><th>CA shipping</th><th>CA tax collected</th><th>After full refunds</th><th>All refunds</th></tr></thead>
+            <tbody>
+              {report?.months.length ? report.months.map((month) => (
+                <tr key={month.month}><td><b>{month.label}</b></td><td>{month.orderCount}</td><td>{money(month.californiaMerchandiseCents, "usd")}</td><td>{money(month.californiaShippingCents, "usd")}</td><td>{money(month.californiaTaxCollectedCents, "usd")}</td><td>{money(month.californiaTaxAfterFullRefundsCents, "usd")}</td><td>{money(month.refundsCents, "usd")}</td></tr>
+              )) : <tr><td colSpan={7}>No reportable paid orders for {year}.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      </div>
+      <div hidden={view !== "setup"}><TaxProfileForm key={profile?.updatedAt ?? "new"} profile={profile} automaticTaxEnabled={Boolean(data.automaticTaxEnabled)} action={action} /><TaxReferencePanel /></div>
+      <div hidden={view !== "calendar"}><TaxTaskManager tasks={tasks} year={year} businessStartedAt={profile?.businessStartedAt} launchStatus={profile?.businessLaunchStatus} action={action} /></div>
+      <div hidden={view !== "bookkeeping"}><label>Bookkeeping year<select value={year} onChange={e => setYear(Number(e.target.value))}>{yearOptions.map(option => <option key={option}>{option}</option>)}</select></label><LedgerManager entries={ledger} year={year} action={action} /></div>
+      <div hidden={view !== "sellers"}><SellerTaxReadiness sellers={(data.sellers as SellerTaxRow[]) ?? []} action={action} /></div>
+      <div hidden={view !== "activity"}><TaxActivity rows={(data.activity as TaxActivityRow[]) ?? []} /></div>
+    </fieldset>
+  );
+}
+
+function TaxMetric({ label, value, detail, tone }: { label: string; value: string; detail: string; tone?: string }) {
+  return <article className={tone ?? ""}><span>{label}</span><b>{value}</b><small>{detail}</small></article>;
+}
+
+function TaxProfileForm({
+  profile,
+  automaticTaxEnabled,
+  action,
+}: {
+  profile: TaxProfile;
+  automaticTaxEnabled: boolean;
+  action(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
+}) {
+  const [form, setForm] = useState({
+    businessStartedAt: profile?.businessStartedAt ?? "",
+    businessApprovedAt: profile?.businessApprovedAt ?? "",
+    businessLaunchStatus: profile?.businessLaunchStatus ?? "not_set",
+    sellerPermitStatus: profile?.sellerPermitStatus ?? "not_checked",
+    marketplaceFacilitatorStatus: profile?.marketplaceFacilitatorStatus ?? "not_checked",
+    stripeCaliforniaRegistrationStatus: profile?.stripeCaliforniaRegistrationStatus ?? "not_checked",
+    salesTaxFilingFrequency: profile?.salesTaxFilingFrequency ?? "not_set",
+    nextSalesTaxDueAt: profile?.nextSalesTaxDueAt ?? "",
+    caAccountVerifiedAt: profile?.caAccountVerifiedAt ?? "",
+    sellerDocumentationIssued: profile?.sellerDocumentationIssued ?? false,
+    w9CollectionReady: profile?.w9CollectionReady ?? false,
+    stripeTaxReportingReady: profile?.stripeTaxReportingReady ?? false,
+    incomeTaxReservePercent: (profile?.incomeTaxReserveBps ?? 0) / 100,
+    notes: profile?.notes ?? "",
+  });
+  function field(name: string, value: string | number | boolean) {
+    setForm((current) => ({ ...current, [name]: value }));
+  }
+  return (
+    <section className="admin-panel tax-profile-panel">
+      <div className="panel-heading">
+        <div><p className="eyebrow">Control record</p><h2>California tax setup</h2></div>
+        <span className={`status ${automaticTaxEnabled ? "paid" : "failed"}`}>Automatic tax {automaticTaxEnabled ? "enabled" : "disabled"}</span>
+      </div>
+      <form className="tax-profile-form" onSubmit={(event) => {
+        event.preventDefault();
+        void action({
+          action: "save_tax_profile",
+          ...form,
+          incomeTaxReserveBps: Math.round(Number(form.incomeTaxReservePercent) * 100),
+        });
+      }}>
+        <label>Business approval date<input type="date" value={form.businessApprovedAt} onChange={(event) => field("businessApprovedAt", event.target.value)} /><small>Record the approval separately from starting operations or making your first sale.</small></label>
+        <label>Launch status<select value={form.businessLaunchStatus} onChange={(event) => field("businessLaunchStatus", event.target.value)}><option value="not_set">Not recorded</option><option value="prelaunch">Not launched</option><option value="launched">Launched</option></select></label>
+        <label>Business start date<input type="date" value={form.businessStartedAt} onChange={(event) => field("businessStartedAt", event.target.value)} /><small>Enter the actual operations start date when known. Approval and launch can be different dates.</small></label>
+        <label>Seller’s permit<select value={form.sellerPermitStatus} onChange={(event) => field("sellerPermitStatus", event.target.value)}><option value="not_checked">Not checked</option><option value="active">Active (owner confirmed)</option><option value="needs_attention">Needs attention</option></select></label>
+        <label>CDTFA marketplace status<select value={form.marketplaceFacilitatorStatus} onChange={(event) => field("marketplaceFacilitatorStatus", event.target.value)}><option value="not_checked">Not confirmed</option><option value="confirmed">Confirmed</option><option value="needs_attention">Needs attention</option></select></label>
+        <label>Stripe California registration<select value={form.stripeCaliforniaRegistrationStatus} onChange={(event) => field("stripeCaliforniaRegistrationStatus", event.target.value)}><option value="not_checked">Not checked</option><option value="active">Active</option><option value="needs_attention">Needs attention</option></select></label>
+        <label>CDTFA filing frequency<select value={form.salesTaxFilingFrequency} onChange={(event) => field("salesTaxFilingFrequency", event.target.value)}><option value="not_set">Not set</option><option value="monthly">Monthly</option><option value="quarterly">Quarterly</option><option value="annual">Annual</option></select></label>
+        <label>Next sales-tax due date<input type="date" value={form.nextSalesTaxDueAt} onChange={(event) => field("nextSalesTaxDueAt", event.target.value)} /></label>
+        <label>CDTFA account last verified<input type="date" value={form.caAccountVerifiedAt} onChange={(event) => field("caAccountVerifiedAt", event.target.value)} /></label>
+        <label>Income-tax reserve target (%)<input type="number" min="0" max="100" step="0.1" value={form.incomeTaxReservePercent} onChange={(event) => field("incomeTaxReservePercent", event.target.value)} /><small>Planning aid only. Set this with your tax preparer.</small></label>
+        <div className="tax-profile-facts"><span><b>Structure</b>Sole proprietor</span><span><b>Home state</b>California</span><span><b>Product code</b>txcd_99999999</span></div>
+        <fieldset className="tax-checklist-fields">
+          <legend>Process confirmations</legend>
+          <label><input type="checkbox" checked={form.sellerDocumentationIssued} onChange={(event) => field("sellerDocumentationIssued", event.target.checked)} /> Sellers received marketplace tax documentation</label>
+          <label><input type="checkbox" checked={form.w9CollectionReady} onChange={(event) => field("w9CollectionReady", event.target.checked)} /> Seller W-9 collection process is ready</label>
+          <label><input type="checkbox" checked={form.stripeTaxReportingReady} onChange={(event) => field("stripeTaxReportingReady", event.target.checked)} /> Stripe Connect tax reporting was reviewed</label>
+        </fieldset>
+        <label className="tax-notes-field">Private notes<textarea rows={4} maxLength={4000} value={form.notes} onChange={(event) => field("notes", event.target.value)} placeholder="Advisor guidance, CDTFA call date, filing instructions…" /><small>Do not store a full permit number, SSN, EIN, or seller TIN here.</small></label>
+        <button className="button dark small">Save tax profile</button>
+      </form>
+    </section>
+  );
+}
+
+function TaxTaskManager({
+  tasks,
+  year,
+  businessStartedAt,
+  launchStatus,
+  action,
+}: {
+  tasks: TaxTask[];
+  year: number;
+  businessStartedAt?: string | null;
+  launchStatus?: string;
+  action(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
+}) {
+  const [form, setForm] = useState({
+    kind: "ca_sales_tax",
+    title: "",
+    jurisdiction: "California CDTFA",
+    periodStart: "",
+    periodEnd: "",
+    dueAt: "",
+    amountDue: "",
+    notes: "",
+  });
+  function field(name: string, value: string) {
+    setForm((current) => ({ ...current, [name]: value }));
+  }
+  return (
+    <section className="admin-panel tax-task-panel">
+      <div className="panel-heading">
+        <div><p className="eyebrow">Deadlines and payments</p><h2>Tax calendar</h2></div>
+        <button className="button outline small" onClick={() => void action({ action: "seed_tax_calendar", year })}>Add / refresh {year} calendar</button>
+      </div>
+      <p>All recorded deadlines are shown below, including payments due in the following year. Add / refresh uses the selected reporting year, repairs untouched planning dates, and preserves your recorded updates.</p>
+      {businessStartedAt && <p>Business started {shortDate(businessStartedAt)}. Earlier planning deadlines are flagged for review. Estimated taxes depend on all personal income and withholding; review annualization for a midyear start.</p>}
+      <form className="tax-task-create" onSubmit={(event) => {
+        event.preventDefault();
+        void action({
+          action: "create_tax_task",
+          ...form,
+          amountDueCents: form.amountDue ? dollarsToCents(form.amountDue) : null,
+        }).then((result) => { if (result.ok) setForm((current) => ({ ...current, title: "", dueAt: "", amountDue: "", notes: "" })); });
+      }}>
+        <label>Type<select value={form.kind} onChange={(event) => field("kind", event.target.value)}><option value="ca_sales_tax">California sales tax</option><option value="federal_estimated_tax">Federal estimated tax</option><option value="ca_estimated_tax">California estimated tax</option><option value="annual_income_tax">Annual income tax</option><option value="seller_reporting">Seller reporting</option><option value="other">Other</option></select></label>
+        <label className="tax-task-title">Task<input required maxLength={180} value={form.title} onChange={(event) => field("title", event.target.value)} placeholder="Q3 CDTFA return and payment" /></label>
+        <label>Jurisdiction<input maxLength={100} value={form.jurisdiction} onChange={(event) => field("jurisdiction", event.target.value)} /></label>
+        <label>Period start<input type="date" value={form.periodStart} onChange={(event) => field("periodStart", event.target.value)} /></label>
+        <label>Period end<input type="date" value={form.periodEnd} onChange={(event) => field("periodEnd", event.target.value)} /></label>
+        <label>Due date<input required type="date" value={form.dueAt} onChange={(event) => field("dueAt", event.target.value)} /></label>
+        <label>Expected amount<input type="number" min="0" step="0.01" inputMode="decimal" value={form.amountDue} onChange={(event) => field("amountDue", event.target.value)} placeholder="0.00" /></label>
+        <label className="tax-task-notes">Notes<input maxLength={2000} value={form.notes} onChange={(event) => field("notes", event.target.value)} placeholder="Filing portal, preparer instructions, records needed…" /></label>
+        <button className="button dark small">Add deadline</button>
+      </form>
+      <div className="tax-task-list">
+        {tasks.length ? tasks.map((task) => <TaxTaskRow key={`${task.id}-${task.updatedAt}`} task={task} businessStartedAt={businessStartedAt} launchStatus={launchStatus} action={action} />) : <p className="tax-empty">No deadlines recorded. Add the planning calendar, then add your CDTFA filing dates.</p>}
+      </div>
+    </section>
+  );
+}
+
+function TaxTaskRow({
+  task,
+  businessStartedAt,
+  launchStatus,
+  action,
+}: {
+  task: TaxTask;
+  businessStartedAt?: string | null;
+  launchStatus?: string;
+  action(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
+}) {
+  const [status, setStatus] = useState(task.status);
+  const [dueAt, setDueAt] = useState(task.dueAt);
+  const [amountDue, setAmountDue] = useState(task.amountDueCents == null ? "" : (task.amountDueCents / 100).toFixed(2));
+  const [amountPaid, setAmountPaid] = useState(task.amountPaidCents == null ? "" : (task.amountPaidCents / 100).toFixed(2));
+  const [confirmationReference, setConfirmationReference] = useState(task.confirmationReference);
+  const [notes, setNotes] = useState(task.notes);
+  const timing = taxTaskTiming(task, businessStartedAt, undefined, launchStatus);
+  const overdue = timing === "overdue";
+  const timingLabel = timing === "prelaunch_review" ? "Prelaunch - review" : timing === "before_start" ? "Before business start - review" : timing === "due_today" ? "Due today" : overdue ? "Overdue - review" : task.status.replaceAll("_", " ");
+  return (
+    <article className={`tax-task ${overdue ? "overdue" : ""}`}>
+      <div className="tax-task-summary">
+        <span className={`status ${task.status}`}>{timingLabel}</span>
+        <h3>{task.title}</h3>
+        <p>{task.jurisdiction || "No jurisdiction"} · Due {shortDate(task.dueAt)}</p>
+        <small>{task.periodStart && task.periodEnd ? `${shortDate(task.periodStart)}–${shortDate(task.periodEnd)}` : "No reporting period recorded"}</small>
+        {task.amountDueCents != null && <b>{money(task.amountDueCents, "usd")} expected</b>}
+        {task.status === "filed" && timing !== "closed" && <small>Filed; payment or a zero balance still needs confirmation.</small>}
+        {task.filedAt && <small>Filing recorded {shortDateTime(task.filedAt)}</small>}
+        {task.paidAt && <small>Payment recorded {shortDateTime(task.paidAt)}</small>}
+      </div>
+      <form onSubmit={(event) => {
+        event.preventDefault();
+        void action({
+          action: "update_tax_task",
+          taskId: task.id,
+          status,
+          dueAt,
+          amountDueCents: amountDue ? dollarsToCents(amountDue) : null,
+          amountPaidCents: amountPaid ? dollarsToCents(amountPaid) : null,
+          confirmationReference,
+          notes,
+        });
+      }}>
+        <label>Due date<input required type="date" value={dueAt} onChange={(event) => setDueAt(event.target.value)} /></label>
+        <label>Expected amount<input type="number" min="0" step="0.01" value={amountDue} onChange={(event) => setAmountDue(event.target.value)} placeholder="0.00" /></label>
+        <label>Status<select value={status} onChange={(event) => setStatus(event.target.value)}><option value="upcoming">Upcoming</option><option value="ready">Ready to file/pay</option><option value="filed">Filed</option><option value="paid">Paid</option><option value="not_required">Not required</option></select></label>
+        <label>Amount paid<input type="number" min="0" step="0.01" inputMode="decimal" value={amountPaid} onChange={(event) => setAmountPaid(event.target.value)} placeholder="0.00" /></label>
+        <label>Confirmation/reference<input maxLength={300} value={confirmationReference} onChange={(event) => setConfirmationReference(event.target.value)} placeholder="Confirmation ID or receipt location" /></label>
+        <label className="tax-task-row-notes">Notes<input maxLength={2000} value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
+        <button className="button dark small">Update</button>
+      </form>
+    </article>
+  );
+}
+
+function LedgerManager({
+  entries,
+  year,
+  action,
+}: {
+  entries: LedgerEntry[];
+  year: number;
+  action(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
+}) {
+  const [form, setForm] = useState({
+    entryType: "expense",
+    category: "Software and hosting",
+    description: "",
+    vendor: "",
+    occurredAt: todayDateInput(),
+    amount: "",
+    reference: "",
+    notes: "",
+  });
+  function field(name: string, value: string) {
+    setForm((current) => ({ ...current, [name]: value }));
+  }
+  return (
+    <section className="admin-panel tax-ledger-panel">
+      <div className="panel-heading"><div><p className="eyebrow">Schedule C support</p><h2>Bookkeeping entries</h2></div><small>Tax payments are tracked in the calendar, not as business expenses.</small></div>
+      <form className="tax-ledger-form" onSubmit={(event) => {
+        event.preventDefault();
+        void action({ action: "create_ledger_entry", ...form, amountCents: dollarsToCents(form.amount) }).then((result) => { if (result.ok) setForm((current) => ({ ...current, description: "", vendor: "", amount: "", reference: "", notes: "" })); });
+      }}>
+        <label>Entry type<select value={form.entryType} onChange={(event) => field("entryType", event.target.value)}><option value="expense">Business expense</option><option value="owner_draw">Owner draw</option><option value="other_income">Other business income</option></select></label>
+        <label>Category<select value={form.category} onChange={(event) => field("category", event.target.value)}><option>Software and hosting</option><option>Advertising</option><option>Professional services</option><option>Insurance</option><option>Office supplies</option><option>Shipping supplies</option><option>Bank fees</option><option>Home office</option><option>Owner draw</option><option>Other income</option><option>Other</option></select></label>
+        <label>Date<input required type="date" value={form.occurredAt} onChange={(event) => field("occurredAt", event.target.value)} /></label>
+        <label>Amount<input required type="number" min="0.01" step="0.01" inputMode="decimal" value={form.amount} onChange={(event) => field("amount", event.target.value)} placeholder="0.00" /></label>
+        <label className="tax-ledger-description">Description<input required maxLength={240} value={form.description} onChange={(event) => field("description", event.target.value)} placeholder="Cloud hosting bill" /></label>
+        <label>Vendor/source<input maxLength={160} value={form.vendor} onChange={(event) => field("vendor", event.target.value)} /></label>
+        <label>Receipt/reference<input maxLength={300} value={form.reference} onChange={(event) => field("reference", event.target.value)} placeholder="Receipt filename or confirmation" /></label>
+        <label className="tax-ledger-notes">Notes<input maxLength={2000} value={form.notes} onChange={(event) => field("notes", event.target.value)} /></label>
+        <button className="button dark small">Record entry</button>
+      </form>
+      <div className="admin-table-wrap" role="region" aria-label="Scrollable records" tabIndex={0}>
+        <table>
+          <thead><tr><th>Date</th><th>Type</th><th>Description</th><th>Category</th><th>Vendor</th><th>Amount</th><th>Reference</th><th /></tr></thead>
+          <tbody>
+            {entries.length ? entries.map((entry) => (
+              <tr key={entry.id} className={entry.status === "voided" ? "voided" : ""}><td>{shortDate(entry.occurredAt)}</td><td>{entry.entryType.replaceAll("_", " ")}</td><td><b>{entry.description}</b>{entry.notes && <small>{entry.notes}</small>}</td><td>{entry.category}</td><td>{entry.vendor || "-"}</td><td>{money(entry.amountCents, "usd")}</td><td>{entry.reference || "-"}</td><td>{entry.status === "active" ? <button onClick={() => void action({ action: "void_ledger_entry", entryId: entry.id })}>Void</button> : "Voided"}</td></tr>
+            )) : <tr><td colSpan={8}>No manual bookkeeping entries for {year}.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function SellerTaxReadiness({
+  sellers,
+  action,
+}: {
+  sellers: SellerTaxRow[];
+  action(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
+}) {
+  return (
+    <section className="admin-panel tax-seller-panel">
+      <div className="panel-heading"><div><p className="eyebrow">Information reporting</p><h2>Seller tax readiness</h2></div><small>Track status only. TINs and W-9 documents stay in Stripe or your approved secure process.</small></div>
+      <div className="admin-table-wrap" role="region" aria-label="Scrollable records" tabIndex={0}>
+        <table>
+          <thead><tr><th>Seller</th><th>Marketplace status</th><th>Stripe</th><th>Terms</th><th>Tax information</th><th>Last verified</th></tr></thead>
+          <tbody>
+            {sellers.length ? sellers.map((seller) => <SellerTaxRowEditor key={`${seller.id}-${seller.taxInfoVerifiedAt ?? seller.taxInfoStatus}`} seller={seller} action={action} />) : <tr><td colSpan={6}>No sellers yet.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function SellerTaxRowEditor({ seller, action }: { seller: SellerTaxRow; action(payload: Record<string, unknown>): Promise<Record<string, unknown>> }) {
+  const [status, setStatus] = useState(seller.taxInfoStatus);
+  return (
+    <tr>
+      <td><b>{seller.storeName}</b><small>{seller.sellerType}</small></td>
+      <td><span className={`status ${seller.status}`}>{seller.status}</span></td>
+      <td>{seller.stripeAccountId && seller.stripeChargesEnabled && seller.stripePayoutsEnabled ? "Connected and enabled" : seller.stripeAccountId ? "Onboarding incomplete" : "Not connected"}</td>
+      <td>{seller.sellerTermsAcceptedAt ? shortDate(seller.sellerTermsAcceptedAt) : "Not accepted"}</td>
+      <td><div className="tax-seller-status"><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="not_checked">Not checked</option><option value="collecting">Collecting</option><option value="ready">Ready</option><option value="needs_attention">Needs attention</option></select><button onClick={() => void action({ action: "seller_tax_status", sellerId: seller.id, status })}>Save</button></div></td>
+      <td>{seller.taxInfoVerifiedAt ? shortDate(seller.taxInfoVerifiedAt) : "-"}</td>
+    </tr>
+  );
+}
+
+function TaxActivity({ rows }: { rows: TaxActivityRow[] }) {
+  return (
+    <section className="admin-panel tax-activity-panel">
+      <div className="panel-heading"><div><p className="eyebrow">Evidence trail</p><h2>Recent tax activity</h2></div></div>
+      {rows.length ? <ol>{rows.map((row) => <li key={row.id}><span>{shortDateTime(row.createdAt)}</span><p><b>{row.summary}</b><small>{row.actorEmail}</small></p></li>)}</ol> : <p>No tax activity recorded yet.</p>}
+    </section>
+  );
+}
+
+function TaxReferencePanel() {
+  return (
+    <aside className="tax-reference-panel">
+      <div><p className="eyebrow light">Owner rules</p><h2>Accounting guidelines</h2></div>
+      <ul><li>Sales tax is a liability, not revenue.</li><li>Seller proceeds are not owner income.</li><li>Owner draws are not deductible expenses.</li><li>Partially refunded orders require a Stripe Tax adjustment check.</li><li>The margin proxy is a planning view, not a completed tax return.</li></ul>
+      <nav aria-label="Official tax references"><a href="https://www.cdtfa.ca.gov/industry/MPFAct.htm" target="_blank" rel="noreferrer">CDTFA marketplace guide</a><a href="https://www.irs.gov/publications/p334" target="_blank" rel="noreferrer">IRS sole-proprietor guide</a><a href="https://www.ftb.ca.gov/file/business/types/sole-proprietorship.html" target="_blank" rel="noreferrer">California sole-proprietor guide</a><a href="https://docs.stripe.com/tax/tax-for-marketplaces" target="_blank" rel="noreferrer">Stripe marketplace tax setup</a></nav>
+    </aside>
+  );
+}
+
+function dollarsToCents(value: string) {
+  const normalized = value.trim();
+  if (!/^\d+(\.\d{1,2})?$/.test(normalized)) return Number.NaN;
+  return Math.round(Number(normalized) * 100);
+}
+
+function todayDateInput() {
+  return taxDate()!;
+}
+
+function shortDateTime(value: string) {
+  const parsed = new Date(/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}$/.test(value) ? `${value.replace(" ", "T")}Z` : value);
+  return Number.isNaN(parsed.getTime()) ? "Invalid date" : parsed.toLocaleString();
+}
+
 type AdminOrder = {
   id: string;
   orderNumber: string;
+  isTestOrder: boolean;
+  testOrderReason: string | null;
   sellerName: string;
   buyerEmail: string;
   buyerName: string;
   shippingAddress: string;
   currency: string;
+  subtotalCents: number;
+  shippingCents: number;
+  taxCents: number;
+  marketplaceFeeBps: number;
+  platformFeeCents: number;
+  paymentProcessingFeeCents?: number | null;
+  processingFeePayer?: "platform" | "seller";
+  sellerProceedsCents?: number | null;
   totalCents: number;
   paymentStatus: string;
   fulfillmentStatus: string;
   carrier?: string | null;
   trackingNumber?: string | null;
   createdAt: string;
+  paidAt?: string | null;
+  shippedAt?: string | null;
+  shipByAt?: string | null;
+  refundedAmountCents: number;
+  sellerTransferStatus: string;
   items: Array<{
     id: string;
     productTitleSnapshot: string;
+    sellerSkuSnapshot: string;
+    imageUrlSnapshot?: string | null;
     quantity: number;
     unitPriceCents: number;
+    availabilityTypeSnapshot: "in_stock" | "preorder";
+    releaseDateSnapshot: string | null;
   }>;
 };
+
+type AdminDispute = {
+  id: string;
+  orderId?: string | null;
+  orderNumber?: string | null;
+  sellerName?: string | null;
+  status: string;
+  reason: string;
+  amountCents: number;
+  currency: string;
+  evidenceDueBy?: string | null;
+  closedAt?: string | null;
+  updatedAt: string;
+};
+
+type AdminSellerAlert = {
+  id: string;
+  sellerId: string;
+  sellerName: string;
+  type: string;
+  severity: "info" | "warning" | "critical";
+  message: string;
+  sourceObjectId?: string | null;
+  acknowledged: boolean;
+  acknowledgedAt?: string | null;
+  createdAt: string;
+};
+
 function Orders({
   data,
   action,
@@ -1187,18 +2323,149 @@ function Orders({
   action(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
 }) {
   const rows = (data.orders as AdminOrder[]) ?? [];
+  const disputeRows = (data.disputes as AdminDispute[]) ?? [];
+  const sellerAlertRows = (data.sellerAlerts as AdminSellerAlert[]) ?? [];
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 60_000); return () => clearInterval(timer); }, []);
+  const params = useSearchParams();
+  const [query, setQuery] = useState(params.get("q") || "");
+  const [filter, setFilter] = useState(params.get("filter") || "all");
+  const [payment, setPayment] = useState("");
+  const [recordType, setRecordType] = useState("all");
+  const [sort, setSort] = useState("newest");
+  const visible = rows.filter(order => {
+    if (recordType === "live" && order.isTestOrder || recordType === "test" && !order.isTestOrder) return false;
+    if (payment && order.paymentStatus !== payment) return false;
+    if (filter === "awaiting" && !awaitingShipment(order) || filter === "overdue" && !overdueShipment(order, now) || filter === "missing_items" && !orderItemProblem(order)) return false;
+    if (filter === "exceptions" && order.paymentStatus !== "failed" && order.sellerTransferStatus !== "failed" && !sellerAlertRows.some(alert => alert.sellerName === order.sellerName && !alert.acknowledged)) return false;
+    if (filter === "disputes" && !disputeRows.some(dispute => dispute.orderId === order.id && !dispute.closedAt && !["won", "lost", "prevented", "warning_closed"].includes(dispute.status))) return false;
+    if (["shipped", "delivered", "cancelled"].includes(filter) && order.fulfillmentStatus !== filter) return false;
+    return `${order.orderNumber} ${order.sellerName} ${order.buyerEmail} ${order.buyerName} ${order.items.map(item => `${item.productTitleSnapshot} ${item.sellerSkuSnapshot}`).join(" ")}`.toLowerCase().includes(query.toLowerCase());
+  }).sort((a, b) => sort === "oldest" ? a.createdAt.localeCompare(b.createdAt) : sort === "deadline" ? (a.shipByAt || "9999").localeCompare(b.shipByAt || "9999") : b.createdAt.localeCompare(a.createdAt));
+  return <div className="admin-stack">
+    <section className="admin-panel">
+      <h2>Order queue</h2>
+      <p>{rows.filter(awaitingShipment).length} awaiting shipment - {rows.filter(order => overdueShipment(order, now)).length} overdue - {rows.filter(order => orderItemProblem(order)).length} need item reconciliation</p>
+      <div className="admin-queue-filters">
+        <label>Search orders<input value={query} onChange={e => setQuery(e.target.value)} placeholder="Order, SKU, item, seller or buyer" /></label>
+        <label>Queue<select value={filter} onChange={e => setFilter(e.target.value)}>{[["all", "All orders"], ["awaiting", "Awaiting shipment"], ["overdue", "Overdue shipments"], ["missing_items", "Item reconciliation"], ["exceptions", "Payment exceptions"], ["disputes", "Open disputes"], ["shipped", "Shipped"], ["delivered", "Delivered"], ["cancelled", "Cancelled"]].map(([value,label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+        <label>Payment<select value={payment} onChange={e => setPayment(e.target.value)}><option value="">All payment states</option>{["pending", "paid", "failed", "partially_refunded", "refunded"].map(value => <option key={value} value={value}>{value.replaceAll("_", " ")}</option>)}</select></label>
+        <label>Records<select value={recordType} onChange={e => setRecordType(e.target.value)}><option value="all">Live and test</option><option value="live">Live only</option><option value="test">Test only</option></select></label>
+        <label>Sort<select value={sort} onChange={e => setSort(e.target.value)}><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="deadline">Shipment deadline</option></select></label>
+      </div>
+      <p className="admin-muted">{visible.length} orders shown - Latest 250 orders loaded. Dates use your local time.</p>
+    </section>
+    <div className="admin-records">{visible.length ? visible.map(order => <details key={order.id} open={params.get("order") === order.id || undefined}>
+      <summary><span className="admin-record-summary"><strong>{order.orderNumber}{order.isTestOrder ? " - TEST" : ""}</strong><b>{money(order.totalCents, order.currency)}</b></span>
+        <span>{order.items.length ? order.items.map(item => `${item.productTitleSnapshot} x ${item.quantity} (${item.sellerSkuSnapshot})`).join("; ") : "Item records missing"}</span>
+        <span className="admin-record-meta"><span>{order.sellerName}</span><span>Ordered {shortDateTime(order.createdAt)} · {Math.max(0, Math.floor((now - (adminTimestamp(order.createdAt)?.getTime() || now)) / 86400000))} days old</span><span>Ship by {order.shipByAt ? shortDateTime(order.shipByAt) : "Not recorded"}</span></span>
+        <span className="admin-record-meta"><span>Payment: {order.paymentStatus.replaceAll("_", " ")}</span><span>Fulfillment: {awaitingShipment(order) ? "Awaiting shipment" : order.fulfillmentStatus}</span>{overdueShipment(order, now) && <strong className="admin-warning">Overdue</strong>}</span>
+      </summary><OrderPanel order={order} action={action} />
+    </details>) : <div className="admin-panel">No orders match these filters.</div>}</div>
+    <details className="admin-panel" open={["disputes", "exceptions"].includes(filter) || undefined}><summary>Payment alerts - {disputeRows.filter(row => !row.closedAt && !["won", "lost", "prevented", "warning_closed"].includes(row.status)).length} open disputes - {sellerAlertRows.filter(row => !row.acknowledged).length} unacknowledged seller alerts</summary><StripeRiskPanels disputes={disputeRows} sellerAlerts={sellerAlertRows} action={action} /></details>
+  </div>;
+}
+
+function StripeRiskPanels({
+  disputes,
+  sellerAlerts,
+  action,
+}: {
+  disputes: AdminDispute[];
+  sellerAlerts: AdminSellerAlert[];
+  action(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
+}) {
+  const openDisputes = disputes.filter(
+    (row) => !row.closedAt && !["won", "lost", "prevented", "warning_closed"].includes(row.status),
+  );
+  const openAlerts = sellerAlerts.filter((row) => !row.acknowledged);
   return (
-    <div className="order-admin-list">
-      {rows.length ? (
-        rows.map((order) => (
-          <OrderPanel key={order.id} order={order} action={action} />
-        ))
-      ) : (
-        <div className="admin-panel">No orders yet.</div>
-      )}
-    </div>
+    <>
+      <section className="admin-panel">
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">Stripe payment risk</p>
+            <h2>Disputes</h2>
+          </div>
+          <span className={`status ${openDisputes.length ? "failed" : "paid"}`}>
+            {openDisputes.length} open
+          </span>
+        </div>
+        {disputes.length ? (
+          <div className="admin-table-wrap" role="region" aria-label="Scrollable records" tabIndex={0}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Order</th>
+                  <th>Seller</th>
+                  <th>Status</th>
+                  <th>Reason</th>
+                  <th>Amount</th>
+                  <th>Evidence due</th>
+                </tr>
+              </thead>
+              <tbody>
+                {disputes.map((row) => (
+                  <tr key={row.id}>
+                    <td><b>{row.orderNumber ?? "Unmatched charge"}</b><br /><small>{row.id}</small></td>
+                    <td>{row.sellerName ?? "Unknown seller"}</td>
+                    <td><span className={`status ${["won", "prevented", "warning_closed"].includes(row.status) ? "paid" : "failed"}`}>{row.status.replaceAll("_", " ")}</span></td>
+                    <td>{row.reason.replaceAll("_", " ") || "Not provided"}</td>
+                    <td>{money(row.amountCents, row.currency)}</td>
+                    <td>{row.evidenceDueBy ? shortDateTime(row.evidenceDueBy) : "-"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p>No Stripe disputes recorded.</p>
+        )}
+      </section>
+
+      <section className="admin-panel">
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">Stripe Connect monitoring</p>
+            <h2>Seller payout alerts</h2>
+          </div>
+          <span className={`status ${openAlerts.length ? "failed" : "paid"}`}>
+            {openAlerts.length} unacknowledged
+          </span>
+        </div>
+        {sellerAlerts.length ? (
+          <div className="admin-table-wrap" role="region" aria-label="Scrollable records" tabIndex={0}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Seller</th>
+                  <th>Severity</th>
+                  <th>Alert</th>
+                  <th>When</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sellerAlerts.map((row) => (
+                  <tr key={row.id}>
+                    <td><b>{row.sellerName}</b></td>
+                    <td><span className={`status ${row.severity === "info" ? "paid" : "failed"}`}>{row.severity}</span></td>
+                    <td>{row.message}</td>
+                    <td>{shortDateTime(row.createdAt)}</td>
+                    <td>{row.acknowledged ? "Acknowledged" : <button className="button outline small" onClick={() => void action({ action: "acknowledge_seller_alert", alertId: row.id })}>Acknowledge</button>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p>No Stripe Connect alerts recorded.</p>
+        )}
+      </section>
+    </>
   );
 }
+
 function OrderPanel({
   order,
   action,
@@ -1221,6 +2488,7 @@ function OrderPanel({
             {order.fulfillmentStatus}
           </span>
           <h2>{order.orderNumber}</h2>
+          {order.isTestOrder && <p><b>Test order - excluded from tax reports.</b>{order.testOrderReason ? ` ${order.testOrderReason}` : ""}</p>}
           <p>
             {order.sellerName} · {order.buyerName} · {order.buyerEmail}
           </p>
@@ -1230,34 +2498,44 @@ function OrderPanel({
       <div className="order-admin-body">
         <div>
           <h3>Items</h3>
-          {order.items.map((item) => (
-            <p key={item.id}>
-              {item.productTitleSnapshot} × {item.quantity} —{" "}
-              {money(item.unitPriceCents * item.quantity, order.currency)}
-            </p>
-          ))}
+          {orderItemProblem(order) && <p className="admin-warning" role="alert">{orderItemProblem(order)}</p>}
+          {order.items.map(item => <div className="admin-item" key={item.id}>{item.imageUrlSnapshot && <Image src={item.imageUrlSnapshot} alt="" width={64} height={52} unoptimized />}<div><b>{item.productTitleSnapshot}</b><p>SKU {item.sellerSkuSnapshot} · Quantity {item.quantity} · {money(item.unitPriceCents * item.quantity, order.currency)}</p>{item.availabilityTypeSnapshot === "preorder" && <small>Preorder - Expected release {shortDate(item.releaseDateSnapshot)}</small>}</div></div>)}
+          <h3>Financial record</h3><p>Paid: {order.paidAt ? shortDateTime(order.paidAt) : "Not recorded"}<br/>Merchandise {money(order.subtotalCents, order.currency)} · Shipping {money(order.shippingCents, order.currency)} · Tax {money(order.taxCents, order.currency)}<br/>Refunded {money(order.refundedAmountCents, order.currency)} · Seller transfer: {order.sellerTransferStatus.replaceAll("_", " ")}</p>
+          <p>
+            Model Car Center fee ({feePercent(order.marketplaceFeeBps)}):{" "}
+            <b>{money(order.platformFeeCents, order.currency)}</b>
+            <br />
+            Stripe processing ({order.processingFeePayer === "seller" ? "deducted from seller proceeds" : "paid by platform"}): {order.paymentProcessingFeeCents == null
+              ? "not recorded"
+              : money(order.paymentProcessingFeeCents, order.currency)}
+            <br />
+            Seller proceeds: {order.sellerProceedsCents == null
+              ? "not recorded"
+              : money(order.sellerProceedsCents, order.currency)}
+          </p>
         </div>
         <div>
           <h3>Ship to</h3>
           <pre>{formatAddress(order.shippingAddress)}</pre>
         </div>
       </div>
-      {order.paymentStatus === "paid" &&
-        order.fulfillmentStatus !== "shipped" && (
+      {awaitingShipment(order) && (
           <div className="fulfillment-controls">
             <input
               value={carrier}
               onChange={(e) => setCarrier(e.target.value)}
+              aria-label="Carrier"
               placeholder="Carrier"
             />
             <input
               value={tracking}
               onChange={(e) => setTracking(e.target.value)}
+              aria-label="Tracking number"
               placeholder="Tracking number"
             />
             <button
               className="button dark small"
-              disabled={!carrier || !tracking}
+              disabled={!carrier || !tracking || Boolean(orderItemProblem(order))}
               onClick={() =>
                 void action({
                   action: "ship_order",
@@ -1282,6 +2560,7 @@ function OrderPanel({
             <input
               type="checkbox"
               checked={restock}
+              disabled={Boolean(orderItemProblem(order))}
               onChange={(e) => setRestock(e.target.checked)}
             />{" "}
             Restock inventory after Stripe confirms the refund
@@ -1310,6 +2589,20 @@ function OrderPanel({
       )}
     </article>
   );
+}
+
+function feePercent(basisPoints: number) {
+  return `${basisPoints / 100}%`;
+}
+
+function shortDate(value?: string | null) {
+  if (!value) return "Not set";
+  const parsed = /^\d{4}-\d{2}-\d{2}$/.test(value)
+    ? new Date(`${value}T12:00:00`)
+    : new Date(value);
+  return Number.isNaN(parsed.getTime())
+    ? "Invalid date"
+    : parsed.toLocaleDateString();
 }
 function formatAddress(raw: string) {
   try {

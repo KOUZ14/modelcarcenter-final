@@ -1,4 +1,4 @@
-export const MAX_LISTING_IMAGES = 8;
+export const MAX_LISTING_IMAGES = 20;
 export const MAX_LISTING_IMAGE_BYTES = 10 * 1024 * 1024;
 
 export function detectListingImageType(
@@ -48,6 +48,23 @@ export function validateListingImageBatch(input: {
     )
   ) {
     return "Each photo must be 10 MB or smaller.";
+  }
+  return null;
+}
+
+export function validateListingImageOrder(
+  currentIds: string[],
+  requestedIds: string[],
+) {
+  if (requestedIds.length !== currentIds.length) {
+    return "The photo order must include every saved photo.";
+  }
+  if (new Set(requestedIds).size !== requestedIds.length) {
+    return "Each saved photo can appear only once in the photo order.";
+  }
+  const current = new Set(currentIds);
+  if (requestedIds.some((id) => !current.has(id))) {
+    return "The photo order contains a photo that is not part of this listing.";
   }
   return null;
 }

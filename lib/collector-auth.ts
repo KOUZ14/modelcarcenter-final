@@ -6,6 +6,7 @@ import {
   ensureCollectorProfile,
 } from "./collector-store";
 import { safeReturnPath } from "./account-rules";
+import { claimProfessionalStoreForUser } from "./store";
 
 export async function getCurrentCollector(requestHeaders?: Headers) {
   const session = await getCollectorAuth().api.getSession({
@@ -19,9 +20,12 @@ export async function getCurrentCollector(requestHeaders?: Headers) {
     emailVerified: session.user.emailVerified,
     image: session.user.image,
   };
-  const profile = await ensureCollectorProfile(user);
-  await claimGuestDataForUser(user);
-  return { session: session.session, user, profile };
+  const [profile, , seller] = await Promise.all([
+    ensureCollectorProfile(user),
+    claimGuestDataForUser(user),
+    claimProfessionalStoreForUser(user),
+  ]);
+  return { session: session.session, user, profile, seller };
 }
 
 export async function requireCollector(
@@ -67,8 +71,8 @@ export async function requireSellerOwner(sellerId: string, request: Request) {
 export async function requireProductOwner(productId: string, request: Request) {
   const collector = await requireCollectorApi(request);
   if (collector instanceof Response) return collector;
-  const { getOwnedProduct } = await import("./collector-store");
-  const product = await getOwnedProduct(collector.user.id, productId);
+  const { getOwnedProductForImages } = await import("./collector-store");
+  const product = await getOwnedProductForImages(collector.user.id, productId);
   if (!product)
     return Response.json(
       { error: "You do not have access to this listing." },

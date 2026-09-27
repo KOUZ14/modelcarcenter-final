@@ -1,0 +1,27 @@
+import { assertContact, blockSQL, getPiece, notify, one, required, rows, run, settings, text } from "./community";
+import { ValidationError } from "./validation";
+export type Thread={id:string;senderId:string;recipientId:string;itemId:string|null;reference:string;status:string;updatedAt:number;otherName:string;unread:number};
+export async function threadAccess(user:string,id:string){const t=await one<{id:string;sender_id:string;recipient_id:string;status:string}>("SELECT * FROM collector_threads WHERE id=? AND (sender_id=? OR recipient_id=?)",id,user,user);if(!t)throw new ValidationError('Conversation unavailable.');await assertContact(t.sender_id,t.recipient_id);return t;}
+export async function startCollectorThread(user:string,recipient:string,itemId?:string,offer=false,listingReference?:string){
+  await assertContact(user,recipient);
+  const existing=await one<{id:string;status:string}>("SELECT id,status FROM collector_threads WHERE ((sender_id=? AND recipient_id=?) OR (sender_id=? AND recipient_id=?)) AND coalesce(item_id,'')=? ORDER BY created_at DESC LIMIT 1",user,recipient,recipient,user,itemId||'');
+  if(existing){if(existing.status==='declined')throw new ValidationError('This message request was declined.');return existing.id;}
+  if(!listingReference&&!await one("SELECT user_id FROM community_settings WHERE user_id=? AND published=1",recipient))throw new ValidationError('Collector unavailable.');
+  const pref=await settings(recipient),follow=await one("SELECT id FROM collector_relationships WHERE owner_id=? AND target_id=? AND kind='follow'",recipient,user);
+  if(!offer&&(pref.contact==='existing'||(pref.contact==='following'&&!follow)))throw new ValidationError('This collector is not accepting new messages from this account.');
+  const item=itemId?await getPiece(itemId,user):null;if(itemId&&(!item||item.ownerId!==recipient))throw new ValidationError('Collection piece unavailable.');
+  const id=crypto.randomUUID(),now=Date.now();await run("INSERT INTO collector_threads (id,sender_id,recipient_id,item_id,reference,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)",id,user,recipient,itemId||null,item?.title||listingReference||'',pref.contact==='everyone'||follow?'accepted':'request',now,now);return id;
+}
+export async function collectorInbox(user:string){return rows<Thread>(`SELECT t.id,t.sender_id senderId,t.recipient_id recipientId,t.item_id itemId,t.reference,t.status,t.updated_at updatedAt,c.display_name otherName,
+  (SELECT count(*) FROM collector_messages m WHERE m.thread_id=t.id AND m.owner_id!=? AND m.created_at>CASE WHEN t.sender_id=? THEN t.sender_read_at ELSE t.recipient_read_at END) unread
+  FROM collector_threads t JOIN collector_profiles c ON c.user_id=CASE WHEN t.sender_id=? THEN t.recipient_id ELSE t.sender_id END WHERE (t.sender_id=? OR t.recipient_id=?) AND ${blockSQL('c.user_id')} ORDER BY t.updated_at DESC LIMIT 100`,user,user,user,user,user,user,user);}
+export async function threadMessages(user:string,id:string){const t=await threadAccess(user,id);await run(`UPDATE collector_threads SET ${t.sender_id===user?'sender_read_at':'recipient_read_at'}=? WHERE id=?`,Date.now(),id);return rows<{id:string;ownerId:string;body:string;photoId:string|null;offerId:string|null;createdAt:number}>("SELECT id,owner_id ownerId,body,photo_id photoId,offer_id offerId,created_at createdAt FROM collector_messages WHERE thread_id=? ORDER BY created_at LIMIT 200",id);}
+export async function collectorMessageAction(user:string,p:Record<string,unknown>){const action=String(p.action);if(action==='start'){const id=await startCollectorThread(user,required(p.recipientId,'Recipient'),text(p.itemId));await collectorMessageAction(user,{action:'send',id,body:p.body,photoId:p.photoId});return {id};}
+  const id=required(p.id,'Conversation'),t=await threadAccess(user,id),now=Date.now();
+  if(action==='accept_request'||action==='decline_request'){if(t.recipient_id!==user||t.status!=='request')throw new ValidationError('Request unavailable.');await run("UPDATE collector_threads SET status=? WHERE id=? AND status='request'",action==='accept_request'?'accepted':'declined',id);if(action==='accept_request')await notify(t.sender_id,user,'social','Message request accepted',`/messages?thread=${id}`);return {id};}
+  if(action!=='send')throw new ValidationError('Unknown message action.');
+  if(t.status==='declined'||(t.status==='request'&&(t.sender_id!==user||await one('SELECT id FROM collector_messages WHERE thread_id=?',id))))throw new ValidationError('Wait for this message request to be accepted before sending another message.');
+  const body=required(p.body,'Message',2000),photoId=text(p.photoId)||null;
+  if(photoId&&(t.status!=='accepted'||!await one('SELECT id FROM community_media WHERE id=? AND owner_id=? AND item_id IS NULL AND post_id IS NULL AND thread_id IS NULL',photoId,user)))throw new ValidationError('Send photos after the request has been accepted.');
+  await run('INSERT INTO collector_messages (id,thread_id,owner_id,body,photo_id,created_at) VALUES (?,?,?,?,?,?)',crypto.randomUUID(),id,user,body,photoId,now);if(photoId)await run('UPDATE community_media SET thread_id=? WHERE id=?',id,photoId);await run('UPDATE collector_threads SET updated_at=? WHERE id=?',now,id);await notify(t.sender_id===user?t.recipient_id:t.sender_id,user,'social',t.status==='request'?'New message request':'New message',`/messages?thread=${id}`);return {id};
+}

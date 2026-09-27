@@ -1,5 +1,8 @@
 export type ProductSummary = {
   id: string;
+  catalogProductId?: string | null;
+  availableOfferCount?: number;
+  conditionNotes?: string;
   sellerId: string;
   sellerSlug: string;
   sellerName: string;
@@ -15,19 +18,47 @@ export type ProductSummary = {
   vehicleYear: string | null;
   color: string | null;
   condition: string;
+  modelCondition: string;
+  packagingCondition: string;
+  originalBoxStatus: string;
+  missingParts: string;
+  defects: string;
+  restorationCustomization: string;
+  material: string;
+  productNumber: string | null;
+  editionSerial: string | null;
+  coaStatus: string;
+  accessories: string;
+  provenance: string;
+  photoFrontChecked: boolean;
+  photoRearChecked: boolean;
+  photoSidesChecked: boolean;
+  photoBaseChecked: boolean;
+  photoPackagingChecked: boolean;
+  photoIssuesChecked: boolean;
   priceCents: number;
   currency: string;
   inventoryQuantity: number;
   reservedQuantity: number;
   availableQuantity: number;
+  availabilityType: "in_stock" | "preorder";
+  releaseDate: string | null;
+  saleUnit?: string | null;
+  unitsPerPack?: number | null;
   primaryImageUrl: string | null;
   keywords: string;
   defaultShippingCents: number;
+  shippingMode: "calculated" | "flat" | "free";
+  handlingTimeBusinessDays: number;
   createdAt: string;
 };
 
 export type ProductDetail = ProductSummary & {
   sellerDescription: string;
+  sellerSpecialty?: string;
+  sellerPackingApproach?: string;
+  shippingOriginRegion?: string | null;
+  shippingOriginCountry?: string;
   sellerWebsiteUrl: string | null;
   sellerLogoUrl: string | null;
   shippingPolicySummary: string;
@@ -44,6 +75,7 @@ export type CatalogResponse = {
     sellers: Array<{ id: string; name: string }>;
     conditions: string[];
   };
+  stockCounts?: { scales: Record<string, number>; manufacturers: Record<string, number> };
 };
 
 export type CartItem = {
@@ -54,11 +86,18 @@ export type CartItem = {
   title: string;
   scale: string;
   modelManufacturer: string;
+  modelCondition?: string;
+  packagingCondition?: string;
+  originalBoxStatus?: string;
+  handlingTimeBusinessDays?: number;
   imageUrl: string | null;
   priceCents: number;
   currency: string;
   availableQuantity: number;
+  availabilityType: "in_stock" | "preorder";
+  releaseDate: string | null;
   shippingCents: number;
+  shippingMode: "calculated" | "flat" | "free";
   quantity: number;
 };
 

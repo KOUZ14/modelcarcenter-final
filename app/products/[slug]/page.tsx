@@ -1,13 +1,15 @@
 import type { Metadata } from "next";
-import Link from "next/link";
-import Image from "next/image";
+import { ModelCommunity } from "@/components/model-community";
 import { notFound } from "next/navigation";
-import { getProductBySlug, getRelatedProducts } from "@/lib/catalog";
-import { ProductPurchase } from "@/components/product-purchase";
+import { getCatalogListings, getProductBySlug, getRelatedProducts } from "@/lib/catalog";
+import { TrackEvent } from "@/components/track-event";
 import { ProductCard } from "@/components/product-card";
-import { formatCondition, formatMoney } from "@/lib/format";
 import { SiteHeader } from "@/components/site-header";
 import { SiteFooter } from "@/components/site-footer";
+import { SellerReputation } from "@/components/seller-reputation";
+import { getSellerReputation } from "@/lib/reputation";
+import { ProductListingView } from "@/components/product-listing-view";
+import { ProductOtherOffers } from "@/components/product-other-offers";
 
 export const dynamic = "force-dynamic";
 
@@ -44,7 +46,12 @@ export default async function ProductPage({
 }) {
   const product = await getProductBySlug((await params).slug);
   if (!product) notFound();
-  const related = await getRelatedProducts(product);
+  const [related, reputation, catalogOffers] = await Promise.all([
+    getRelatedProducts(product),
+    getSellerReputation(product.sellerId),
+    product.catalogProductId ? getCatalogListings(product.catalogProductId) : Promise.resolve(null),
+  ]);
+  const otherOffers = catalogOffers?.listings.filter(offer => offer.id !== product.id) ?? [];
   const productJsonLd = {
     "@context": "https://schema.org",
     "@type": "Product",
@@ -57,104 +64,24 @@ export default async function ProductPage({
       "@type": "Offer",
       priceCurrency: product.currency.toUpperCase(),
       price: (product.priceCents / 100).toFixed(2),
-      availability:
-        product.availableQuantity > 0
-          ? "https://schema.org/InStock"
-          : "https://schema.org/OutOfStock",
+      availability: product.availabilityType === "preorder" ? "https://schema.org/PreOrder" : product.availableQuantity < 1 ? "https://schema.org/OutOfStock" : "https://schema.org/InStock",
       seller: { "@type": "Organization", name: product.sellerName },
     },
   };
   return (
-    <main>
+    <main className="product-detail-page">
+      <TrackEvent name="listing_viewed" />
       <SiteHeader />
-      <div className="inner-page product-page shell">
-        <nav className="breadcrumbs" aria-label="Breadcrumb">
-          <Link href="/">Marketplace</Link>
-          <span>/</span>
-          <span>{product.title}</span>
-        </nav>
-        <div className="product-detail">
-          <div className="product-gallery">
-            {product.images.map((image) => (
-              <Image
-                key={image.id}
-                src={image.url}
-                alt={
-                  image.alt ||
-                  `${product.modelManufacturer} ${product.title} model car`
-                }
-                width={1200}
-                height={1260}
-                sizes="(max-width: 1000px) 100vw, 55vw"
-                unoptimized
-              />
-            ))}
-          </div>
-          <aside className="product-summary">
-            <p className="eyebrow">
-              {product.scale} · {product.modelManufacturer}
-            </p>
-            <h1>{product.title}</h1>
-            <p className="vehicle-line">
-              {[
-                product.vehicleYear,
-                product.vehicleMake,
-                product.vehicleModel,
-                product.color,
-              ]
-                .filter(Boolean)
-                .join(" · ")}
-            </p>
-            <p className="detail-price">
-              {formatMoney(product.priceCents, product.currency)}
-            </p>
-            <p className="stock-line">
-              {product.availableQuantity === 1
-                ? "Only 1 available"
-                : `${product.availableQuantity} available`}{" "}
-              · {formatCondition(product.condition)}
-            </p>
-            <ProductPurchase product={product} />
-            <dl className="product-facts">
-              <div>
-                <dt>Seller</dt>
-                <dd>
-                  <Link href={`/sellers/${product.sellerSlug}`}>
-                    {product.sellerName}
-                  </Link>
-                  <br />
-                  {product.sellerType === "collector"
-                    ? "Individual collector"
-                    : "Professional seller"}
-                </dd>
-              </div>
-              <div>
-                <dt>Shipping</dt>
-                <dd>
-                  {product.defaultShippingCents
-                    ? `${formatMoney(product.defaultShippingCents, product.currency)} flat shipping`
-                    : "Free seller shipping"}
-                  <br />
-                  {product.shippingPolicySummary}
-                </dd>
-              </div>
-              <div>
-                <dt>Returns</dt>
-                <dd>
-                  {product.returnPolicySummary ||
-                    "See the seller's stated return policy before purchase."}
-                </dd>
-              </div>
-            </dl>
-            <div className="product-description">
-              <h2>About this model</h2>
-              <p>
-                {product.description ||
-                  "The seller has not added a longer description for this model."}
-              </p>
-            </div>
-          </aside>
-        </div>
+      <div id="main-content" tabIndex={-1} className="inner-page product-page shell">
+        <ProductListingView product={product} />
+        {product.catalogProductId && <ProductOtherOffers catalogId={product.catalogProductId} offers={otherOffers} totalOffers={catalogOffers?.listings.length ?? 0} />}
+        {reputation && (
+          <SellerReputation
+            reputation={reputation}
+            sellerSlug={product.sellerSlug}
+            compact
+          />
+        )}
         {related.length > 0 && (
           <section className="related-section">
             <div className="section-heading">
@@ -168,6 +95,7 @@ export default async function ProductPage({
             </div>
           </section>
         )}
+        {product.catalogProductId && <ModelCommunity catalogId={product.catalogProductId} preview />}
       </div>
       <script
         type="application/ld+json"
