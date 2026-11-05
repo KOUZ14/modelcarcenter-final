@@ -20,31 +20,38 @@
     "db:seed:beta": "node scripts/seed-beta.mjs"
   },
   "dependencies": {
-    "@better-auth/drizzle-adapter": "1.7.1",
-    "better-auth": "1.7.1",
+    "@better-auth/drizzle-adapter": "1.7.14",
+    "@cf-wasm/photon": "0.4.0",
+    "better-auth": "1.7.14",
     "drizzle-orm": "0.45.2",
-    "next": "16.3.1",
+    "image-size": "2.0.4",
+    "next": "16.4.3",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "1.53.1",
+    "@cloudflare/vite-plugin": "1.66.0",
     "@tailwindcss/postcss": "4.2.1",
     "@types/node": "22.19.19",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.2",
     "@vitejs/plugin-rsc": "0.5.34",
-    "auth": "1.7.1",
-    "drizzle-kit": "0.31.10",
+    "auth": "1.7.14",
+    "drizzle-kit": "0.31.11",
     "eslint": "9.39.4",
-    "eslint-config-next": "16.3.1",
+    "eslint-config-next": "16.4.3",
     "react-server-dom-webpack": "19.2.8",
     "tailwindcss": "4.2.1",
     "typescript": "5.9.3",
-    "vinext": "1.0.0-beta.8",
-    "vite": "8.2.2",
-    "wrangler": "4.125.0"
+    "vinext": "1.0.0",
+    "vite": "8.3.5",
+    "wrangler": "4.154.0"
+  },
+  "overrides": {
+    "@esbuild-kit/core-utils": { "esbuild": "0.28.2" },
+    "satori": { "fflate": "0.7.5" },
+    "@typescript-eslint/typescript-estree": { "minimatch": "11.0.3" }
   },
   "type": "module",
   "displayName": "Model Car Center"

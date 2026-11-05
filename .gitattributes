@@ -2,3 +2,7 @@ drizzle/0031_community_guards.sql text eol=lf
 drizzle/0032_preorder_deposits.sql text eol=lf
 drizzle/0033_deposit_settlements.sql text eol=lf
 drizzle/0034_preorder_refund_concurrency.sql text eol=lf
+drizzle/0039_better_auth_account_identity.sql text eol=lf
+
+# Bash scripts must remain executable by Linux/WSL after a Windows checkout.
+*.sh text eol=lf

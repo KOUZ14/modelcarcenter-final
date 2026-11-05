@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile, readdir } from "node:fs/promises";
+import { access, readFile, readdir } from "node:fs/promises";
 import { extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
@@ -13,6 +13,23 @@ async function collectJavaScript(directory) {
   }
   return files;
 }
+
+test("RSC preload manifests only reference emitted client assets", async () => {
+  for (const relative of ["server/__vite_rsc_assets_manifest.js", "server/ssr/__vite_rsc_assets_manifest.js"]) {
+    const { default: manifest } = await import(new URL(`../dist/${relative}`, import.meta.url));
+    const urls = new Set();
+    function visit(value) {
+      if (typeof value === "string" && value.startsWith("/_next/")) urls.add(value);
+      else if (value && typeof value === "object") Object.values(value).forEach(visit);
+    }
+    visit(manifest);
+    assert.ok(urls.size > 0, `${relative}: asset URLs are present`);
+    for (const url of urls) {
+      const asset = new URL(`../dist/client${url}`, import.meta.url);
+      await assert.doesNotReject(access(asset), `${relative}: missing client asset ${url}`);
+    }
+  }
+});
 
 test("the built artifact contains the real marketplace and no starter preview marker", async () => {
   const dist = fileURLToPath(new URL("../dist/", import.meta.url));

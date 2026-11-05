@@ -24,6 +24,17 @@ export function sites(): Plugin {
     configResolved(config) {
       root = config.root;
     },
+    outputOptions: {
+      order: "post",
+      handler(output) {
+        // Vinext's server manifests use relative external imports. Keep Worker
+        // chunks beside those root-level manifests; client asset paths retain
+        // Vinext's defaults. This also covers manifests written after bundling.
+        if (this.environment?.name === "rsc") {
+          return { ...output, chunkFileNames: "[name]-[hash].js" };
+        }
+      },
+    },
     async closeBundle() {
       const outputDirectory = resolve(root, "dist", ".openai");
       const hostingConfig = resolve(root, ".openai", "hosting.json");
