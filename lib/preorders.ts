@@ -1,8 +1,9 @@
+import { assertSellerCompliance } from "./seller-compliance";
 import { and, asc, desc, eq } from "drizzle-orm";
 import { getD1, getDb } from "@/db";
 import { incomingBatches, preorderEvents, preorderPolicies, preorderReservations, preorderSellerAccess, products, sellers } from "@/db/schema";
 import { prepareListingCatalog, persistCatalogListing } from "./catalog-products";
-import { PREORDER_POLICY, PREORDER_TERMS, capacitySummary, dateWindow, instant, required, whole, type PreorderTerms } from "./preorder-rules";
+import { DEPOSIT_PREORDER_POLICY, PREORDER_POLICY, PREORDER_TERMS, capacitySummary, dateWindow, instant, required, whole, type PreorderTerms } from "./preorder-rules";
 import { isEmail, moneyToCents, ValidationError } from "./validation";
 import { POLICY_VERSION, sellerAcceptedCurrentTerms } from "./legal";
 import { parseCheckoutShippingAddress } from "./shipping-rules";
@@ -95,7 +96,7 @@ export async function publicPreorderOffers(listingId: string) {
     const [access] = await getDb().select().from(preorderSellerAccess).where(eq(preorderSellerAccess.sellerId,seller.id)).limit(1);
     const [policy] = await getDb().select().from(preorderPolicies).where(eq(preorderPolicies.version,terms.policyVersion)).limit(1);
     const deposit = terms.paymentModel === "deposit_10";
-    const canReserve = Boolean((deposit || access?.approved) && policy?.enabled && sellerAcceptedCurrentTerms(seller) && seller.stripeChargesEnabled && seller.stripePayoutsEnabled && batch.status === "open" && (deposit || batch.evidenceState === "reviewed") && batch.shortage === 0 && totals.remaining > 0 && terms.priceCents > 0 && batch.dispatchEnd && batch.dispatchEnd > now() && batch.opensAt <= now() && batch.cutoffAt > new Date(Date.now()+(deposit ? 35*60000 : 0)).toISOString() && ["expected","in_transit"].includes(batch.supplyState));
+    const canReserve = Boolean((!deposit || terms.policyVersion === DEPOSIT_PREORDER_POLICY) && (deposit || access?.approved) && policy?.enabled && sellerAcceptedCurrentTerms(seller) && seller.stripeChargesEnabled && seller.stripePayoutsEnabled && batch.status === "open" && (deposit || batch.evidenceState === "reviewed") && batch.shortage === 0 && totals.remaining > 0 && terms.priceCents > 0 && batch.dispatchEnd && batch.dispatchEnd > now() && batch.opensAt <= now() && batch.cutoffAt > new Date(Date.now()+(deposit ? 35*60000 : 0)).toISOString() && ["expected","in_transit"].includes(batch.supplyState));
     return { id: batch.id, terms, remaining: canReserve ? totals.remaining : 0, canReserve, supplyState: batch.supplyState, cutoffAt: batch.cutoffAt, timezone: batch.timezone, evidenceReviewed: batch.evidenceState === "reviewed" };
   }));
 }
@@ -110,6 +111,7 @@ export async function holdPreorder(user: { id: string; email: string }, input: R
   if (!batch) throw new ValidationError("Incoming batch not found.");
   const [offer] = (await publicPreorderOffers(batch.listingId)).filter(o=>o.id===batch.id);
   if (!offer?.canReserve) throw new ValidationError("This offer currently accepts interest only.");
+  await assertSellerCompliance(offer.terms.sellerId);
   if (Number(input.revision) !== batch.revision) throw new ValidationError("The offer changed. Refresh and review its current terms.");
   if (termsOf(batch).paymentModel === "deposit_10") holdMinutes = Math.max(35,holdMinutes);
   const id = crypto.randomUUID();
@@ -150,7 +152,7 @@ export async function cancelPreorder(id: string, actor: string, reason: string, 
       (status IN ('allocated','awaiting_payment') AND payment_deadline <= strftime('%Y-%m-%dT%H:%M:%fZ','now')))` : ""}`).bind(expired?"expired":"cancelled",expired?1:0,reason,actor,now(),id).run();
   if (result.meta.changes && before && termsOf(before).paymentModel === "deposit_10") {
     const [batch] = await getDb().select().from(incomingBatches).where(eq(incomingBatches.id,before.batchId)).limit(1);
-    if (before.consentState === "required" || (before.status === "reserved" && batch.dispatchEnd && batch.dispatchEnd <= now()) || batch.supplyState === "cancelled" || ["seller_refund","supplier_shortage","seller_failure","manufacturer_cancelled","material_product_change","deposit_not_confirmed","deposit_refunded"].includes(reason)) {
+    if (termsOf(before).policyVersion === DEPOSIT_PREORDER_POLICY || before.consentState === "required" || (before.status === "reserved" && batch.dispatchEnd && batch.dispatchEnd <= now()) || batch.supplyState === "cancelled" || ["seller_refund","supplier_shortage","seller_failure","manufacturer_cancelled","material_product_change","deposit_not_confirmed","deposit_refunded"].includes(reason)) {
       const {requestDepositRefund}=await import("./preorder-deposits");
       await requestDepositRefund(id,actor,reason);
     }

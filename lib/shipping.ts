@@ -506,6 +506,7 @@ async function applyOrderTrackingStatus(input: {
   if (!["in_transit", "delivered"].includes(input.nextStatus)) return;
   const rows = await getDb().select().from(orders).where(inArray(orders.id, input.orderIds));
   for (const order of rows) {
+    if (order.fulfillmentStatus === "cancelled" || await getD1().prepare("SELECT 1 FROM order_shipping_delays WHERE order_id=? AND status IN ('cancel_requested','refunding','refunded')").bind(order.id).first()) continue;
     // A combined shipment can contain orders with different sold-under terms.
     const deliveryDeadline = input.nextStatus === "delivered"
       ? reportDeadlineForOrder({ ...order, deliveredAt: order.deliveredAt ?? input.eventAt }) : null;

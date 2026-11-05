@@ -89,15 +89,11 @@ export async function depositScenarios({t,api,sqlite,row,all,buyer,buyer2,sessio
     setRefundOutcome('succeeded');
   });
 
-  await t.test('buyer cancellation retains the deposit; the seller can refund it even after settlement',async()=>{
+  await t.test('new refundable deposits return the full payment on buyer cancellation, once',async()=>{
     const r=await reserve(await make());await api.updateBuyerPreorder(buyer.id,r.id,{action:'cancel'});await api.recoverPreorderRefunds();
-    assert.equal(ledger(r.id).refund_status,'not_required');assert.equal(refundsFor(r).length,0);
-    sqlite.prepare("UPDATE preorder_reservations SET updated_at='2000-01-01T00:00:00.000Z' WHERE id=?").run(r.id);
-    const before=transfers.size;await api.settleForfeitedPreorderDeposits();await api.settleForfeitedPreorderDeposits();assert.equal(transfers.size,before+1);
-    const checkout=row('SELECT * FROM preorder_deposit_checkouts WHERE reservation_id=?',r.id);assert.ok(checkout.seller_transfer_amount_cents>0);
-    const reversalsBefore=reversals.size;await api.refundPreorderDeposit('owner',r.id,'Seller courtesy refund');await api.recoverPreorderRefunds();
-    assert.equal(ledger(r.id).refund_status,'succeeded');assert.equal(refundsFor(r).length,1);assert.equal(reversals.size,reversalsBefore+1);
-    assert.equal(row('SELECT seller_transfer_reversed_cents n FROM preorder_deposit_checkouts WHERE reservation_id=?',r.id).n,checkout.seller_transfer_amount_cents);
+    assert.equal(ledger(r.id).refund_status,'succeeded');assert.equal(refundsFor(r).length,1);assert.equal(refundsFor(r)[0].amount,305);
+    const before=transfers.size;await api.settleForfeitedPreorderDeposits();await api.settleForfeitedPreorderDeposits();assert.equal(transfers.size,before);
+    await api.recoverPreorderRefunds();assert.equal(refundsFor(r).length,1);
   });
 
   await t.test('seller cancellation, declined delays and unavailable stock return the full deposit',async()=>{
@@ -110,12 +106,12 @@ export async function depositScenarios({t,api,sqlite,row,all,buyer,buyer2,sessio
     }
   });
 
-  await t.test('missing a ready-stock payment deadline retains the deposit and releases inventory',async()=>{
+  await t.test('missing a ready-stock payment deadline queues a full deposit refund and releases inventory',async()=>{
     const b=await make(),r=await reserve(b);await ready(b);
     sqlite.prepare("UPDATE preorder_reservations SET payment_deadline='2000-01-01T00:00:00.000Z' WHERE id=?").run(r.id);
     await api.cancelPreorder(r.id,'system','response_deadline_expired',true);
     assert.equal((await api.buyerReservation(buyer.id,r.id)).reason,'payment_deadline_expired');
-    assert.equal(ledger(r.id).refund_status,'not_required');assert.equal(row('SELECT reserved_quantity n FROM products WHERE id=?',b.listingId).n,0);
+    assert.equal(ledger(r.id).refund_status,'required');await api.recoverPreorderRefunds();assert.equal(ledger(r.id).refunded_cents,305);assert.equal(row('SELECT reserved_quantity n FROM products WHERE id=?',b.listingId).n,0);
   });
 
   await t.test('cancellation records a refund obligation even if the request ends before recovery runs',async()=>{
@@ -152,4 +148,20 @@ export async function depositScenarios({t,api,sqlite,row,all,buyer,buyer2,sessio
     const reopened={...event,id:'evt_dep_reopened'};assert.equal(await api.processPreorderDepositStripeEvent(reopened),null);await api.processStripeEvent(reopened);
     assert.equal(row("SELECT order_id id FROM disputes WHERE id='dp_dep'").id,order.id);
   });
+  await t.test('deleting an account preserves a paid deposit and recovery requires the original verified email',async()=>{
+    const r=await reserve(await make());const before=row('SELECT terms,status FROM preorder_reservations WHERE id=?',r.id);
+    await api.updateBuyerPreorder(buyer.id,r.id,{action:'contact',email:'alternate@example.test'});
+    await api.deleteCollectorAccount(buyer.id);
+    assert.equal(row('SELECT status FROM preorder_reservations WHERE id=?',r.id).status,before.status);
+    assert.equal(ledger(r.id).refund_status,'not_required');
+    sqlite.prepare("INSERT INTO user(id,name,email,email_verified,created_at,updated_at) VALUES('recovered','Recovered',?,1,0,0),('wrong-contact','Other','alternate@example.test',1,0,0)").run(buyer.email);
+    await api.claimGuestDataForUser({id:'wrong-contact',email:'alternate@example.test',emailVerified:true});
+    assert.equal(row('SELECT buyer_user_id id FROM preorder_reservations WHERE id=?',r.id).id,null);
+    await api.claimGuestDataForUser({id:'recovered',email:buyer.email,emailVerified:false});
+    assert.equal(row('SELECT buyer_user_id id FROM preorder_reservations WHERE id=?',r.id).id,null);
+    await api.claimGuestDataForUser({id:'recovered',email:buyer.email,emailVerified:true});
+    assert.equal((await api.buyerReservation('recovered',r.id)).terms,before.terms);
+    assert.throws(()=>sqlite.prepare("UPDATE preorder_reservations SET buyer_user_id='wrong-contact' WHERE id=?").run(r.id),/immutable/);
+  });
+
 }

@@ -1,4 +1,5 @@
 "use client";
+import { prepareUploadPhoto } from "@/lib/upload-client";
 
 import Image from "next/image";
 import Link from "next/link";
@@ -85,9 +86,15 @@ export function ResolutionCenter({
     setError("");
     setMessage("");
     try {
+      const form = new FormData(event.currentTarget);
+      for (const key of new Set(form.keys())) {
+        const values = form.getAll(key);
+        form.delete(key);
+        for (const value of values) form.append(key, value instanceof File && ["image/jpeg", "image/png", "image/webp"].includes(value.type) && value.size ? await prepareUploadPhoto(value) : value);
+      }
       const response = await fetch("/api/resolution", {
         method: "POST",
-        body: new FormData(event.currentTarget),
+        body: form,
       });
       const text = await response.text();
       let body: { error?: string } = {};
@@ -206,7 +213,7 @@ function ReportProblem({
     return (
       <div className="resolution-empty">
         <h2>We couldn&apos;t find an eligible order on this account.</h2>
-        <p>{orders.length ? "An order may already have a support request, be past its reporting deadline, or have no payment left to refund." : "Check your order confirmation, or ask support to help find your purchase."}</p>
+        <p>{orders.length ? "An order may already have a support request, or have no payment left to refund." : "Check your order confirmation, or ask support to help find your purchase."}</p>
         <div className="resolution-recovery-actions">
           <Link className="button dark" href="/account?view=orders">Find an order</Link>
           <Link className="button outline" href="/contact">Contact support</Link>
@@ -235,7 +242,8 @@ function ReportProblem({
             ))}
           </select>
         </label>
-        {selectedOrder && <OrderProtectionSummary order={selectedOrder} compact/>}
+        {selectedOrder && <><OrderProtectionSummary order={selectedOrder} compact/><a href={selectedOrder.evidenceUrl} target="_blank" rel="noreferrer">View retained purchase evidence</a></>}
+        {selectedOrder?.requiresReview && <label>Why are you requesting review after the standard deadline?<textarea name="reviewReason" required maxLength={2000} placeholder="Tell us when you discovered the problem and about any warranty, seller promise, or legal right. This request needs individual review." /></label>}
         <label>
           Problem
           <select name="reason" required defaultValue="damaged">

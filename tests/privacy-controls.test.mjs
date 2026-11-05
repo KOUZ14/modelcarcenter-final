@@ -143,8 +143,8 @@ test("account deletion removes optional email data before removing the verified 
     assert.equal(sqlite.prepare("SELECT status FROM sellers WHERE id='seller-1'").get().status, "suspended");
     assert.equal(sqlite.prepare("SELECT status FROM products WHERE id='product-2'").get().status, "active");
     assert.equal(sqlite.prepare("SELECT count(*) AS n FROM orders").get().n, 1);
-    assert.equal(sqlite.prepare("SELECT status FROM preorder_reservations").get().status, "cancelled");
-    assert.equal(sqlite.prepare("SELECT allocated_quantity FROM preorder_reservations").get().allocated_quantity, 0);
+    assert.equal(sqlite.prepare("SELECT status FROM preorder_reservations").get().status, "awaiting_payment");
+    assert.equal(sqlite.prepare("SELECT allocated_quantity FROM preorder_reservations").get().allocated_quantity, 1);
     assert.equal(sqlite.prepare("SELECT status FROM preorder_waitlist").get().status, "cancelled");
     assert.equal(sqlite.prepare("SELECT status FROM collection_offers WHERE id='offer-1'").get().status, "withdrawn");
     assert.equal(sqlite.prepare("SELECT status FROM collection_offers WHERE id='offer-paid'").get().status, "completed");

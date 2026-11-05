@@ -8,7 +8,7 @@ export function OrderProtectionSummary({ order, compact = false }: { compact?: b
   const deadlineTime = <time dateTime={deadline}>{new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" }).format(new Date(deadline))} UTC</time>;
   const details = <>
     <p>{order.deliveredAt ? `${policy.deliveredDays} calendar days after confirmed delivery.` : `Current non-delivery deadline. Once delivery is confirmed, the deadline becomes ${policy.deliveredDays} calendar days after delivery.`} Damage, non-delivery or a materially inaccurate listing can qualify for protection. The seller pays reasonable authorized return shipping for covered problems.</p>
-    <p>Change-of-mind returns depend on the seller’s policy shown before purchase; the buyer normally pays return shipping. Open cases keep their own displayed response and return deadlines. <Link href="/returns">Return details</Link> · <Link href="/protection">Protection rules</Link></p>
+    <p>Change-of-mind returns depend on the seller’s policy shown before purchase; the buyer normally pays return shipping. You can still request individual review after the standard deadline for legal rights, warranties, longer seller promises, or problems discovered later. Open cases keep their own displayed response and return deadlines. <Link href="/shipping/requests">Shipping delays &amp; preorder cancellation</Link> ? <Link href="/returns">Return details</Link> · <Link href="/protection">Protection rules</Link></p>
   </>;
   return <aside className={`${styles.summary}${compact ? ` ${styles.compactSummary}` : ""}`} aria-label="Order protection deadline">
     <strong>{compact ? "Open an MCC request by " : "Report an order problem by "}{deadlineTime}</strong>

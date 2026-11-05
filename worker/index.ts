@@ -1,6 +1,9 @@
 /** Cloudflare Worker entry point for the vinext-starter template. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
+import { processShippingDelays, deliverLegalNotices } from "../lib/consumer-shipping";
+import { processSellerCompliance } from "../lib/seller-compliance";
+import { reconcileCounterNotices } from "../lib/compliance-admin";
 import { processResolutionNotifications } from "../lib/resolution-notifications";
 import { processEligibleSellerTransfers } from "../lib/seller-transfers";
 import { config } from "../lib/config";
@@ -98,6 +101,10 @@ const worker = {
 
 async function runScheduledMaintenance(database: D1Database, storage: R2Bucket, now: Date) {
   try {
+    await processShippingDelays(now);
+    await processSellerCompliance(now);
+    await deliverLegalNotices();
+    await reconcileCounterNotices();
     const [notifications, transfers, , , promotions] = await Promise.all([
       processResolutionNotifications({ database, now }),
       processEligibleSellerTransfers({ database, now }),

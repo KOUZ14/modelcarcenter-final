@@ -90,7 +90,7 @@ test("order support keeps recovery routes and time-sensitive request actions ava
     const view = renderer({ data: data([request("existing")], [order("expired", { eligible: false })]) });
     button(view.render(), "Choose an order").props.onClick();
     const tree = view.render();
-    assert.match(text(tree), /past its reporting deadline/);
+    assert.match(text(tree), /no payment left to refund/);
     assert.ok(find(tree, node => node.type === "a" && text(node) === "Find an order"));
     button(tree, "← View your support requests").props.onClick();
     assert.match(text(view.render()), /REQUEST-existing/);

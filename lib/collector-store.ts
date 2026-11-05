@@ -64,9 +64,11 @@ export async function claimGuestDataForUser(user: VerifiedCollectorUser) {
     d1
       .prepare(
         `UPDATE orders SET buyer_user_id = ?, updated_at = CURRENT_TIMESTAMP
-      WHERE buyer_user_id IS NULL AND lower(trim(buyer_email)) = ?`,
+      WHERE buyer_user_id IS NULL AND (
+        EXISTS(SELECT 1 FROM order_recovery_owners r WHERE r.order_id=orders.id AND r.owner_email=?)
+        OR (NOT EXISTS(SELECT 1 FROM order_recovery_owners r WHERE r.order_id=orders.id) AND lower(trim(buyer_email))=?))`,
       )
-      .bind(user.id, email),
+      .bind(user.id, email, email),
     d1
       .prepare(
         `UPDATE wanted_requests SET user_id = ?
@@ -74,6 +76,10 @@ export async function claimGuestDataForUser(user: VerifiedCollectorUser) {
       )
       .bind(user.id, email),
   ]);
+  await d1.prepare(`UPDATE sellers SET owner_user_id=? WHERE owner_user_id IS NULL AND seller_type='collector'
+    AND id IN (SELECT seller_id FROM seller_recovery_owners WHERE owner_email=?)`).bind(user.id,email).run();
+  await d1.prepare(`UPDATE preorder_reservations SET buyer_user_id=? WHERE buyer_user_id IS NULL
+    AND id IN (SELECT reservation_id FROM preorder_recovery_owners WHERE owner_email=?)`).bind(user.id,email).run();
   return {
     orders: Number(orderResult.meta?.changes ?? 0),
     hunts: Number(huntResult.meta?.changes ?? 0),
@@ -590,9 +596,8 @@ export async function deleteCollectorAccount(userId: string) {
   const d1 = getD1();
   await d1.batch([
     d1.prepare("UPDATE collection_offers SET status='withdrawn' WHERE (buyer_id=? OR owner_id=?) AND status IN ('proposed','reserved')").bind(userId,userId),
-    // End unpaid promises and release inspected stock before unlinking the user.
-    // Accepted commercial evidence remains available for service and refunds.
-    d1.prepare("UPDATE preorder_reservations SET status='cancelled',allocated_quantity=0,actor=?,reason='account_deleted',updated_at=CURRENT_TIMESTAMP WHERE buyer_user_id=? AND status IN ('hold','reserved','allocated','awaiting_payment')").bind(userId,userId),
+    // Account deletion does not cancel purchases or authorize deposit retention.
+    // Recovery ownership was captured from the original sign-in identity.
     d1.prepare("UPDATE preorder_waitlist SET status='cancelled' WHERE buyer_user_id=? AND status IN ('waiting','invited')").bind(userId),
     // Remove optional/guest records before deleting the account's verified email.
     d1.prepare("DELETE FROM community_subscribers WHERE lower(email) = (SELECT lower(email) FROM user WHERE id = ?)").bind(userId),

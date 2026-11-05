@@ -53,7 +53,7 @@ export async function putManagedUpload(input: { database: D1Database; storage: S
 
 export async function deleteManagedUpload(database: D1Database, storage: Pick<Storage, "delete">, key: string) {
   await database.prepare("INSERT OR IGNORE INTO security_uploads(storage_key,owner_id,size_bytes,created_at) VALUES(?,'legacy-retention-guard',0,?)").bind(key,Date.now()).run();
-  const claim=await database.prepare("UPDATE security_uploads SET state='deleting' WHERE storage_key=? AND state!='deleted' RETURNING storage_key").bind(key).first();
+  const claim=await database.prepare("UPDATE security_uploads SET state='deleting' WHERE storage_key=? AND state!='deleted' AND NOT EXISTS(SELECT 1 FROM purchase_evidence_media WHERE storage_key=?) RETURNING storage_key").bind(key,key).first();
   if (!claim) return;
   await storage.delete(key);
   // Tombstones prevent late attachment of an expired URL after object deletion.
@@ -69,6 +69,7 @@ export async function deleteManagedUpload(database: D1Database, storage: Pick<St
 export async function pruneManagedUploads(database: D1Database, storage: Pick<Storage, "delete">, now = Date.now()) {
   const result = await database.prepare(`UPDATE security_uploads SET state='deleting' WHERE storage_key IN (
     SELECT u.storage_key FROM security_uploads u WHERE u.created_at < ? AND u.state!='deleted'
+      AND NOT EXISTS(SELECT 1 FROM purchase_evidence_media WHERE storage_key=u.storage_key)
       AND NOT EXISTS(SELECT 1 FROM product_images WHERE storage_key=u.storage_key)
       AND NOT EXISTS(SELECT 1 FROM products WHERE primary_image_url='/media/' || u.storage_key)
       AND NOT EXISTS(SELECT 1 FROM resolution_files WHERE storage_key=u.storage_key)

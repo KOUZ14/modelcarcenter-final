@@ -1,0 +1,18 @@
+import Link from "next/link";
+import { requireCollector } from "@/lib/collector-auth";
+import { getD1 } from "@/db";
+import { PolicyPage } from "@/components/policy-page";
+import { ComplianceForm } from "@/components/compliance-form";
+export const dynamic="force-dynamic";
+export default async function ShippingRequestsPage() {
+  const {user}=await requireCollector('/shipping/requests'),db=getD1();
+  const requests=await db.prepare(`SELECT d.*,o.order_number,o.buyer_user_id FROM order_shipping_delays d JOIN orders o ON o.id=d.order_id JOIN sellers s ON s.id=o.seller_id WHERE o.buyer_user_id=? OR s.owner_user_id=? ORDER BY d.created_at DESC LIMIT 100`).bind(user.id,user.id).all<{id:string;order_number:string;buyer_user_id:string;status:string;reason:string;proposed_at:string;response_by:string;error:string|null}>();
+  const unshipped=await db.prepare(`SELECT o.id,o.order_number FROM orders o JOIN sellers s ON s.id=o.seller_id WHERE s.owner_user_id=? AND o.shipped_at IS NULL AND o.payment_status IN ('paid','partially_refunded') AND o.fulfillment_status IN ('unfulfilled','processing')`).bind(user.id).all<{id:string;order_number:string}>();
+  const preorders=await db.prepare(`SELECT o.id,o.order_number FROM orders o JOIN preorder_reservations r ON r.order_id=o.id WHERE o.buyer_user_id=? AND o.shipped_at IS NULL AND o.payment_status IN ('paid','partially_refunded') AND o.fulfillment_status IN ('unfulfilled','processing') AND json_extract(r.terms,'$.policyVersion')='mcc-preorder-deposit-2026-09-v3'`).bind(user.id).all<{id:string;order_number:string}>();
+  return <PolicyPage title="Shipping requests" intro="Review revised ship dates and manage cancellations before shipment."><Link href="/account?view=orders">My orders</Link>
+    {(requests.results??[]).map(r=><section key={r.id}><h2>{r.order_number}: {r.status.replaceAll('_',' ')}</h2><p>{r.reason}</p><p>Proposed ship date: {r.proposed_at}. Respond by: {r.response_by}.</p>{r.status==='pending'&&r.buyer_user_id===user.id&&<><p>Without your explicit acceptance by the deadline, the unshipped order will be cancelled and refunded.</p><ComplianceForm endpoint="/api/shipping/requests" values={{id:r.id,action:'accept'}} label="Accept revised ship date"/><ComplianceForm endpoint="/api/shipping/requests" values={{id:r.id,action:'cancel'}} label="Cancel and request full refund"/></>}{r.error&&<p>Support is reviewing this request. Contact us with your order number.</p>}</section>)}
+    {!!unshipped.results?.length&&<section><h2>Request a shipping delay</h2><ComplianceForm endpoint="/api/shipping/requests" values={{action:'request'}} label="Notify buyer"><label>Order<select name="orderId">{unshipped.results.map(o=><option key={o.id} value={o.id}>{o.order_number}</option>)}</select></label><label>Revised ship date and timezone<input name="proposedAt" required placeholder="2026-10-15T23:59:00-07:00"/></label><label>Reason and basis for the revised estimate<textarea name="reason" required maxLength={2000}/></label><p>Send before the existing deadline. Silence is not consent. Do not ship while cancellation or refund is pending.</p></ComplianceForm></section>}
+    {!!preorders.results?.length&&<section><h2>Cancel a paid preorder before shipment</h2><ComplianceForm endpoint="/api/shipping/requests" values={{action:'cancel_preorder'}} label="Cancel and request full refund"><label>Order<select name="orderId">{preorders.results.map(o=><option key={o.id} value={o.id}>{o.order_number}</option>)}</select></label><p>These orders were purchased under the refundable preorder policy. All payments, including the deposit, are returned to the original payment methods.</p></ComplianceForm></section>}
+    {!requests.results?.length&&<p>No shipping-delay requests.</p>}
+  </PolicyPage>;
+}

@@ -1,8 +1,9 @@
 // Immutable order terms. A longer window requires a separate approved version.
 export const LEGACY_PROTECTION_POLICY_VERSION = "delivery-3-v1";
-export const ACTIVE_PROTECTION_POLICY_VERSION = LEGACY_PROTECTION_POLICY_VERSION;
+export const ACTIVE_PROTECTION_POLICY_VERSION = "delivery-14-v2";
 export const protectionPolicies = {
   "delivery-3-v1": { deliveredDays: 3, shipmentDays: 30, paymentDays: 45 },
+  "delivery-14-v2": { deliveredDays: 14, shipmentDays: 30, paymentDays: 45 },
 } as const;
 export function protectionPolicyForOrder(order: { protectionPolicyVersion?: string | null }) {
   const version = order.protectionPolicyVersion || LEGACY_PROTECTION_POLICY_VERSION;
@@ -100,9 +101,10 @@ export function canReportOrderProblem(
   }
   if (now.getTime() > new Date(reportDeadline).getTime()) {
     return {
-      eligible: false,
+      eligible: true,
+      requiresReview: true,
       reportDeadline,
-      reason: "The order-level reporting window has ended.",
+      reason: "The standard window has ended. Request review for a legal right, warranty, longer seller return promise, or problem discovered later.",
     };
   }
   return { eligible: true, reportDeadline, reason: "" };

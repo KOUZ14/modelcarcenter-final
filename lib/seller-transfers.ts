@@ -95,6 +95,7 @@ export async function processEligibleSellerTransfers(input: {
             SELECT 1 FROM resolution_cases rc
             WHERE rc.order_id = o.id
               AND rc.status NOT IN ('resolved', 'closed', 'denied')
+              AND NOT EXISTS (SELECT 1 FROM resolution_late_reviews lr WHERE lr.case_id=rc.id AND lr.payout_hold=0)
           )
           AND NOT EXISTS (
             SELECT 1 FROM disputes d
@@ -146,6 +147,7 @@ export async function processEligibleSellerTransfers(input: {
               SELECT 1 FROM resolution_cases rc
               WHERE rc.order_id = orders.id
                 AND rc.status NOT IN ('resolved', 'closed', 'denied')
+              AND NOT EXISTS (SELECT 1 FROM resolution_late_reviews lr WHERE lr.case_id=rc.id AND lr.payout_hold=0)
             )
             AND NOT EXISTS (
               SELECT 1 FROM disputes d

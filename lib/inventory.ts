@@ -1,3 +1,4 @@
+import { assertSellerCompliance } from "./seller-compliance";
 import { logSecurityEvent } from "./security-events.ts";
 import { ACTIVE_PROTECTION_POLICY_VERSION } from "./protection";
 import { and, eq, inArray, lt, or, sql } from "drizzle-orm";
@@ -39,6 +40,10 @@ export async function loadAuthoritativeCartItems(items: RequestedCartItem[], all
       shipFromAddressId: products.shipFromAddressId,
       title: products.title,
       description: products.description,
+      listingUpdatedAt: products.updatedAt,
+      sellerReturnPolicy: sellers.returnPolicySummary,
+      sellerShippingPolicy: sellers.shippingPolicySummary,
+      handlingTimeBusinessDays: sellers.handlingTimeBusinessDays,
       sellerSku: products.sellerSku,
       scale: products.scale,
       manufacturer: products.modelManufacturer,
@@ -86,6 +91,7 @@ export async function loadAuthoritativeCartItems(items: RequestedCartItem[], all
     .leftJoin(sellerAddresses, eq(products.shipFromAddressId, sellerAddresses.id))
     .where(inArray(products.id, [...consolidated.keys()]));
   if (rows.length !== consolidated.size) throw new Error("One or more products no longer exist.");
+  if (!allocatedPreorder) for (const id of new Set(rows.map(row=>row.sellerId))) await assertSellerCompliance(id);
   for (const row of rows) {
     const quantity = consolidated.get(row.id)!;
     if ((!allocatedPreorder && (row.status !== "active" || row.sellerStatus !== "active")) || (allocatedPreorder && !["active", "suspended"].includes(row.sellerStatus))) throw new Error(`${row.title} is no longer available.`);
@@ -189,8 +195,8 @@ export function buildCartReservation(
        checkout_shipping_quote_id, selected_shipping_rate_id, selected_shipping_carrier,
        selected_shipping_service, selected_shipping_service_token, selected_shipping_estimated_days,
        quoted_shipping_address, ship_from_address, marketplace_fee_bps, platform_fee_cents, currency,
-       policy_version, policy_accepted_at, expires_at, checkout_group_id, combined_shipping_request_id, protection_policy_version)
-      VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?)`)
+       policy_version, policy_accepted_at, expires_at, checkout_group_id, combined_shipping_request_id, protection_policy_version, existing_commitment)
+      VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?)`)
       .bind(
         reservationId,
         input.seller.sellerId,
@@ -214,10 +220,12 @@ export function buildCartReservation(
         checkoutGroupId,
         shipping?.combinedShippingRequestId ?? null,
         ACTIVE_PROTECTION_POLICY_VERSION,
+        allocatedPreorder ? 1 : 0,
       ),
     d1.prepare(`UPDATE sellers SET
-      default_shipping_cents = CASE WHEN status = 'active' OR (? = 1 AND status = 'suspended') THEN default_shipping_cents ELSE -1 END
-      WHERE id = ?`).bind(allocatedPreorder ? 1 : 0, input.seller.sellerId),
+      default_shipping_cents = CASE WHEN (status = 'active' OR (? = 1 AND status = 'suspended'))
+        AND (?=1 OR (seller_terms_version=? AND return_policy_summary=? AND shipping_policy_summary=? AND handling_time_business_days=?)) THEN default_shipping_cents ELSE -1 END
+      WHERE id = ?`).bind(allocatedPreorder ? 1 : 0, allocatedPreorder ? 1 : 0,input.seller.sellerTermsVersion,input.seller.sellerReturnPolicy,input.seller.sellerShippingPolicy,input.seller.handlingTimeBusinessDays,input.seller.sellerId),
   ];
   if (shipping?.combinedShippingRequestId) {
     statements.push(d1.prepare(`UPDATE combined_shipping_requests SET status = CASE
@@ -233,9 +241,9 @@ export function buildCartReservation(
   }
   for (const item of input.items) {
     if (!allocatedPreorder) statements.push(d1.prepare(`UPDATE products SET
-        reserved_quantity = CASE WHEN status = 'active' THEN reserved_quantity + ? ELSE -1 END,
+        reserved_quantity = CASE WHEN status = 'active' AND price_cents=? AND title=? AND description=? AND updated_at=? THEN reserved_quantity + ? ELSE -1 END,
         updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?`).bind(item.quantity, item.id));
+        WHERE id = ?`).bind(item.priceCents,item.title,item.description,item.listingUpdatedAt,item.quantity, item.id));
     statements.push(
       d1.prepare(`INSERT INTO checkout_reservation_items
         (id, reservation_id, product_id, product_title_snapshot, seller_sku_snapshot, scale_snapshot,

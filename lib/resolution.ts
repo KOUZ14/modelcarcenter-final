@@ -1,3 +1,4 @@
+import { legalNotice } from "./legal-notifications";
 import { and, asc, desc, eq, inArray, or } from "drizzle-orm";
 import { getD1, getDb } from "@/db";
 import {
@@ -10,7 +11,6 @@ import {
   sellers,
 } from "@/db/schema";
 import { config } from "./config";
-import { POLICY_VERSION } from "./legal";
 import { sanitizeUploadedImage } from "./image-sanitization";
 import { assertUploadRate, deleteManagedUpload, putManagedUpload } from "./managed-uploads";
 import {
@@ -152,6 +152,7 @@ export async function getResolutionCenterData(userId: string) {
         ...order,
         items: items.filter((item) => item.orderId === order.id),
         caseId: casesByOrder.get(order.id)?.id ?? null,
+        evidenceUrl: `/api/orders/evidence?order=${encodeURIComponent(order.id)}`,
         ...eligibility,
       };
     });
@@ -231,6 +232,7 @@ export async function openResolutionCase(input: {
   const eligibility = canReportOrderProblem(row.order);
   if (!eligibility.eligible) throw new ValidationError(eligibility.reason);
 
+  const reviewReason = eligibility.requiresReview ? requiredString(input.payload.reviewReason, "reason for review after the standard deadline", 2000) : "";
   const evidenceRequired = [
     "damaged",
     "not_as_described",
@@ -277,7 +279,7 @@ export async function openResolutionCase(input: {
           (id, case_number, order_id, opened_by_user_id, reason, requested_resolution,
            requested_refund_cents, details, status, policy_version, report_deadline,
            seller_respond_by, buyer_evidence_by, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'awaiting_seller', ?, ?, ?, ?, ?, ?)`,
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .bind(
           caseId,
@@ -288,7 +290,8 @@ export async function openResolutionCase(input: {
           requestedResolution,
           requestedRefundCents,
           details,
-          POLICY_VERSION,
+          eligibility.requiresReview ? "under_review" : "awaiting_seller",
+          row.order.protectionPolicyVersion,
           eligibility.reportDeadline,
           addCalendarDays(now, SELLER_RESPONSE_DAYS),
           addCalendarDays(now, BUYER_EVIDENCE_DAYS),
@@ -302,6 +305,7 @@ export async function openResolutionCase(input: {
           VALUES (?, ?, ?, 'buyer', 'case_opened', ?, ?)`,
         )
         .bind(crypto.randomUUID(), caseId, input.userId, details, now.toISOString()),
+      ...(eligibility.requiresReview ? [d1.prepare("INSERT INTO resolution_late_reviews(case_id,reason,payout_hold) VALUES(?,?,0)").bind(caseId,reviewReason),legalNotice(`late-case:${caseId}`,config.supportEmail,"Order report requires individual review",`Review case ${caseNumber} (${caseId}) in /admin/compliance. The standard reporting window ended. No automatic payout hold applies.`)] : []),
       ...prepared.map((file) =>
         d1
           .prepare(

@@ -1,3 +1,4 @@
+import { SellerDisclosure } from "@/components/seller-disclosure";
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { ModelCommunity } from "@/components/model-community";
@@ -105,6 +106,7 @@ export default async function ProductPage({
           __html: JSON.stringify(productJsonLd).replaceAll("<", "\\u003c"),
         }}
       />
+      <div className="shell"><SellerDisclosure sellerId={product.sellerId}/></div>
       <SiteFooter />
     </main>
   );

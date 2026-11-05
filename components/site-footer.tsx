@@ -7,9 +7,9 @@ import { CookieSettingsButton } from "./cookie-notice";
 
 const groups = [
   { title: "Marketplace", links: [["/marketplace", "Browse all"], ["/#scales", "Browse by scale"], ["/#model-hunt", "Model Hunt"], ["/wishlist", "Saved items"]] },
-  { title: "Sell", links: [["/sell", "Sell with us"], ["/seller-terms", "Seller terms"]] },
-  { title: "Support", links: [["/help", "Shopping & selling help"], ["/resolution", "Customer Support"], ["/protection", "Buyer & seller protection"], ["/contact", "Contact"], ["/shipping", "Shipping"], ["/returns", "Returns & refunds"]] },
-  { title: "Policies", links: [["/terms", "Marketplace terms"], ["/privacy", "Privacy"], ["/privacy/request", "Data deletion requests"], ["/cookies", "Cookies & local storage"]] },
+  { title: "Sell", links: [["/sell", "Sell with us"], ["/store/compliance", "Seller verification"], ["/seller-terms", "Seller terms"]] },
+  { title: "Support", links: [["/help", "Shopping & selling help"], ["/resolution", "Customer Support"], ["/report", "Report suspicious activity"], ["/shipping/requests", "Shipping requests"], ["/protection", "Buyer & seller protection"], ["/contact", "Contact"], ["/shipping", "Shipping"], ["/returns", "Returns & refunds"]] },
+  { title: "Policies", links: [["/terms", "Marketplace terms"], ["/copyright", "Copyright reports"], ["/privacy", "Privacy"], ["/privacy/request", "Data deletion requests"], ["/cookies", "Cookies & local storage"]] },
 ];
 
 export function SiteFooter() {

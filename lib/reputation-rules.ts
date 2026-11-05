@@ -1,3 +1,4 @@
+import { isUsBusinessDay } from "./business-days.ts";
 const COMPLETED_FULFILLMENT_STATUSES = new Set(["shipped", "delivered"]);
 const ELIGIBLE_PAYMENT_STATUSES = new Set(["paid", "partially_refunded"]);
 
@@ -24,8 +25,7 @@ export function addBusinessDays(start: Date, businessDays: number) {
   let remaining = Math.max(1, Math.trunc(businessDays));
   while (remaining > 0) {
     result.setUTCDate(result.getUTCDate() + 1);
-    const weekday = result.getUTCDay();
-    if (weekday !== 0 && weekday !== 6) remaining -= 1;
+    if (isUsBusinessDay(result)) remaining -= 1;
   }
   result.setUTCHours(23, 59, 59, 999);
   return result;

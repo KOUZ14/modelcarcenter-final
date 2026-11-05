@@ -1,3 +1,4 @@
+import { SellerDisclosure } from "@/components/seller-disclosure";
 import type { Metadata } from "next";
 import Link from "next/link";
 import Image from "next/image";
@@ -71,6 +72,7 @@ export default async function SellerPage({ params, searchParams }: {
             {reputation ? <StoreHistory reputation={reputation}/> : <p>Marketplace history is temporarily unavailable.</p>}
           </div>
         </details>
+        <SellerDisclosure sellerId={seller.id}/>
       </header>
       <section className="storefront-inventory" id="seller-inventory" aria-labelledby="storefront-inventory-heading" tabIndex={-1}>
         <h2 id="storefront-inventory-heading">Models from {seller.storeName}</h2>

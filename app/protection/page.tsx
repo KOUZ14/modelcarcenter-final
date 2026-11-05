@@ -15,10 +15,10 @@ export default function ProtectionPage() {
     <h2>1. Orders covered</h2>
     <p>Protection applies to an order paid through Model Car Center checkout while the buyer and seller use the platform case record in good faith. Covered problems include non-delivery, carrier damage, a wrong or missing item, a material difference from the listing, and a reasonable authenticity concern. Coverage is limited to the remaining paid order balance and does not replace non-waivable rights under applicable law.</p>
 
-    <h2>2. Enforced deadlines</h2>
+    <h2>2. Standard deadlines and later review</h2>
     <p>These are the current terms for new purchases. Every order keeps the protection policy accepted at checkout. My Orders and Customer Support show its exact deadline, including time and time zone. A later policy change does not replace existing order terms or reset an open case.</p>
     <div className="legal-table-wrap"><table><thead><tr><th>Step</th><th>Deadline</th><th>What happens</th></tr></thead><tbody>
-      <tr><td>Buyer opens a case after delivery</td><td>Within {activeProtectionPolicy.deliveredDays} calendar days after carrier-confirmed delivery</td><td>The system blocks a new delivered-order case after the window, unless applicable law requires otherwise.</td></tr>
+      <tr><td>Buyer opens a case after delivery</td><td>Within {activeProtectionPolicy.deliveredDays} calendar days after carrier-confirmed delivery</td><td>Later reports can be submitted for individual review of legal rights, warranties, longer seller promises, or problems discovered later. The standard deadline is not a waiver of those rights.</td></tr>
       <tr><td>Buyer reports non-delivery</td><td>Within {activeProtectionPolicy.shipmentDays} calendar days after shipment; if unshipped, within {activeProtectionPolicy.paymentDays} calendar days after payment</td><td>This fallback remains available because a delivery-based deadline cannot apply to an undelivered order.</td></tr>
       <tr><td>Buyer supplies evidence</td><td>Within {BUYER_EVIDENCE_DAYS} calendar days after opening</td><td>Clear photos or PDFs should show the model, packaging, shipping label, and claimed problem.</td></tr>
       <tr><td>Seller responds</td><td>Within {SELLER_RESPONSE_DAYS} calendar days after opening</td><td>After the deadline, the buyer may escalate for platform review.</td></tr>

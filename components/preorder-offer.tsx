@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { formatMoney } from "@/lib/format";
-import type { PreorderTerms } from "@/lib/preorder-rules";
+import { DEPOSIT_PREORDER_POLICY, type PreorderTerms } from "@/lib/preorder-rules";
 import type { publicPreorderOffers } from "@/lib/preorders";
 import type { ProductSummary } from "@/lib/types";
 import { AdultConsent } from "./adult-consent";
@@ -19,7 +19,7 @@ export function ReservationTerms({terms,quantity}:{terms:PreorderTerms;quantity:
   return <div className="preorder-terms-summary">
     <div className="preorder-price-breakdown"><div><span>Full item price</span><strong>{formatMoney(terms.priceCents*quantity,terms.currency)}</strong></div><div><span>{deposit ? "10% deposit today" : "Due today"}</span><strong>{formatMoney(deposit,terms.currency)}</strong></div><div><span>Item balance when ready</span><strong>{formatMoney(terms.priceCents*quantity-deposit,terms.currency)}</strong></div></div>
     <p>Expected to ship <strong>{terms.dispatch.label}</strong>. {terms.shippingEstimateCents == null ? "Shipping is calculated before balance payment." : `Shipping: ${formatMoney(terms.shippingEstimateCents,terms.currency)}, paid with the balance.`} Applicable tax is shown before payment.</p>
-    <p className="preorder-cancellation-terms">{deposit ? "The deposit is non-refundable if you change your mind, unless the seller approves a refund. You receive a refund if the seller cannot fulfill or you decline a shipping delay. Your rights under applicable law are unaffected." : "No payment today. You can cancel before payment without a fee."}</p>
+    <p className="preorder-cancellation-terms">{deposit ? (terms.policyVersion === DEPOSIT_PREORDER_POLICY ? "Your payments are refundable before shipment, including cancellation for a missed balance deadline. Your rights under applicable law are unaffected." : "Your accepted deposit terms are shown below. Contact support for a refund review; applicable consumer rights still apply.") : "No payment today. You can cancel before payment without a fee."}</p>
     <details><summary>Preorder terms</summary><p>{terms.policyText}</p><p>{terms.variant}. {terms.contents}</p></details>
   </div>;
 }

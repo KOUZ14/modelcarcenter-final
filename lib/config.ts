@@ -50,6 +50,13 @@ export function parseFeeBasisPoints(
 export const config = {
   marketplaceMode: enumEnv("MARKETPLACE_MODE", "test", ["test", "live"]),
   siteUrl: textEnv("SITE_URL", "http://localhost:5173").replace(/\/$/, ""),
+  reportingPhone: textEnv("REPORTING_PHONE"),
+  dmcaRegistered: textEnv("DMCA_AGENT_REGISTERED") === "true",
+  dmcaRegistrationExpiresAt: textEnv("DMCA_AGENT_REGISTRATION_EXPIRES_AT"),
+  dmcaAgentName: textEnv("DMCA_AGENT_NAME"),
+  dmcaAgentEmail: textEnv("DMCA_AGENT_EMAIL"),
+  dmcaAgentAddress: textEnv("DMCA_AGENT_ADDRESS"),
+  dmcaAgentPhone: textEnv("DMCA_AGENT_PHONE"),
   supportEmail: textEnv("SUPPORT_EMAIL", "support@modelcarcenter.com"),
   businessLegalName: textEnv("BUSINESS_LEGAL_NAME", "KM Venture Group"),
   businessMailingAddress: textEnv("BUSINESS_MAILING_ADDRESS"),

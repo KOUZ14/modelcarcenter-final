@@ -1,3 +1,4 @@
+import { assertExternalShippingAllowed } from "@/lib/shipping-compliance";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { getD1, getDb } from "@/db";
 import {
@@ -1160,6 +1161,7 @@ async function shipOrder(payload: Record<string, unknown>) {
     throw new ValidationError(
       "Carrier tracking is unavailable. Configure Shippo before shipping.",
     );
+  assertExternalShippingAllowed(order.subtotalCents);
   const tracking = await registerShippoTracking(
     carrier,
     trackingNumber,
@@ -1170,8 +1172,8 @@ async function shipOrder(payload: Record<string, unknown>) {
     .set({
       carrier,
       trackingNumber,
-      fulfillmentStatus: "shipped",
-      shippedAt: order.shippedAt ?? new Date().toISOString(),
+      fulfillmentStatus: order.shippedAt ? "shipped" : "processing",
+      shippedAt: order.shippedAt,
       updatedAt: new Date().toISOString(),
     })
     .where(eq(orders.id, orderId));

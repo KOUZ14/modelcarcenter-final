@@ -31,6 +31,7 @@ test("account carts persist and merge sellers while shipping requests use one se
       let values = [];
       return {
         bind(...params) { values = params; return this; },
+        async first() { return sqlite.prepare(query).get(...values) ?? null; },
         async raw() { const statement = sqlite.prepare(query); statement.setReturnArrays(true); return statement.all(...values); },
         async all() { return { results: sqlite.prepare(query).all(...values), success: true }; },
         async run() { const result = sqlite.prepare(query).run(...values); return { success: true, meta: { changes: result.changes } }; },

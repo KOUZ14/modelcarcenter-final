@@ -1,3 +1,4 @@
+import { assertExternalShippingAllowed } from "@/lib/shipping-compliance";
 import {
   and,
   asc,
@@ -676,6 +677,7 @@ export async function shipOwnedStoreOrder(
         "Use the buyer-selected service or attest to an equal/faster transit time; shipping downgrades are not allowed.",
       );
   }
+  assertExternalShippingAllowed(row.order.subtotalCents);
   const tracking = await registerShippoTracking(
     carrier,
     trackingNumber,
@@ -688,8 +690,8 @@ export async function shipOwnedStoreOrder(
       trackingNumber,
       fulfillmentService,
       fulfillmentEstimatedDays,
-      fulfillmentStatus: "shipped",
-      shippedAt: row.order.shippedAt ?? new Date().toISOString(),
+      fulfillmentStatus: row.order.shippedAt ? "shipped" : "processing",
+      shippedAt: row.order.shippedAt,
       updatedAt: new Date().toISOString(),
     })
     .where(

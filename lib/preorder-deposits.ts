@@ -2,7 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { getD1, getDb } from "@/db";
 import { preorderDepositCheckouts, preorderPaymentLedger, preorderReservations, sellers } from "@/db/schema";
 import { buyerReservation, cancelPreorder, eventStatement, ownedBatch, termsOf } from "./preorders";
-import { assertSellerPaymentsReady, buildPreorderDepositBody, createPreorderDepositCheckout, findPreorderDepositCheckout, retrieveChargeRefunds, retrieveCheckoutSession, retrievePromotionDispute, createSellerTransfer, findSellerTransfer, reverseSellerTransfer, type CheckoutSessionInput, type StripeCheckoutSession } from "./stripe";
+import { assertSellerPaymentsReady, buildPreorderDepositBody, createPreorderDepositCheckout, findPreorderDepositCheckout, retrieveChargeRefunds, retrieveCheckoutSession, retrievePromotionDispute, reverseSellerTransfer, type CheckoutSessionInput, type StripeCheckoutSession } from "./stripe";
 import { determineMarketplaceFee } from "./fees";
 import { config } from "./config";
 import { ValidationError } from "./validation";
@@ -170,33 +170,7 @@ export async function recoverPreorderDeposits() {
 }
 
 export async function settleForfeitedPreorderDeposits() {
-  const db=getD1();
-  const rows=await db.prepare(`SELECT r.id,r.terms,l.charge_id chargeId,l.amount_cents amountCents,l.subtotal_cents subtotalCents,l.tax_cents taxCents,l.session_id sessionId,
-    d.request,d.seller_transfer_id transferId,s.stripe_account_id accountId
-    FROM preorder_reservations r JOIN preorder_payment_ledger l ON l.reservation_id=r.id AND l.kind='deposit'
-    JOIN preorder_deposit_checkouts d ON d.reservation_id=r.id JOIN incoming_batches b ON b.id=r.batch_id
-    JOIN products p ON p.id=b.listing_id JOIN sellers s ON s.id=p.seller_id
-    WHERE r.status IN ('cancelled','expired') AND r.reason IN ('buyer_change_of_mind','payment_deadline_expired','account_deleted')
-    AND julianday(r.updated_at) < julianday('now','-7 days') AND r.order_id IS NULL AND b.supply_state != 'cancelled'
-    AND l.status='paid' AND l.refund_status='not_required' AND l.refunded_cents=0 AND d.seller_transfer_id IS NULL
-    AND d.dispute_status IN ('none','won','warning_closed') AND s.status='active' AND s.stripe_payouts_enabled=1 LIMIT 20`)
-    .all<{id:string;terms:string;chargeId:string;amountCents:number;subtotalCents:number;taxCents:number;sessionId:string;request:string;transferId:string|null;accountId:string}>();
-  for(const row of rows.results ?? []) {
-    try {
-      if((await retrieveChargeRefunds(row.chargeId)).some(f=>!["failed","canceled"].includes(f.status))) continue;
-      const session=await retrieveCheckoutSession(row.sessionId);
-      const charge=typeof session.payment_intent === "object" && session.payment_intent && typeof session.payment_intent.latest_charge === "object" ? session.payment_intent.latest_charge : null;
-      if(!charge || typeof charge.balance_transaction !== "object" || !charge.balance_transaction) continue;
-      const request:DepositRequest=JSON.parse(row.request),terms=termsOf(row);
-      const amount=Math.max(0,row.amountCents-row.taxCents-charge.balance_transaction.fee-Math.round(row.subtotalCents*request.input.marketplaceFeeBps/10000));
-      if(amount<1) continue;
-      const orderId=`preorder-deposit-${row.id}`,group=`MCC_${row.id}`;
-      const transfer=await findSellerTransfer(group,orderId) ?? await createSellerTransfer({orderId,orderNumber:"Retained preorder deposit",sellerId:terms.sellerId,sellerStripeAccountId:row.accountId,chargeId:row.chargeId,transferGroup:group,amountCents:amount,currency:terms.currency});
-      if(transfer.amount !== amount) throw new Error("Deposit transfer does not match the recorded proceeds.");
-      await db.prepare("UPDATE preorder_deposit_checkouts SET seller_transfer_id=?,seller_transfer_amount_cents=?,seller_transfer_reversed_cents=?,error=NULL WHERE reservation_id=?").bind(transfer.id,amount,transfer.amount_reversed,row.id).run();
-      const current=await paidPreorderDeposit(row.id);
-      const saved=await db.prepare("SELECT dispute_status status FROM preorder_deposit_checkouts WHERE reservation_id=?").bind(row.id).first<{status:string}>();
-      if(current?.status !== "paid" || current.refundStatus !== "not_required" || !saved || !["none","won","warning_closed"].includes(saved.status)) await reverseRetainedDeposit(row.id);
-    } catch { await db.prepare("UPDATE preorder_deposit_checkouts SET error='Deposit settlement will retry' WHERE reservation_id=?").bind(row.id).run(); }
-  }
+  // Legacy terms remain evidence, but do not authorize an automatic forfeiture.
+  // These records appear in the compliance review queue; refunds use the ledger.
+  return { transferred: 0, reviewRequired: true };
 }

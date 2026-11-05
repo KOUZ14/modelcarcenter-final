@@ -683,9 +683,10 @@ export async function preparePaidOrder(session: StripeCheckoutSession, reservati
     session.metadata?.payment_flow === "separate" ? "separate" : "destination";
   const transferGroup =
     paymentFlow === "separate" ? stripeTransferGroup(session.metadata?.checkout_group_id ?? reservationId) : null;
+  const evidence = await getD1().prepare("SELECT json_extract(snapshot, '$.handlingDays') AS handlingDays FROM purchase_evidence WHERE checkout_id=? LIMIT 1").bind(reservationId).first<{handlingDays:number}>();
   const shipByAt = addBusinessDays(
     preorderAnchor && preorderAnchor > paidAt ? preorderAnchor : paidAt,
-    preorder ? JSON.parse(preorder.reservation.terms).handlingDays : reservation.handlingTimeBusinessDays,
+    preorder ? JSON.parse(preorder.reservation.terms).handlingDays : (evidence?.handlingDays ?? reservation.handlingTimeBusinessDays),
   );
   const d1 = getD1();
   const pendingGuard = `EXISTS (SELECT 1 FROM checkout_reservations WHERE id = ? AND status = 'pending')`;

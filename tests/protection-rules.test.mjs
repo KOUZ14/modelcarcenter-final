@@ -45,8 +45,8 @@ test("case eligibility enforces the window and remaining paid balance", () => {
     true,
   );
   assert.equal(
-    canReportOrderProblem(order, new Date("2026-07-13T00:00:01.000Z")).eligible,
-    false,
+    canReportOrderProblem(order, new Date("2026-07-13T00:00:01.000Z")).requiresReview,
+    true,
   );
   assert.equal(
     canReportOrderProblem(

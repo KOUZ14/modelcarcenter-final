@@ -785,8 +785,7 @@ function ProfileForm({
         <p>
           This revokes sessions, removes your profile, cart, wishlist, Model Hunts,
           and optional email subscriptions, and deactivates listings.
-          Paid order records are retained for transaction and legal
-          requirements.
+          Paid orders and preorders remain active; deleting your account does not cancel or forfeit a payment. Sign in again with the same verified email, or contact support, to manage them. Transaction records are retained for fulfillment and legal requirements.
         </p>
         <label>
           Type DELETE to confirm

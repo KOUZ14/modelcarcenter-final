@@ -67,8 +67,8 @@ test('calculator uses item-only commission and actual-order processing allocatio
   }
   assert.throws(()=>estimateSellerProceeds({itemCents:-1,shippingCents:0,taxCents:0,feeBps:700,processingBps:290,processingFixedCents:30}), /non-negative/);
 });
-test('active protection stays at three calendar days and explicit legacy deadlines remain frozen', () => {
-  assert.equal(ACTIVE_PROTECTION_POLICY_VERSION,'delivery-3-v1');assert.equal(REFUND_REQUEST_DAYS_AFTER_DELIVERY,3);
+test('active protection becomes fourteen calendar days and explicit legacy deadlines remain frozen', () => {
+  assert.equal(ACTIVE_PROTECTION_POLICY_VERSION,'delivery-14-v2');assert.equal(REFUND_REQUEST_DAYS_AFTER_DELIVERY,14);
   const order={createdAt:'2026-09-01T12:00:00Z',deliveredAt:'2026-09-18T12:00:00Z'};
   assert.equal(reportDeadlineForOrder(order),'2026-09-21T12:00:00.000Z');
   assert.equal(reportDeadlineForOrder({...order,refundRequestDeadline:'2026-09-20T12:00:00Z'}),'2026-09-20T12:00:00Z');

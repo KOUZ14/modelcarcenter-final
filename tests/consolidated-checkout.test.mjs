@@ -182,8 +182,8 @@ test("consolidated payments, quotes, inventory, refunds, and payouts use distinc
     assert.equal(sellerOrders.reduce((sum, order) => sum + order.seller_proceeds_cents + order.platform_fee_cents + order.payment_processing_fee_cents + order.tax_cents, 0), session.amount_total);
     assert.equal(sellerOrders[0].selected_shipping_service, "Ground");
     assert.ok(sellerOrders.every((order) => JSON.parse(order.shipping_address).address.line2 === "Unit 4"));
-    assert.ok(sellerOrders.every((order) => order.protection_policy_version === 'delivery-3-v1'));
-    assert.ok(rows("SELECT protection_policy_version FROM checkout_reservations WHERE checkout_group_id = ?", checkout.reservationId).every(reservation => reservation.protection_policy_version === 'delivery-3-v1'));
+    assert.ok(sellerOrders.every((order) => order.protection_policy_version === 'delivery-14-v2'));
+    assert.ok(rows("SELECT protection_policy_version FROM checkout_reservations WHERE checkout_group_id = ?", checkout.reservationId).every(reservation => reservation.protection_policy_version === 'delivery-14-v2'));
     assert.deepEqual(rows("SELECT inventory_quantity, reserved_quantity FROM products ORDER BY id").map((row) => [row.inventory_quantity, row.reserved_quantity]), [[48, 0], [49, 0]]);
     assert.equal((await paid(checkout)).duplicate, true);
     assert.equal((await paid(checkout, "evt_paid_replay")).duplicateOrder, true);
@@ -202,8 +202,8 @@ test("consolidated payments, quotes, inventory, refunds, and payouts use distinc
     sqlite.prepare('UPDATE orders SET refund_request_deadline=?, payout_eligible_at=? WHERE id=?').run(storedDeadline, storedDeadline, ids[0]);
     await api.recordOrderTrackingUpdate(ids, {tracking_status:{status:'DELIVERED',status_date:delivery}});
     const deadlines = () => rows('SELECT delivered_at, refund_request_deadline, payout_eligible_at, fulfillment_status FROM orders WHERE checkout_group_id=? ORDER BY seller_id', checkout.reservationId);
-    assert.deepEqual(deadlines().map(row=>row.refund_request_deadline), [storedDeadline, '2026-09-21T12:00:00.000Z']);
-    assert.deepEqual(deadlines().map(row=>row.payout_eligible_at), [storedDeadline, '2026-09-21T12:00:00.000Z']);
+    assert.deepEqual(deadlines().map(row=>row.refund_request_deadline), [storedDeadline, '2026-10-02T12:00:00.000Z']);
+    assert.deepEqual(deadlines().map(row=>row.payout_eligible_at), [storedDeadline, '2026-10-02T12:00:00.000Z']);
     const first = deadlines();
     await api.recordOrderTrackingUpdate(ids, {tracking_status:{status:'DELIVERED',status_date:'2026-09-19T12:00:00.000Z'}});
     await api.recordOrderTrackingUpdate(ids, {tracking_status:{status:'TRANSIT',status_date:'2026-09-17T12:00:00.000Z'}});
