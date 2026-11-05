@@ -56,6 +56,22 @@ test('collector privacy, social permissions and shared inventory authority',asyn
   db.prepare("INSERT INTO collector_relationships (id,owner_id,target_id,kind,created_at) VALUES ('store-block','store-owner','store-other','block',0)").run();
   await assert.rejects(()=>api.startSellerConversation('store-other','empty-store','Hello'),/unavailable|blocked/i);
  });
+ await t.test('marketplace conversations use collector photos for people and store logos for professional sellers',async()=>{
+  db.prepare("INSERT INTO conversations (id,buyer_user_id,seller_id,product_slug_snapshot,product_title_snapshot) VALUES ('photo-thread','store-buyer','empty-store','store-enquiry','Store enquiry')").run();
+  db.prepare("UPDATE collector_profiles SET avatar_url='/buyer-avatar.jpg' WHERE user_id='store-buyer'").run();
+  db.prepare("UPDATE collector_profiles SET avatar_url='/owner-avatar.jpg' WHERE user_id='store-owner'").run();
+  db.prepare("UPDATE sellers SET logo_url='/store-logo.jpg' WHERE id='empty-store'").run();
+  try {
+   assert.equal((await api.getMessagingCenterData('store-owner')).conversations[0].otherPartyAvatarUrl,'/buyer-avatar.jpg');
+   assert.equal((await api.getMessagingCenterData('store-buyer')).conversations[0].otherPartyAvatarUrl,'/store-logo.jpg');
+   db.prepare("UPDATE sellers SET seller_type='collector' WHERE id='empty-store'").run();
+   assert.equal((await api.getMessagingCenterData('store-buyer')).conversations[0].otherPartyAvatarUrl,'/owner-avatar.jpg');
+  } finally {
+   db.prepare("DELETE FROM conversations WHERE id='photo-thread'").run();
+   db.prepare("UPDATE sellers SET seller_type='professional',logo_url=NULL WHERE id='empty-store'").run();
+   db.prepare("UPDATE collector_profiles SET avatar_url=NULL WHERE user_id IN ('store-owner','store-buyer')").run();
+  }
+ });
  await t.test('wanted releases remain separate from saved seller listings and belong to the current collector',async()=>{
   const wanted={action:'wishlist',catalogId:'model',enabled:true};
   await api.communityAction('owner',wanted);await api.communityAction('owner',wanted);
@@ -101,6 +117,30 @@ test('collector privacy, social permissions and shared inventory authority',asyn
   await api.communityAction('buyer',{action:'relationship',targetId:'owner',kind:'follow'});assert.equal((await api.feed('buyer',{tab:'following'})).length,1);
   const p=await api.getPiece(piece.id,'owner');await api.savePiece('owner',{...p,id:p.id,catalogId:'model',visibility:'private',photos:[]});assert.equal((await api.feed(null))[0].itemId,null);assert.equal(await api.getPiece(piece.id,'buyer'),null);
   await api.savePiece('owner',{...await api.getPiece(piece.id,'owner'),visibility:'public',publishConfirmed:true,photos:[]});
+ });
+ await t.test('collector photos reach directory, profile, feed and inbox without bypassing publication or blocks',async()=>{
+  db.prepare("UPDATE collector_profiles SET avatar_url='/community/media/avatar-next' WHERE user_id='owner'").run();
+  const thread=await api.startCollectorThread('buyer','owner');
+  try {
+   assert.equal((await api.collectors(null)).find(c=>c.userId==='owner').avatarUrl,'/community/media/avatar-next');
+   assert.equal((await api.collectors('owner')).find(c=>c.userId==='owner').isSelf,1);
+   assert.equal((await api.collectors('buyer')).find(c=>c.userId==='owner').isSelf,0);
+   assert.equal((await api.profile('owner',null)).avatarUrl,'/community/media/avatar-next');
+   assert.equal((await api.feed(null,{postId:post.id}))[0].avatarUrl,'/community/media/avatar-next');
+   assert.equal((await api.collectorInbox('buyer')).find(t=>t.id===thread).otherAvatarUrl,'/community/media/avatar-next');
+   db.prepare("UPDATE community_settings SET published=0 WHERE user_id='owner'").run();
+   assert.equal((await api.collectors(null)).some(c=>c.userId==='owner'),false);
+   assert.deepEqual(await api.feed(null,{postId:post.id}),[]);
+   db.prepare("UPDATE community_settings SET published=1 WHERE user_id='owner'").run();
+   await api.communityAction('owner',{action:'relationship',kind:'block',targetId:'buyer'});
+   assert.equal((await api.collectors('buyer')).some(c=>c.userId==='owner'),false);
+   assert.equal((await api.collectorInbox('buyer')).some(t=>t.id===thread),false);
+  } finally {
+   await api.communityAction('owner',{action:'relationship',kind:'block',targetId:'buyer',enabled:false});
+   db.prepare("UPDATE community_settings SET published=1 WHERE user_id='owner'").run();
+   db.prepare("UPDATE collector_profiles SET avatar_url=NULL WHERE user_id='owner'").run();
+   db.prepare("DELETE FROM collector_threads WHERE id=?").run(thread);
+  }
  });
  await t.test('post identity includes release metadata without exposing a private tagged piece',async()=>{
   const tagged=(await api.feed(null,{postId:post.id}))[0];

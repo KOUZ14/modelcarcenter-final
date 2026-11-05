@@ -49,6 +49,24 @@ export function MarketplaceProvider({ children }: { children: React.ReactNode })
 
   useEffect(() => {
     let active = true;
+    async function refreshProfile() {
+      const version = sessionVersion.current;
+      try {
+        const response = await fetch("/api/account", { cache: "no-store" });
+        if (!response.ok) return;
+        const account = await response.json();
+        if (!active || version !== sessionVersion.current || !account.authenticated || !account.profile) return;
+        setCollector(current => current && current.id === account.user?.id ? {
+          ...current, displayName: account.profile.displayName, avatarUrl: account.profile.avatarUrl,
+        } : current);
+      } catch { /* Retain the last loaded identity until the next refresh. */ }
+    }
+    window.addEventListener("mcc-profile-updated", refreshProfile);
+    return () => { active = false; window.removeEventListener("mcc-profile-updated", refreshProfile); };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
     const version = sessionVersion.current;
     const current = () => active && version === sessionVersion.current;
     async function bootstrap() {

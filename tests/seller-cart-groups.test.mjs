@@ -114,7 +114,7 @@ test("adding another seller and revisiting a paid checkout never clears unrelate
     },
   };
   globalThis.__cartProviderTest = fixture;
-  globalThis.window = { location: { pathname: "/marketplace" } };
+  globalThis.window = Object.assign(new EventTarget(), { location: { pathname: "/marketplace" } });
   Object.defineProperty(globalThis, "localStorage", { configurable: true, value: { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: (key) => storage.delete(key) } });
   globalThis.fetch = async (url) => { assert.equal(url, "/api/account"); return Response.json({ authenticated: false }); };
   t.after(async () => {

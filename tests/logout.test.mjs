@@ -54,7 +54,7 @@ test('logout updates the persistent provider and both account menus without a re
     providerHooks = hooks(); headerHooks = hooks(); local = new Map(); session = new Map(); requests = [];
     fixture.path = '/'; fixture.signOutCalls = 0; fixture.navigation = []; fixture.logout = async () => ({ data: { success: true }, error: null });
     const storage = map => ({ getItem: key => map.get(key) ?? null, setItem: (key, value) => map.set(key, value), removeItem: key => map.delete(key) });
-    Object.defineProperty(globalThis, 'window', { configurable: true, value: { location: { pathname: '/' } } });
+    Object.defineProperty(globalThis, 'window', { configurable: true, value: Object.assign(new EventTarget(), { location: { pathname: '/' } }) });
     Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: storage(local) });
     Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, value: storage(session) });
     globalThis.fetch = async (url, options) => {
@@ -74,6 +74,17 @@ test('logout updates the persistent provider and both account menus without a re
     await unlink(file); await rmdir(scratch);
   });
 
+  await t.test('saved profile changes update the persistent identity without resetting the cart', async () => {
+    const context = await ready(), savedFetch = globalThis.fetch;
+    globalThis.fetch = async () => Response.json({ authenticated: true, user: { id: 'buyer' }, profile: { displayName: 'Alex Models', avatarUrl: '/community/media/new-photo' } });
+    window.dispatchEvent(new Event('mcc-profile-updated'));
+    await tick();
+    const updated = renderProvider();
+    assert.equal(updated.collector.displayName, 'Alex Models');
+    assert.equal(updated.collector.avatarUrl, '/community/media/new-photo');
+    assert.deepEqual(updated.cart, context.cart);
+    globalThis.fetch = savedFetch;
+  });
   await t.test('logging out on the home page immediately clears identity, store links and private shopping data', async () => {
     let context = await ready(); assert.equal(context.collector.id, 'buyer');
     assert.ok(find(renderHeader(), n => n.props?.href === '/store'));

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { CollectorAvatar } from "./collector-avatar";
 import {useRouter} from "next/navigation";
 import Image from "next/image";
 import {
@@ -158,9 +159,7 @@ export function MessageCenter({
               disabled={loadingConversation === conversation.id}
               onClick={() => void openConversation(conversation.id)}
             >
-              <span className="conversation-avatar">
-                {conversation.otherPartyName.slice(0, 1).toUpperCase()}
-              </span>
+              <CollectorAvatar className="conversation-avatar" name={conversation.otherPartyName} src={conversation.otherPartyAvatarUrl} size={42}/>
               <span className="conversation-copy">
                 <span>
                   <b>{conversation.otherPartyName}</b>

@@ -89,6 +89,7 @@ export function ProfileEditor({ profile, settings, returnTo, commentSetup = fals
       if (!response.ok) throw new Error(response.status === 401 ? "Your session expired. Your edits are still here; sign in again in another tab, then retry saving." : result.error || "Your profile could not be saved. Please try again.");
       const saved = { ...normalizedProfile(values), ...(typeof result.handle === "string" ? { handle: result.handle } : {}) };
       setValues(saved); setSavedValues(saved); setPublishConfirmed(false);
+      window.dispatchEvent(new Event("mcc-profile-updated"));
       setMessage(`Profile saved. Your profile is ${saved.published ? "public" : "private"}.`); setRecentlySaved(true);
       // Keep confirmation visible; refreshing /profile can redirect a newly public profile.
     } catch (reason) {

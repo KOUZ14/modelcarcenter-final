@@ -34,7 +34,8 @@ test("profile editor previews drafts, preserves failures, and saves only after u
   const writes = [], busyChanges = [], draws = [];
   const fetchPreview = globalThis.fetch;
   let status = 200, refreshes = 0, consentFocus = 0, bitmapClosed = 0;
-  globalThis.window = { requestAnimationFrame: callback => callback(), addEventListener() {}, removeEventListener() {} };
+  const profileEvents = [];
+  globalThis.window = { requestAnimationFrame: callback => callback(), addEventListener() {}, removeEventListener() {}, dispatchEvent(event) { profileEvents.push(event.type); } };
   globalThis.document = { createElement: () => ({ width: 0, height: 0, getContext: () => ({ fillRect() {}, drawImage: (...args) => draws.push(args) }), toBlob: callback => callback(new Blob(["clean jpeg"], { type: "image/jpeg" })) }), body: { style: { overflow: "auto" } }, activeElement: { focus() {} } };
   globalThis.createImageBitmap = async () => ({ width: 4000, height: 2000, close() { bitmapClosed++; } });
   globalThis.FileReader = class {
@@ -112,6 +113,7 @@ test("profile editor previews drafts, preserves failures, and saves only after u
     status = 200; const before = writes.length; await Promise.all([submit(tree), submit(tree)]); tree = editor.render();
     assert.equal(writes.length, before + 1); assert.equal(writes.at(-1).avatarId, "new-avatar"); assert.equal(writes.at(-1).publishConfirmed, true);
     assert.equal(refreshes, 0); assert.equal(find(tree, node => node.props?.role === "status").props.children, "Profile saved. Your profile is public.");
+    assert.deepEqual(profileEvents, ["mcc-profile-updated"], "Successful saves refresh the shared header identity");
     assert.equal(button(tree, "Save profile").props.disabled, true);
     assert.ok(find(tree, node => node.type === "a" && node.props.href === "/collection/piece#comment-composer"));
   });

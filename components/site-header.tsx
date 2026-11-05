@@ -1,9 +1,10 @@
-﻿"use client";
+"use client";
 
 import Link from "next/link";
 import { useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useMarketplace } from "./marketplace-provider";
+import { CollectorAvatar } from "./collector-avatar";
 import { Icon } from "./icons";
 import { BrandLogo } from "./brand-logo";
 import { MobileSheet } from "./mobile-sheet";
@@ -76,7 +77,7 @@ export function SiteHeader({ overlay = false, showSearch = true, searchDisplay =
       <div className="header-actions">
         {showSearch && searchDisplay === "compact" && <Link className="icon-button header-search-link" href="/marketplace#marketplace-query" aria-label="Search model cars" title="Search model cars"><Icon name="search"/></Link>}
         <Link className="icon-button" href="/cart" aria-label={`Shopping cart, ${count} items`}><Icon name="bag" />{count > 0 && <span className="count">{count > 99 ? "99+" : count}</span>}</Link>
-        {authReady && (collector ? <details className="account-menu"><summary aria-label="Account controls"><span className="account-avatar">{collector.displayName.slice(0, 1).toUpperCase()}</span></summary><div>
+        {authReady && (collector ? <details className="account-menu"><summary aria-label="Account controls"><CollectorAvatar className="account-avatar" name={collector.displayName} src={collector.avatarUrl} size={31}/></summary><div>
           <Link href="/profile">Profile</Link><Link href="/collection">My Collection</Link>
           <Link href="/messages">Inbox</Link><Link href="/notifications">Notifications</Link>
           {collector.store && <Link href="/store">Seller Dashboard</Link>}
@@ -89,7 +90,7 @@ export function SiteHeader({ overlay = false, showSearch = true, searchDisplay =
     </header>
     <MobileSheet id="mobile-menu" title="Menu" open={menuOpen} onClose={() => setMenuOpen(false)}>
       {authReady && <div className="mobile-menu-account">
-        {collector ? <><span className="account-avatar">{collector.displayName.slice(0, 1).toUpperCase()}</span><span>{collector.displayName}</span></> : <Link className="button dark" href={signInHref} onClick={() => setMenuOpen(false)}>Sign in or create an account</Link>}
+        {collector ? <><CollectorAvatar className="account-avatar" name={collector.displayName} src={collector.avatarUrl} size={31}/><span>{collector.displayName}</span></> : <Link className="button dark" href={signInHref} onClick={() => setMenuOpen(false)}>Sign in or create an account</Link>}
       </div>}
       <nav className="mobile-menu-groups" aria-label="Menu">
         {menuGroups.map(group => <section key={group.title}>

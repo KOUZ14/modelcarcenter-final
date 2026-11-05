@@ -1,4 +1,32 @@
 .community-navigation { display: grid; gap: 4px; width: 100%; }
+.community-buttons { align-items: flex-start; gap: 12px; }
+.community-action { max-width: 100%; vertical-align: top; }
+.community-action > button.button,
+.community-buttons .button,
+.collector-showroom .button,
+.collector-card .button {
+  display: inline-flex; align-items: center; justify-content: center; min-height: 44px;
+  padding: 10px 18px; border: 1px solid var(--ink); font-size: 14px; font-weight: 700;
+  line-height: 22px; text-align: center; cursor: pointer; text-decoration: none;
+}
+.community-action > button.button.outline { background: transparent; color: var(--ink); }
+.community-action > button.button.dark { padding: 10px 18px; background: var(--ink); color: white; }
+.community-action > button:disabled { cursor: not-allowed; }
+.community-action > small { margin-top: 8px; padding: 8px 10px; background: #fff1f0; border-left: 2px solid var(--accent); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.community-buttons .button:hover:not(:disabled), .collector-showroom .button:hover:not(:disabled), .collector-card .button:hover:not(:disabled) { box-shadow: inset 0 0 0 1px var(--ink); }
+.collector-card .button { padding-inline: 12px; font-size: 13px; }
+.collector-card > .community-action { flex-shrink: 0; max-width: 120px; }
+.collector-card strong { overflow-wrap: anywhere; }
+.community-report-form { display: grid; gap: 10px; width: 100%; padding: 16px; border: 1px solid var(--line); background: var(--paper); }
+.community-report-form label { display: grid; gap: 8px; font-size: 14px; }
+.community-report-form textarea { width: 100%; min-height: 100px; padding: 10px; border: 1px solid var(--line); background: white; font: inherit; resize: vertical; }
+.post-menu .community-report-form { padding: 0; border: 0; background: none; }
+.post-menu button.button { width: 100%; padding: 10px 6px; border: 0; background: transparent; text-align: left; justify-content: flex-start; }
+.collector-conversations .collector-thread-identity, .collector-thread-heading { display: flex; align-items: center; gap: 12px; }
+.collector-thread-identity strong { color: var(--ink); font-size: 14px; overflow-wrap: anywhere; }
+.collector-thread-heading { padding-bottom: 18px; border-bottom: 1px solid var(--line); }
+.collector-thread-heading h2 { margin: 0; font-size: 24px; overflow-wrap: anywhere; }
+.collector-conversations > div { min-width: 0; padding: 20px; border: 1px solid var(--line); background: white; }
 .community-navigation > a { display: flex; align-items: center; min-height: 44px; padding: 10px 8px; font-size: 14px; }
 .community-navigation > a[aria-current="page"] { background: #eceae5; font-weight: 700; box-shadow: inset 3px 0 var(--ink); }
 .community-nav-more { position: relative; }

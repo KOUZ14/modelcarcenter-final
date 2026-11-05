@@ -7,6 +7,7 @@ import type { CommunityComment } from "@/lib/community";
 import { addressComment, commentTime, readCommentDraft } from "@/lib/community-presentation";
 import { ReportButton } from "./community-ui";
 import "./community-post.css";
+import { CollectorAvatar } from "./collector-avatar";
 
 export function focusCommentComposer() {
   const composer=document.getElementById('comment-composer');
@@ -90,7 +91,7 @@ export function CommentSection({postId,itemId,enabled=true,viewerId=null,profile
       {loadError&&<p role="alert">{loadError} <button type="button" onClick={()=>{setLoading(true);setLoadError('');void load();}}>Retry</button></p>}
       {!loading&&!loadError&&!list.length&&<p className="muted">No comments yet. Start the conversation.</p>}
       {list.map(comment=><article className="discussion-comment" key={comment.id}>
-        <span className="comment-avatar" aria-hidden="true">{comment.avatarUrl?<img src={comment.avatarUrl} alt="" width={32} height={32} loading="lazy"/>:comment.displayName.slice(0,1).toUpperCase()}</span>
+        <CollectorAvatar className="comment-avatar" name={comment.displayName} src={comment.avatarUrl} size={32}/>
         <div className="comment-content">
           <header>{comment.handle?<Link href={`/collectors/${comment.handle}`}><strong>{comment.displayName}</strong></Link>:<strong>{comment.displayName}</strong>}
             <time dateTime={new Date(comment.createdAt).toISOString()} title={new Date(comment.createdAt).toLocaleString()}>{commentTime(comment.createdAt)}</time>

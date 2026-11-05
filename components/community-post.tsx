@@ -7,6 +7,7 @@ import { taggedModel } from "@/lib/community-presentation";
 import { Action, availabilityLabel, PhotoCarousel, ReportButton } from "./community-ui";
 import { focusCommentComposer } from "./community-discussion";
 import "./community-post.css";
+import { CollectorAvatar } from "./collector-avatar";
 
 function ModelMetadata({post}:{post:Post}) {
   return <span className="model-tag-metadata">{[
@@ -29,7 +30,7 @@ export function ModelPanel({post,onClose}:{post:Post;onClose:()=>void}) {
     <div className="community-buttons">{post.catalogId&&<>
       <Action className="button dark" payload={{action:'wishlist',catalogId:post.catalogId}}>Add to wanted models</Action>
       <Link className="button outline" href={`/models/${post.catalogId}`}>View model & offers</Link>
-    </>}{post.itemId&&<Link href={`/collection/${post.itemId}`}>View this owner’s piece</Link>}</div>
+    </>}{post.itemId&&<Link className="button outline" href={`/collection/${post.itemId}`}>View this owner’s piece</Link>}</div>
   </dialog>;
 }
 
@@ -59,12 +60,12 @@ export function PostCard({post,refresh,detail=false}:{post:Post;refresh?:()=>voi
   }
   const commentAction=<><span className="post-action-icon"><PostActionIcon name="comment"/><span>{post.comments}</span></span><span>Comment</span></>;
   return <article className={`community-post conversation-post${detail?' post-detail-card':''}`}>
-    <header><Link className="collector-avatar" href={`/collectors/${post.handle}`} aria-label={`${post.displayName}’s profile`}>{post.displayName.slice(0,1)}</Link>
+    <header><Link className="collector-avatar-link" href={`/collectors/${post.handle}`} aria-label={`${post.displayName}’s profile`}><CollectorAvatar name={post.displayName} src={post.avatarUrl}/></Link>
       <div><Link href={`/collectors/${post.handle}`}><strong>{post.displayName}</strong></Link><small><time dateTime={new Date(post.createdAt).toISOString()}>{new Date(post.createdAt).toLocaleDateString("en-US", { timeZone: "UTC" })}</time>{post.commercial?' · Commercial post':''}</small></div>
       <details className="post-menu"><summary aria-label="Post options">•••</summary><div><p>{post.reason||'Public collector contribution'}</p>
-        <Action payload={{action:'post_action',postId:post.id,kind:'hide'}} onDone={refresh}>Hide post</Action>
-        <Action payload={{action:'relationship',targetId:post.ownerId,kind:'mute'}} onDone={refresh}>Mute collector</Action>
-        <Action payload={{action:'relationship',targetId:post.ownerId,kind:'block'}} onDone={refresh}>Block collector</Action>
+        <Action className="post-action" payload={{action:'post_action',postId:post.id,kind:'hide'}} onDone={refresh}>Hide post</Action>
+        <Action className="post-action" payload={{action:'relationship',targetId:post.ownerId,kind:'mute'}} onDone={refresh}>Mute collector</Action>
+        <Action className="post-action" payload={{action:'relationship',targetId:post.ownerId,kind:'block'}} onDone={refresh}>Block collector</Action>
         <ReportButton type="post" id={post.id}/>
       </div></details>
     </header>
@@ -77,12 +78,12 @@ export function PostCard({post,refresh,detail=false}:{post:Post;refresh?:()=>voi
         <span className="model-tag-copy"><strong>{taggedModel(post)}</strong><ModelMetadata post={post}/><span className="model-tag-link">View model →</span></span>
       </button>}
       <footer className="post-actions">
-        <Action payload={{action:'post_action',postId:post.id,kind:'like',enabled:!post.liked}} onDone={refresh}>
+        <Action className="post-action" payload={{action:'post_action',postId:post.id,kind:'like',enabled:!post.liked}} onDone={refresh}>
           <span className="post-action-icon"><PostActionIcon name="like"/><span>{post.likes}</span></span><span>{post.liked?'Liked':'Like'}</span>
         </Action>
         {detail?<button type="button" onClick={focusCommentComposer} aria-label={`Comment · ${post.comments}`}>{commentAction}</button>:
           <Link href={`/community/posts/${post.id}#comment-composer`} aria-label={`Comment · ${post.comments}`}>{commentAction}</Link>}
-        <Action payload={{action:'post_action',postId:post.id,kind:'save',enabled:!post.saved}} onDone={refresh}>
+        <Action className="post-action" payload={{action:'post_action',postId:post.id,kind:'save',enabled:!post.saved}} onDone={refresh}>
           <span className="post-action-icon"><PostActionIcon name="save"/></span><span>{post.saved?'Saved':'Save'}</span>
         </Action>
         <button type="button" onClick={()=>void share()} disabled={sharing}><span className="post-action-icon"><PostActionIcon name="share"/></span><span>Share</span></button>

@@ -24,6 +24,8 @@ const conversationSelection = {
   sellerId: conversations.sellerId,
   sellerOwnerUserId: sellers.ownerUserId,
   sellerName: sellers.storeName,
+  sellerAvatarUrl: sellers.logoUrl,
+  sellerType: sellers.sellerType,
   sellerSlug: sellers.slug,
   productId: conversations.productId,
   productSlug: conversations.productSlugSnapshot,
@@ -53,19 +55,22 @@ export async function getMessagingCenterData(
     )
     .orderBy(desc(conversations.lastMessageAt));
 
-  const buyerIds = [...new Set(rows.map((row) => row.buyerUserId))];
-  const profileRows = buyerIds.length
+  const participantIds = [...new Set(rows.flatMap(row => [row.buyerUserId, row.sellerOwnerUserId].filter((id): id is string => Boolean(id))))];
+  const profileRows = participantIds.length
     ? await db
         .select({
           userId: collectorProfiles.userId,
           displayName: collectorProfiles.displayName,
+          avatarUrl: collectorProfiles.avatarUrl,
         })
         .from(collectorProfiles)
-        .where(inArray(collectorProfiles.userId, buyerIds))
+        .where(inArray(collectorProfiles.userId, participantIds))
     : [];
   const buyerNames = new Map(
     profileRows.map((profile) => [profile.userId, profile.displayName]),
   );
+
+  const participantAvatars = new Map(profileRows.map(profile => [profile.userId, profile.avatarUrl]));
 
   const conversationIds = rows.map((row) => row.id);
   const messageRows = conversationIds.length
@@ -98,6 +103,9 @@ export async function getMessagingCenterData(
         viewerRole === "buyer"
           ? row.sellerName
           : buyerNames.get(row.buyerUserId) || "Collector",
+      otherPartyAvatarUrl: viewerRole === "buyer"
+        ? (row.sellerType === "collector" && row.sellerOwnerUserId ? participantAvatars.get(row.sellerOwnerUserId) : null) || row.sellerAvatarUrl
+        : participantAvatars.get(row.buyerUserId) ?? null,
       sellerName: row.sellerName,
       sellerSlug: row.sellerSlug,
       productId: row.productId,
@@ -188,6 +196,7 @@ export type MessagingCenterData = {
     id: string;
     viewerRole: "buyer" | "seller";
     otherPartyName: string;
+    otherPartyAvatarUrl: string | null;
     sellerName: string;
     sellerSlug: string;
     productId: string | null;

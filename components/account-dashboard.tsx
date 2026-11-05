@@ -106,6 +106,7 @@ export function AccountDashboard({
       return body;
     }
     setMessage("Saved.");
+    if (payload.action === "profile") window.dispatchEvent(new Event("mcc-profile-updated"));
     return body;
   }
   return (

@@ -1,6 +1,6 @@
 import { assertContact, blockSQL, getPiece, notify, one, required, rows, run, settings, text } from "./community";
 import { ValidationError } from "./validation";
-export type Thread={id:string;senderId:string;recipientId:string;itemId:string|null;reference:string;status:string;updatedAt:number;otherName:string;unread:number};
+export type Thread={otherAvatarUrl:string|null;id:string;senderId:string;recipientId:string;itemId:string|null;reference:string;status:string;updatedAt:number;otherName:string;unread:number};
 export async function threadAccess(user:string,id:string){const t=await one<{id:string;sender_id:string;recipient_id:string;status:string}>("SELECT * FROM collector_threads WHERE id=? AND (sender_id=? OR recipient_id=?)",id,user,user);if(!t)throw new ValidationError('Conversation unavailable.');await assertContact(t.sender_id,t.recipient_id);return t;}
 export async function startCollectorThread(user:string,recipient:string,itemId?:string,offer=false,listingReference?:string){
   await assertContact(user,recipient);
@@ -12,7 +12,7 @@ export async function startCollectorThread(user:string,recipient:string,itemId?:
   const item=itemId?await getPiece(itemId,user):null;if(itemId&&(!item||item.ownerId!==recipient))throw new ValidationError('Collection piece unavailable.');
   const id=crypto.randomUUID(),now=Date.now();await run("INSERT INTO collector_threads (id,sender_id,recipient_id,item_id,reference,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)",id,user,recipient,itemId||null,item?.title||listingReference||'',pref.contact==='everyone'||follow?'accepted':'request',now,now);return id;
 }
-export async function collectorInbox(user:string){return rows<Thread>(`SELECT t.id,t.sender_id senderId,t.recipient_id recipientId,t.item_id itemId,t.reference,t.status,t.updated_at updatedAt,c.display_name otherName,
+export async function collectorInbox(user:string){return rows<Thread>(`SELECT t.id,t.sender_id senderId,t.recipient_id recipientId,t.item_id itemId,t.reference,t.status,t.updated_at updatedAt,c.display_name otherName,c.avatar_url otherAvatarUrl,
   (SELECT count(*) FROM collector_messages m WHERE m.thread_id=t.id AND m.owner_id!=? AND m.created_at>CASE WHEN t.sender_id=? THEN t.sender_read_at ELSE t.recipient_read_at END) unread
   FROM collector_threads t JOIN collector_profiles c ON c.user_id=CASE WHEN t.sender_id=? THEN t.recipient_id ELSE t.sender_id END WHERE (t.sender_id=? OR t.recipient_id=?) AND ${blockSQL('c.user_id')} ORDER BY t.updated_at DESC LIMIT 100`,user,user,user,user,user,user,user);}
 export async function threadMessages(user:string,id:string){const t=await threadAccess(user,id);await run(`UPDATE collector_threads SET ${t.sender_id===user?'sender_read_at':'recipient_read_at'}=? WHERE id=?`,Date.now(),id);return rows<{id:string;ownerId:string;body:string;photoId:string|null;offerId:string|null;createdAt:number}>("SELECT id,owner_id ownerId,body,photo_id photoId,offer_id offerId,created_at createdAt FROM collector_messages WHERE thread_id=? ORDER BY created_at LIMIT 200",id);}

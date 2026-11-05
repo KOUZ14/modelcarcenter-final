@@ -11,8 +11,8 @@ export function required(v: unknown, label: string, max = 200) { const s=text(v,
 export const ids = (v: unknown) => Array.isArray(v) ? [...new Set(v.filter((x): x is string => typeof x === "string"))].slice(0,8) : [];
 export const photos = (v: string) => JSON.parse(v) as string[];
 export type Piece = {id:string;ownerId:string;catalogId:string|null;listingId:string|null;title:string;scale:string;maker:string;carMake:string;color:string;story:string;condition:string;visibility:string;availability:string;photos:string;minimumCents:number;commentsEnabled:number;pinned:number;version:number;handle:string|null;displayName:string;listingSlug:string|null;priceCents:number|null;currency:string|null;shippingMode:string|null;shippingCents:number|null;handlingDays:number|null;privateNotes?:string;purchaseCost?:string};
-export type Collector = {userId:string;handle:string;displayName:string;bio:string;interests:string;region:string;published:number;count:number;followers:number;following:number;isFollowing:number};
-export type Post = {id:string;ownerId:string;body:string;photos:string;topic:string;prompt:string;catalogId:string|null;itemId:string|null;commercial:number;createdAt:number;handle:string;displayName:string;likes:number;saves:number;comments:number;liked:number;saved:number;itemTitle:string|null;availability:string|null;modelTitle:string|null;modelScale:string|null;modelManufacturer:string|null;modelColor:string|null;modelImageUrl:string|null;reason?:string};
+export type Collector = {avatarUrl:string|null;isSelf:number;userId:string;handle:string;displayName:string;bio:string;interests:string;region:string;published:number;count:number;followers:number;following:number;isFollowing:number};
+export type Post = {avatarUrl:string|null;id:string;ownerId:string;body:string;photos:string;topic:string;prompt:string;catalogId:string|null;itemId:string|null;commercial:number;createdAt:number;handle:string;displayName:string;likes:number;saves:number;comments:number;liked:number;saved:number;itemTitle:string|null;availability:string|null;modelTitle:string|null;modelScale:string|null;modelManufacturer:string|null;modelColor:string|null;modelImageUrl:string|null;reason?:string};
 export type CommunityComment = {id:string;body:string;displayName:string;handle:string|null;avatarUrl:string|null;ownerId:string;createdAt:number};
 export const blockSQL = (ownerExpression: string) => `NOT EXISTS (SELECT 1 FROM collector_relationships b WHERE b.kind='block' AND ((b.owner_id=${ownerExpression} AND b.target_id=?) OR (b.owner_id=? AND b.target_id=${ownerExpression})))`;
 const pieceSelect = `i.id,i.owner_id ownerId,i.catalog_id catalogId,i.listing_id listingId,i.title,i.scale,i.maker,i.car_make carMake,i.color,i.story,CASE WHEN p.id IS NOT NULL THEN p.condition || CASE WHEN p.condition_notes!='' THEN ': '||p.condition_notes ELSE '' END ELSE i.condition END condition,i.visibility,
@@ -40,12 +40,12 @@ export async function getShelves(ownerId:string,viewer:string|null,visitor=false
   return rows<{id:string;name:string;itemId:string}>(`SELECT s.id,s.name,m.item_id itemId FROM collection_shelves s LEFT JOIN shelf_members m ON m.shelf_id=s.id LEFT JOIN collection_items i ON i.id=m.item_id WHERE s.owner_id=? AND (s.owner_id=? OR (i.visibility='public' AND EXISTS(SELECT 1 FROM community_settings c WHERE c.user_id=s.owner_id AND c.published=1))) AND ${blockSQL("s.owner_id")}`,ownerId,visitor?null:viewer,viewer,viewer);
 }
 export async function collectors(viewer:string|null,q="") {
-  return rows<Collector>(`SELECT c.user_id userId,c.handle,c.display_name displayName,c.bio,s.interests,s.region,s.published,
+  return rows<Collector>(`SELECT c.user_id userId,c.handle,c.display_name displayName,c.avatar_url avatarUrl,c.user_id IS ? isSelf,c.bio,s.interests,s.region,s.published,
   (SELECT count(*) FROM collection_items i LEFT JOIN products p ON p.id=i.listing_id WHERE i.owner_id=c.user_id AND i.visibility='public' AND i.availability!='previously_owned' AND (p.id IS NULL OR p.inventory_quantity>0)) count,
   (SELECT count(*) FROM collector_relationships r WHERE r.target_id=c.user_id AND r.kind='follow') followers,
   (SELECT count(*) FROM collector_relationships r WHERE r.owner_id=c.user_id AND r.kind='follow') following,
   EXISTS(SELECT 1 FROM collector_relationships r WHERE r.owner_id=? AND r.target_id=c.user_id AND r.kind='follow') isFollowing
-  FROM collector_profiles c JOIN community_settings s ON s.user_id=c.user_id WHERE s.published=1 AND c.handle IS NOT NULL AND (c.display_name LIKE ? OR c.handle LIKE ? OR s.interests LIKE ?) AND ${blockSQL("c.user_id")} ORDER BY c.created_at DESC LIMIT 60`,viewer,`%${text(q)}%`,`%${text(q)}%`,`%${text(q)}%`,viewer,viewer);
+  FROM collector_profiles c JOIN community_settings s ON s.user_id=c.user_id WHERE s.published=1 AND c.handle IS NOT NULL AND (c.display_name LIKE ? OR c.handle LIKE ? OR s.interests LIKE ?) AND ${blockSQL("c.user_id")} ORDER BY c.created_at DESC LIMIT 60`,viewer,viewer,`%${text(q)}%`,`%${text(q)}%`,`%${text(q)}%`,viewer,viewer);
 }
 export async function profile(handle:string,viewer:string|null,visitor=false) {
   const row=await one<{userId:string;handle:string;displayName:string;bio:string;avatarUrl:string|null}>(`SELECT user_id userId,handle,display_name displayName,bio,avatar_url avatarUrl FROM collector_profiles WHERE handle=?`,handle);
@@ -106,7 +106,7 @@ export async function feed(viewer:string|null, input:{tab?:string;topic?:string;
   else {where+=" AND p.created_at<=?";args.push(before);}
   const limit=Math.min(100,Math.max(1,input.limit||20));args.push(input.tab==='following'||input.order==='newest'?limit:Math.min(200,limit*3));
   const result=await rows<Post>(`SELECT p.id,p.owner_id ownerId,p.body,p.photos,p.topic,p.prompt,p.catalog_id catalogId,
-  CASE WHEN i.visibility='public' THEN i.id ELSE NULL END itemId,p.commercial,p.created_at createdAt,c.handle,c.display_name displayName,
+  CASE WHEN i.visibility='public' THEN i.id ELSE NULL END itemId,p.commercial,p.created_at createdAt,c.handle,c.display_name displayName,c.avatar_url avatarUrl,
   (SELECT count(*) FROM community_post_actions a WHERE a.post_id=p.id AND a.kind='like') likes,(SELECT count(*) FROM community_post_actions a WHERE a.post_id=p.id AND a.kind='save') saves,
   (SELECT count(*) FROM community_comments a WHERE a.post_id=p.id AND a.status='public') comments,
   EXISTS(SELECT 1 FROM community_post_actions a WHERE a.post_id=p.id AND a.kind='like' AND a.owner_id=?) liked,
