@@ -13,7 +13,6 @@ import { SiteFooter } from "./site-footer";
 import { SiteHeader } from "./site-header";
 import { MobileSheet } from "./mobile-sheet";
 import { PriceRangeFilter } from "./price-range-filter";
-import "./discovery.css";
 import "./marketplace-page.css";
 
 export type MarketplaceInitialState = MarketplaceFilters;

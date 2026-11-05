@@ -13,10 +13,10 @@ import { Icon } from "./icons";
 import { ProductCard } from "./product-card";
 import { ModelHuntForm } from "./model-hunt-form";
 import { CommunityForm } from "./community-form";
-import "./discovery.css";
 import "./home-desktop.css";
+import "./home-hero.css";
 
-const scales = ["1:18", "1:24", "1:43", "1:64", "1:87"];
+const scales = ["1:12", "1:18", "1:24", "1:43", "1:64"];
 const makers = ["AUTOart", "Minichamps", "Kyosho", "Spark", "Tarmac Works", "Bburago", "INNO64", "GT Spirit"];
 const marketplaceOverview = {
   title: "Buy, sell and share model cars",
@@ -148,21 +148,37 @@ export function HomeMarketplace({ emailAlertsEnabled = false }: { emailAlertsEna
 
   return <main className="home-marketplace">
     <SiteHeader overlay />
-    <section className="hero" id="top">
-      <Image src="/images/model-car-hero.png" alt="Detailed collectible sports car model in a dark studio" fill sizes="100vw" priority unoptimized />
-      <div className="hero-shade" />
-      <div id="main-content" tabIndex={-1} className="hero-content shell">
-        <p className="eyebrow light home-desktop-only">Model Car Center</p>
-        <h1><span className="home-mobile-only">Find your next model car</span><span className="home-desktop-only">Buy and sell<br />model cars</span></h1>
-        <p className="hero-copy"><span className="home-mobile-only">Shop model cars from stores and collectors.</span><span className="home-desktop-only">Find model cars from independent sellers and fellow collectors in one place.</span></p>
-        <form className="hero-search" role="search" onSubmit={runSearch}>
-          <label className="sr-only" htmlFor="hero-query">Search model cars</label>
-          <Icon name="search" />
-          <input id="hero-query" type="search" enterKeyHint="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search model cars" />
-          <button type="submit"><span className="home-mobile-only">Search</span><span className="home-desktop-only">Search inventory</span></button>
-        </form>
-        <div className="quick-links home-desktop-only" aria-label="Popular searches"><span>Try:</span>{["1:18", "AUTOart", "Le Mans"].map(value => <button key={value} type="button" onClick={() => router.push(marketplaceHref({ q: value }))}>{value}</button>)}</div>
-        <p className="home-hunt-prompt home-mobile-only">Can’t find it? <Link href={modelHuntHref()}>Start a Model Hunt <Icon name="arrow" /></Link></p>
+    <section className="hero collector-hero" id="top" aria-labelledby="hero-heading">
+      <Image className="collector-hero-background" src="/images/model-car-hero.png" alt="A detailed silver Porsche rally model with red accents, held on a display base in gloved hands" fill sizes="100vw" priority unoptimized />
+      <div className="collector-hero-shade" aria-hidden="true" />
+      <div className="collector-hero-layout shell">
+        <div id="main-content" tabIndex={-1} className="hero-content">
+          <p className="collector-hero-eyebrow"><span aria-hidden="true" />Buy. Sell. Collect.</p>
+          <h1 id="hero-heading">Find your next<br /><strong>model car.</strong></h1>
+          <p className="hero-copy"><span className="home-mobile-only">Shop model cars from stores and collectors.</span><span className="home-desktop-only">From the one that started it all to the one you’re still chasing. Shop model cars from independent sellers and fellow collectors.</span></p>
+          <form className="hero-search" role="search" onSubmit={runSearch}>
+            <label className="sr-only" htmlFor="hero-query">Search model cars</label>
+            <Icon name="search" />
+            <input id="hero-query" name="q" type="search" enterKeyHint="search" value={query} onChange={event => setQuery(event.target.value)} placeholder="Search model cars" />
+            <button type="submit">Search <Icon name="arrow" /></button>
+          </form>
+          <nav className="collector-hero-suggestions" aria-label="Suggested model searches">
+            <span>Explore:</span>
+            <Link href={marketplaceHref({ manufacturer: "AUTOart" })}>AUTOart</Link>
+            <Link href={marketplaceHref({ q: "Porsche" })}>Porsche</Link>
+            <Link href={marketplaceHref({ q: "Le Mans" })}>Le Mans</Link>
+          </nav>
+          <div className="collector-hero-actions">
+            <Link href="/marketplace">Explore the marketplace <Icon name="arrow" /></Link>
+            <Link href="/sell">Sell a model <Icon name="arrow" /></Link>
+          </div>
+        </div>
+      </div>
+      <div className="collector-hero-footer">
+        <div className="collector-hero-footer-inner shell">
+          <nav className="collector-hero-scales" aria-label="Shop model cars by scale"><span>Find your scale</span>{scales.map(scale => <Link key={scale} href={marketplaceHref({ scale })}>{scale}</Link>)}</nav>
+          <Link className="collector-hero-hunt" href={modelHuntHref()}>Chasing something special? <span>Start a Model Hunt <Icon name="arrow" /></span></Link>
+        </div>
       </div>
     </section>
 

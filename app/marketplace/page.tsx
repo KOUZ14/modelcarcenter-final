@@ -5,6 +5,7 @@ import {
 } from "@/components/marketplace-page";
 import { readMarketplaceFilters } from "@/lib/discovery";
 import { modelHuntEmailEnabled } from "@/lib/model-hunt-capabilities";
+import "@/components/discovery.css";
 
 export const metadata: Metadata = {
   title: "Marketplace",

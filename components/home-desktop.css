@@ -3,14 +3,6 @@
   .home-marketplace .home-desktop-only { display: none !important; }
   .home-marketplace .header-search { display: none; }
   .home-marketplace .collector-header { min-height: 68px; }
-  main.home-marketplace .hero-content { padding-top: 92px; padding-bottom: 16px; }
-  main.home-marketplace .hero h1 { max-width: 18ch; font-size: clamp(32px, 8vw, 44px); }
-  main.home-marketplace .hero-copy { margin-bottom: 16px; }
-  main.home-marketplace .hero-search input, main.home-marketplace .hero-search button { height: 44px; }
-  main.home-marketplace .hero-search button { padding-inline: 14px; }
-  .home-hunt-prompt { display: flex; flex-wrap: wrap; align-items: center; gap: 0 8px; margin: 8px 0 0; color: #e4e4e4; font-size: 14px; }
-  .home-hunt-prompt a { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; color: white; font-weight: 700; text-decoration: underline; text-underline-offset: 4px; }
-  .home-hunt-prompt svg { width: 16px; height: 16px; }
   main.home-marketplace .inventory-section { padding-block: 20px 28px; }
   main.home-marketplace .inventory-heading { margin-bottom: 12px; gap: 12px; }
   main.home-marketplace .home-discovery { padding: var(--space-4); border: 1px solid var(--line); border-radius: 12px; background: white; scroll-margin-top: var(--space-4); }
@@ -84,15 +76,6 @@
 @media (min-width: 821px) {
   .home-marketplace .home-mobile-only { display: none !important; }
   main.home-marketplace h2 { font-size: clamp(40px, 4.3vw, 68px); line-height: 1.12; letter-spacing: -.045em; font-weight: 500; }
-
-  main.home-marketplace .hero { min-height: 0; }
-  main.home-marketplace .hero-content { padding-top: clamp(160px, 14vw, 200px); padding-bottom: var(--section-space); }
-  main.home-marketplace .hero h1 { max-width: 870px; margin-bottom: var(--space-5); font-size: clamp(66px, 8.2vw, 128px); line-height: 1.05; letter-spacing: -.065em; font-weight: 500; }
-  main.home-marketplace .hero-copy { max-width: 650px; margin-bottom: var(--space-5); font-size: 19px; line-height: 1.58; }
-  main.home-marketplace .hero-search { width: min(820px, 100%); grid-template-columns: 28px 1fr auto; padding: 9px 9px 9px 20px; }
-  main.home-marketplace .hero-search input { height: 52px; padding: 0 14px; }
-  main.home-marketplace .hero-search button { height: 52px; padding: 0 27px; }
-  main.home-marketplace .quick-links { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-4); }
 
   main.home-marketplace .inventory-heading { align-items: flex-end; gap: var(--space-5); }
   main.home-marketplace .catalog-tools { display: flex; gap: var(--space-4); flex-wrap: wrap; justify-content: flex-end; }
