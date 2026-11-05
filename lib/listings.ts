@@ -366,6 +366,7 @@ export async function startCollectorStripeOnboarding(
     selling?: string;
     minimum?: string;
   },
+  returnView: "listings" | "payments" = "listings",
 ) {
   if (!isCurrentPolicyVersion(sellerTermsVersion)) {
     throw new ValidationError("Accept the current Seller Terms before connecting your payment method.");
@@ -401,7 +402,7 @@ export async function startCollectorStripeOnboarding(
       })
       .where(eq(sellers.id, seller.id));
   }
-  const query = new URLSearchParams(listing ? { id: listing.productId } : { view: "listings" });
+  const query = new URLSearchParams(listing ? { id: listing.productId } : { view: returnView });
   if (listing?.collectionItem) {
     query.set("collectionItem", listing.collectionItem);
     query.set("selling", listing.selling === "open_to_offers" ? "open_to_offers" : "for_sale");

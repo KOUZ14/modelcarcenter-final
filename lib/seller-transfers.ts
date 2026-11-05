@@ -22,6 +22,7 @@ type EligibleOrder = {
   totalCents: number;
   refundedAmountCents: number;
   sellerProceedsCents: number;
+  shippingLabelCostCents: number;
   sellerTransferAmountCents: number;
   sellerTransferReversedCents: number;
   preorderDepositCents?: number;
@@ -35,6 +36,7 @@ type TransferredOrder = {
   sellerTransferAmountCents: number;
   sellerTransferReversedCents: number;
   sellerProceedsCents: number;
+  shippingLabelCostCents: number;
 };
 
 export type SellerTransferGateway = {
@@ -70,6 +72,7 @@ export async function processEligibleSellerTransfers(input: {
         o.stripe_transfer_group AS stripeTransferGroup, o.currency,
         o.total_cents AS totalCents, o.refunded_amount_cents AS refundedAmountCents,
         o.seller_proceeds_cents AS sellerProceedsCents,
+        o.shipping_label_cost_cents AS shippingLabelCostCents,
         o.seller_transfer_amount_cents AS sellerTransferAmountCents,
         o.seller_transfer_reversed_cents AS sellerTransferReversedCents,
         o.preorder_deposit_cents AS preorderDepositCents
@@ -119,6 +122,7 @@ export async function processEligibleSellerTransfers(input: {
             totalCents: order.totalCents,
             refundedAmountCents: order.refundedAmountCents,
             sellerProceedsCents: order.sellerProceedsCents,
+            shippingLabelCostCents: order.shippingLabelCostCents,
           });
     if (releaseAmountCents < 1) {
       await markTransferCancelled(input.database, order.id, nowIso);
@@ -225,6 +229,7 @@ export async function processEligibleSellerTransfers(input: {
         refundedAmountCents: latest?.refundedAmountCents ?? current.refundedAmountCents,
         sellerTransferAmountCents: releaseAmountCents,
         sellerProceedsCents: order.sellerProceedsCents,
+        shippingLabelCostCents: order.shippingLabelCostCents,
       });
       const alreadyReversed = latest?.sellerTransferReversedCents ?? 0;
       if (targetReversedCents > alreadyReversed) {
@@ -275,8 +280,23 @@ export async function processEligibleSellerTransfers(input: {
 
 // Stripe can publish the balance transaction after the paid Checkout event.
 // Keep proceeds unknown (and ineligible for transfer) until the actual fee arrives.
+export async function reconcileOrderProcessingFees(input: {
+  database: D1Database;
+  orderIds: string[];
+  retrieveSession?: typeof retrieveCheckoutSession;
+}) {
+  const orderIds = [...new Set(input.orderIds)];
+  if (!orderIds.length) return;
+  if (orderIds.length > RELEASE_BATCH_SIZE) throw new Error("Too many orders to reconcile.");
+  // Request-scoped accounting only. This must never release seller transfers.
+  await reconcileProcessingFees(input.database,
+    { retrieveSession: input.retrieveSession ?? retrieveCheckoutSession },
+    new Date().toISOString(), orderIds.length, orderIds);
+}
+
 async function reconcileProcessingFees(
-  database: D1Database, gateway: SellerTransferGateway, nowIso: string, limit: number,
+  database: D1Database, gateway: Pick<SellerTransferGateway, "retrieveSession">,
+  nowIso: string, limit: number, orderIds?: string[],
 ) {
   if (!gateway.retrieveSession) return;
   const pending = await database.prepare(`SELECT id, stripe_checkout_session_id AS sessionId,
@@ -287,7 +307,8 @@ async function reconcileProcessingFees(
       AND seller_proceeds_cents IS NULL AND stripe_transfer_id IS NULL
       AND seller_transfer_status IN ('pending', 'failed', 'cancelled')
       AND payment_status IN ('paid', 'partially_refunded', 'refunded')
-    ORDER BY updated_at, created_at LIMIT ?`).bind(limit).all<{
+      ${orderIds ? `AND id IN (${orderIds.map(() => "?").join(",")})` : ""}
+    ORDER BY updated_at, created_at LIMIT ?`).bind(...(orderIds ?? []), limit).all<{
       id: string; sessionId: string; totalCents: number; taxCents: number;
       currency: string; platformFeeCents: number; chargeId: string | null; checkoutGroupId: string | null; preorderDepositCents:number;
     }>();
@@ -355,7 +376,8 @@ async function reconcileTransferReversals(input: {
         refunded_amount_cents AS refundedAmountCents,
         seller_transfer_amount_cents AS sellerTransferAmountCents,
         seller_transfer_reversed_cents AS sellerTransferReversedCents,
-        seller_proceeds_cents AS sellerProceedsCents
+        seller_proceeds_cents AS sellerProceedsCents,
+        shipping_label_cost_cents AS shippingLabelCostCents
        FROM orders
        WHERE payment_flow = 'separate'
          AND stripe_transfer_id IS NOT NULL
@@ -375,6 +397,7 @@ async function reconcileTransferReversals(input: {
       refundedAmountCents: order.refundedAmountCents,
       sellerTransferAmountCents: order.sellerTransferAmountCents,
       sellerProceedsCents: order.sellerProceedsCents,
+      shippingLabelCostCents: order.shippingLabelCostCents,
     });
     if (targetReversedCents <= order.sellerTransferReversedCents) continue;
     try {

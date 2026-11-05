@@ -201,7 +201,7 @@ export async function recoverPreorderRefunds() {
       }
       const matchesOrder=order?.stripeCheckoutSessionId===l.sessionId;
       const refund=await createOrderRefund({orderId:matchesOrder?order.id:`preorder-${l.sessionId}`,paymentIntentId:l.paymentIntentId,chargeId:l.chargeId,paymentFlow:"separate",totalCents:matchesOrder?order.totalCents:l.amountCents,
-        refundedAmountCents:balance.refundedCents,stripeTransferId:matchesOrder?order.stripeTransferId:null,sellerTransferAmountCents:matchesOrder?order.sellerTransferAmountCents:0,sellerTransferReversedCents:matchesOrder?order.sellerTransferReversedCents:0,sellerProceedsCents:matchesOrder?order.sellerProceedsCents:null});
+        refundedAmountCents:balance.refundedCents,stripeTransferId:matchesOrder?order.stripeTransferId:null,sellerTransferAmountCents:matchesOrder?order.sellerTransferAmountCents:0,sellerTransferReversedCents:matchesOrder?order.sellerTransferReversedCents:0,shippingLabelCostCents:matchesOrder?order.shippingLabelCostCents:0,sellerProceedsCents:matchesOrder?order.sellerProceedsCents:null});
       await getD1().prepare("UPDATE preorder_payment_ledger SET refund_id=?,refund_status=?,error=NULL,updated_at=? WHERE id=?").bind(refund.id,refund.status==="succeeded"?"required":refund.status,now(),l.id).run();
       // A concurrent partial refund can own the shared idempotency key. Its
       // success is not evidence that the entire cancellation was refunded.

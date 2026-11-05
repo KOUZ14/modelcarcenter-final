@@ -162,6 +162,7 @@ export async function getStoreDashboardData(userId: string) {
         processingFeePayer: orders.processingFeePayer,
         paymentProcessingFeeCents: orders.paymentProcessingFeeCents,
         sellerProceedsCents: orders.sellerProceedsCents,
+          shippingLabelCostCents: orders.shippingLabelCostCents,
         paymentFlow: orders.paymentFlow,
         sellerTransferStatus: orders.sellerTransferStatus,
         sellerTransferAmountCents: orders.sellerTransferAmountCents,

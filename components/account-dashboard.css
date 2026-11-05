@@ -1,4 +1,28 @@
 .account-page { padding-top: 28px; }
+.account-payments { display: grid; gap: 20px; }
+.account-payment-panel { padding: 20px; background: white; border: 1px solid var(--line); min-width: 0; }
+.account-payment-panel h3, .account-payment-totals h3 { margin: 0 0 8px; font-size: 18px; font-weight: 600; }
+.account-payment-panel p, .account-payment-totals p, .account-payment-note { margin: 8px 0; color: var(--muted); font-size: 14px; line-height: 1.6; }
+.account-payment-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; }
+.account-payment-setup { display: grid; justify-items: start; gap: 12px; margin-top: 16px; }
+.account-payment-currency { display: grid; gap: 4px; font-size: 13px; }
+.account-payment-currency select { min-height: 44px; padding: 8px 12px; border: 1px solid var(--line); background: white; color: var(--ink); font-size: 16px; }
+.account-payment-totals { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.account-payment-totals > section { padding: 20px; border: 1px solid var(--line); background: white; }
+.account-payment-totals strong { font-size: clamp(24px, 3vw, 32px); font-weight: 500; font-variant-numeric: tabular-nums; }
+.account-payment-history { display: grid; gap: 12px; }
+.account-payment-result { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px 16px; margin-top: 14px; }
+.account-payment-result h4 { margin: 0; font-size: 16px; font-weight: 600; }
+.account-payment-result > strong { font-size: 22px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.account-payment-panel summary { min-height: 44px; padding: 12px 0; font-size: 14px; cursor: pointer; }
+.account-payment-panel .seller-order-amounts { margin: 0 0 12px; font-size: 13px; }
+.account-payment-panel .seller-order-amounts > div { gap: 12px; }
+.account-payment-panel .seller-order-amounts dd { flex-shrink: 0; }
+@media (max-width: 620px) {
+  .account-payment-totals { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .account-payment-panel, .account-payment-totals > section { padding: 16px; }
+  .account-payment-actions > .button { width: 100%; }
+}
 .account-dashboard { grid-template-columns: 240px minmax(0, 1fr); gap: 32px; }
 .account-dashboard .garage-nav { padding: 20px; color: var(--ink); background: white; border: 1px solid var(--line); }
 .account-dashboard .garage-nav h1 { margin: 0 0 8px; font-size: 30px; line-height: 1.2; font-weight: 500; }

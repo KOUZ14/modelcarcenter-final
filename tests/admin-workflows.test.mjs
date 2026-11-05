@@ -45,6 +45,9 @@ test("admin recovery, API payloads, editor initial state, and maintenance previe
     assert.equal(sqlite.prepare("SELECT is_test_order FROM orders WHERE id='mismatch'").get().is_test_order, 0);
     assert.deepEqual(sqlite.prepare("PRAGMA foreign_key_check").all(), []);
   });
+  // Keep the recovery test at its historical migration, then exercise today's
+  // API against the current schema (including shipping-label accounting).
+  for (const file of (await readdir(join(root, "drizzle"))).filter(n => n.endsWith(".sql") && n > "0036_admin_workflows.sql").sort()) sqlite.exec(await readFile(join(root, "drizzle", file), "utf8"));
   const binding = { prepare(query) { let values = []; return {
     bind(...args) { values = args; return this; },
     async raw() { const statement = sqlite.prepare(query); statement.setReturnArrays(true); return statement.all(...values); },

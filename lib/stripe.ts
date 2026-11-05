@@ -388,6 +388,12 @@ export async function retrieveStripeAccount(accountId: string) {
   return stripeRequest<StripeAccount>(`/v1/accounts/${encodeURIComponent(accountId)}`);
 }
 
+export async function createExpressDashboardLink(accountId: string) {
+  return stripeRequest<{ url: string }>(`/v1/accounts/${encodeURIComponent(accountId)}/login_links`, {
+    method: "POST",
+  });
+}
+
 export async function assertSellerPaymentsReady(accountId: string, sellerName: string) {
   let account: StripeAccount;
   try {
@@ -493,6 +499,7 @@ export async function createOrderRefund(input: {
   sellerTransferAmountCents?: number;
   sellerTransferReversedCents?: number;
   sellerProceedsCents?: number | null;
+  shippingLabelCostCents?: number;
 }) {
   const refundedAmountCents = input.refundedAmountCents ?? 0;
   const remainingCents = input.totalCents == null ? undefined : input.totalCents - refundedAmountCents;
@@ -544,6 +551,7 @@ export async function createOrderRefund(input: {
       sellerTransferAmountCents: input.sellerTransferAmountCents,
       sellerProceedsCents:
         input.sellerProceedsCents ?? input.sellerTransferAmountCents,
+      shippingLabelCostCents: input.shippingLabelCostCents,
     });
     const amountToReverse = Math.max(
       0,
@@ -573,6 +581,7 @@ export async function createFullRefund(input: {
   sellerTransferAmountCents?: number;
   sellerTransferReversedCents?: number;
   sellerProceedsCents?: number | null;
+  shippingLabelCostCents?: number;
 }) {
   return createOrderRefund(input);
 }
@@ -582,6 +591,7 @@ export function sellerTransferReversalTarget(input: {
   refundedAmountCents: number;
   sellerTransferAmountCents: number;
   sellerProceedsCents?: number;
+  shippingLabelCostCents?: number;
 }) {
   if (input.totalCents < 1 || input.sellerTransferAmountCents < 1) return 0;
   const netSellerProceeds = sellerProceedsAfterRefund({
@@ -589,6 +599,7 @@ export function sellerTransferReversalTarget(input: {
     refundedAmountCents: input.refundedAmountCents,
     sellerProceedsCents:
       input.sellerProceedsCents ?? input.sellerTransferAmountCents,
+    shippingLabelCostCents: input.shippingLabelCostCents,
   });
   return Math.min(
     input.sellerTransferAmountCents,

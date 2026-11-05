@@ -100,6 +100,7 @@ export async function processStripeEvent(event: StripeEvent) {
         totalCents: matchedOrder.totalCents,
         refundedAmountCents: amountRefunded,
         sellerTransferAmountCents: matchedOrder.sellerTransferAmountCents,
+        shippingLabelCostCents: matchedOrder.shippingLabelCostCents,
         sellerProceedsCents:
           matchedOrder.sellerProceedsCents ??
           matchedOrder.sellerTransferAmountCents,

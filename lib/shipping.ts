@@ -29,6 +29,9 @@ import {
   shippingAddressKey,
 } from "./shipping-rules";
 import { cleanText, ValidationError } from "./validation";
+import { allocateCents } from "./checkout-allocation";
+import { sellerLabelBudget } from "./seller-proceeds";
+import { reconcileOrderProcessingFees } from "./seller-transfers";
 import {
   parseStoredShipFromAddress,
   shipFromAddressKey,
@@ -44,12 +47,14 @@ export async function quoteOwnedOrders(
   payload: Record<string, unknown>,
 ) {
   const orderIds = parseOrderIds(payload.orderIds);
-  const rows = await loadOwnedOrders(userId, orderIds);
+  const parcel = parseParcel(payload);
+  const rows = await loadOrdersForLabel(userId, orderIds);
   const { store, origin, recipient, declaredValueCents } = validateOrdersForShipment(
     rows,
     orderIds,
   );
-  const parcel = parseParcel(payload);
+  const availableProceeds = labelFunding(rows);
+  await assertNoPendingLabel(store.id, orderIds);
   const rules = highValueShippingRules(
     declaredValueCents,
     config.shippoInsuranceThresholdCents,
@@ -79,6 +84,8 @@ export async function quoteOwnedOrders(
   const allowedRates = result.rates.filter(
     (rate) =>
       rate.amountCents <= config.shippoMaxLabelCostCents &&
+      rate.currency.toUpperCase() === "USD" &&
+      rate.amountCents <= availableProceeds.reduce((sum, amount) => sum + amount, 0) &&
       requirements.every((requirement) =>
         rateMeetsShippingRequirement(rate, requirement),
       ),
@@ -87,7 +94,7 @@ export async function quoteOwnedOrders(
     throw new ValidationError(
       requirements.length
         ? "No current label matches or improves on the buyer-selected service. Refresh later or add compliant tracking manually."
-        : "Available labels exceed the marketplace purchase limit. Buy a label elsewhere and add tracking manually.",
+        : "No label fits the available seller proceeds and marketplace purchase limit. Buy a label elsewhere and add tracking manually.",
     );
   const now = new Date();
   const expiresAt = new Date(
@@ -147,11 +154,13 @@ export async function purchaseOwnedLabel(
     .limit(1);
   const row = quoteRows[0];
   if (!row) throw new ValidationError("Shipping quote not found.");
+  if (row.quote.status !== "quoted")
+    throw new ValidationError("This quote is already being purchased or has been used. Refresh My Sales or contact MCC support.");
   if (new Date(row.quote.expiresAt).getTime() <= Date.now()) {
     await getDb()
       .update(shippingQuotes)
       .set({ status: "expired", updatedAt: new Date().toISOString() })
-      .where(eq(shippingQuotes.id, quoteId));
+      .where(and(eq(shippingQuotes.id, quoteId), eq(shippingQuotes.status, "quoted")));
     throw new ValidationError("That shipping quote expired. Request fresh rates.");
   }
   const rates = parseStoredRates(row.quote.rates);
@@ -161,8 +170,13 @@ export async function purchaseOwnedLabel(
   if (rate.amountCents > config.shippoMaxLabelCostCents)
     throw new ValidationError("The selected label exceeds the marketplace purchase limit.");
   const orderIds = parseStoredOrderIds(row.quote.orderIds);
-  const orderRows = await loadOwnedOrders(userId, orderIds);
+  const orderRows = await loadOrdersForLabel(userId, orderIds);
   validateOrdersForShipment(orderRows, orderIds);
+  const availableProceeds = labelFunding(orderRows);
+  if (rate.currency.toUpperCase() !== "USD" || !Number.isSafeInteger(rate.amountCents) || rate.amountCents < 0 ||
+      rate.amountCents > availableProceeds.reduce((sum, amount) => sum + amount, 0))
+    throw new ValidationError("Available seller proceeds cannot cover this label. Request fresh rates.");
+  const costShares = allocateCents(rate.amountCents, availableProceeds);
   const requirements = selectedServiceRequirements(orderRows);
   if (
     !requirements.every((requirement) =>
@@ -181,11 +195,18 @@ export async function purchaseOwnedLabel(
       and(
         eq(shippingQuotes.id, quoteId),
         eq(shippingQuotes.status, "quoted"),
+        sql`julianday(${shippingQuotes.expiresAt}) > julianday('now')`,
+        // Serialize overlapping quotes as well as repeated requests for one
+        // quote: two browser tabs must never buy two labels for the same order.
+        sql`NOT EXISTS (SELECT 1 FROM shipping_quotes other, json_each(other.order_ids) item
+          WHERE other.seller_id = ${row.store.id} AND other.id <> ${quoteId}
+            AND other.status IN ('purchasing', 'purchased')
+            AND item.value IN (${sql.join(orderIds.map(id => sql`${id}`), sql`, `)}))`,
       ),
     )
     .returning({ id: shippingQuotes.id });
   if (!claimed[0])
-    throw new ValidationError("This quote is already being purchased or has been used.");
+    throw new ValidationError("A label for these orders is already being purchased or has been created. Refresh My Sales before trying again.");
 
   let transaction;
   try {
@@ -193,9 +214,10 @@ export async function purchaseOwnedLabel(
       rateId,
       `MCC ${orderRows.map((item) => item.order.orderNumber).join(",")}`,
     );
-  } catch (error) {
-    await markQuoteFailed(quoteId);
-    throw error;
+  } catch {
+    // A lost response can still mean the carrier charged us. Preserve the
+    // claim for reconciliation instead of allowing another purchase.
+    throw new ShippoApiError("The carrier did not confirm the label purchase. Contact MCC support before trying again; another label purchase is blocked to prevent a duplicate charge.");
   }
   if (
     transaction.status !== "SUCCESS" ||
@@ -203,6 +225,8 @@ export async function purchaseOwnedLabel(
     !transaction.object_id ||
     !transaction.tracking_number
   ) {
+    if (transaction.status !== "ERROR" && transaction.object_state !== "INVALID")
+      throw new ShippoApiError("The label purchase is still awaiting carrier confirmation. Contact MCC support before trying again.");
     await markQuoteFailed(quoteId);
     const details = (transaction.messages ?? [])
       .map((message) => message.text?.trim())
@@ -263,15 +287,18 @@ export async function purchaseOwnedLabel(
         now,
       ),
   ];
-  for (const orderId of orderIds) {
+  for (const [index, { order }] of orderRows.entries()) {
+    const orderId = order.id;
     statements.push(
       getD1()
         .prepare("INSERT INTO shipment_orders (id, shipment_id, order_id) VALUES (?, ?, ?)")
         .bind(crypto.randomUUID(), shipmentId, orderId),
       getD1()
-        .prepare(`UPDATE orders SET carrier = ?, tracking_number = ?, fulfillment_status = 'processing', updated_at = ?
-          WHERE id = ? AND seller_id = ? AND fulfillment_status = 'unfulfilled'`)
-        .bind(rate.provider, transaction.tracking_number, now, orderId, row.store.id),
+        .prepare(`UPDATE orders SET carrier = ?, tracking_number = ?,
+          shipping_label_cost_cents = shipping_label_cost_cents + ?,
+          fulfillment_status = CASE WHEN fulfillment_status = 'unfulfilled' THEN 'processing' ELSE fulfillment_status END,
+          updated_at = ? WHERE id = ? AND seller_id = ?`)
+        .bind(rate.provider, transaction.tracking_number, costShares[index], now, orderId, row.store.id),
     );
   }
   await getD1().batch(statements);
@@ -533,7 +560,43 @@ async function loadOwnedOrders(userId: string, orderIds: string[]) {
   if (!owned.length) return [];
   // Separate projections keep D1's 100-column result limit as records grow.
   const stores = await db.select().from(sellers).where(and(eq(sellers.ownerUserId, userId), inArray(sellers.id, [...new Set(owned.map(row => row.order.sellerId))])));
-  return owned.flatMap(({ order }) => { const store = stores.find(row => row.id === order.sellerId); return store ? [{ order, store }] : []; });
+  return owned.sort((a, b) => a.order.id.localeCompare(b.order.id)).flatMap(({ order }) => { const store = stores.find(row => row.id === order.sellerId); return store ? [{ order, store }] : []; });
+}
+
+async function loadOrdersForLabel(userId: string, orderIds: string[]) {
+  let rows = await loadOwnedOrders(userId, orderIds);
+  validateOrdersForShipment(rows, orderIds);
+  labelFunding(rows); // Check ownership, payment and held funds before any Stripe request.
+  const pending = rows.filter(({ order }) => order.sellerProceedsCents == null);
+  if (pending.length) {
+    await reconcileOrderProcessingFees({ database: getD1(), orderIds: pending.map(({ order }) => order.id) });
+    rows = await loadOwnedOrders(userId, orderIds);
+    // Refunds, fulfillment and transfers can change while Stripe is responding.
+    validateOrdersForShipment(rows, orderIds);
+  }
+  return rows;
+}
+
+function labelFunding(rows: Awaited<ReturnType<typeof loadOwnedOrders>>) {
+  return rows.map(({ order }) => {
+    if (order.paymentFlow !== "separate" || order.stripeTransferId || order.sellerTransferAmountCents > 0 ||
+        !["pending", "failed"].includes(order.sellerTransferStatus))
+      throw new ValidationError("This order does not have held seller proceeds available for a label. Buy a label elsewhere and add tracking manually.");
+    return sellerLabelBudget(order);
+  });
+}
+
+async function assertNoPendingLabel(sellerId: string, orderIds: string[]) {
+  const pending = await getDb().select({ id: shippingQuotes.id }).from(shippingQuotes).where(and(
+    eq(shippingQuotes.sellerId, sellerId), inArray(shippingQuotes.status, ["purchasing", "purchased"]),
+    sql`EXISTS (SELECT 1 FROM json_each(${shippingQuotes.orderIds}) item
+      WHERE item.value IN (${sql.join(orderIds.map(id => sql`${id}`), sql`, `)}))`,
+  )).limit(1);
+  if (pending.length) throw new ValidationError("A label purchase already exists for this order. Refresh My Sales or contact MCC support if the label is not visible.");
+}
+
+function assertTrackingIdentity(tracking: ShippoTracking, carrier: string, trackingNumber: string) {
+  if (tracking.carrier?.toLowerCase() !== carrier.toLowerCase() || tracking.tracking_number !== trackingNumber) throw new ShippoApiError("Tracking verification is temporarily unavailable.");
 }
 
 function validateOrdersForShipment(
@@ -667,8 +730,4 @@ function safeHttpsUrl(value: string | null | undefined) {
   } catch {
     return null;
   }
-}
-
-function assertTrackingIdentity(tracking: ShippoTracking, carrier: string, trackingNumber: string) {
-  if (tracking.carrier?.toLowerCase() !== carrier.toLowerCase() || tracking.tracking_number !== trackingNumber) throw new ShippoApiError("Tracking verification is temporarily unavailable.");
 }

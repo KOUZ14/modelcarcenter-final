@@ -23,7 +23,7 @@ export type HubProduct = Parameters<typeof listingPhotoEvidence>[0] & {
 export type HubOrder = {
   id: string; buyerEmail: string; paymentStatus: string; fulfillmentStatus: string;
   createdAt: string; paidAt: string | null; subtotalCents: number;
-  sellerProceedsCents: number | null; paymentFlow: string; sellerTransferStatus: string;
+  shippingLabelCostCents?: number; sellerProceedsCents: number | null; paymentFlow: string; sellerTransferStatus: string;
   sellerTransferAmountCents: number; sellerTransferReversedCents: number;
   totalCents: number; refundedAmountCents: number;
 };

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { getD1, getDb } from "@/db";
 import {
   cartItems,
@@ -22,6 +22,7 @@ import {
   uniqueWishlistIds,
 } from "./account-rules";
 import { loadAuthoritativeCartItems, type RequestedCartItem } from "./inventory";
+import { config } from "./config";
 import { POLICY_VERSION } from "./legal";
 import { getVerifiedFeedbackEligibility } from "./reputation-rules";
 import type { CartItem } from "./types";
@@ -458,6 +459,7 @@ export async function getGarageData(userId: string) {
           processingFeePayer: orders.processingFeePayer,
           paymentProcessingFeeCents: orders.paymentProcessingFeeCents,
           sellerProceedsCents: orders.sellerProceedsCents,
+          shippingLabelCostCents: orders.shippingLabelCostCents,
           paymentFlow: orders.paymentFlow,
           sellerTransferStatus: orders.sellerTransferStatus,
           sellerTransferAmountCents: orders.sellerTransferAmountCents,
@@ -472,12 +474,21 @@ export async function getGarageData(userId: string) {
           deliveredAt: orders.deliveredAt,
           payoutEligibleAt: orders.payoutEligibleAt,
           sellerTransferredAt: orders.sellerTransferredAt,
+          isTestOrder: orders.isTestOrder,
+          payoutHold: sql<boolean>`(
+            EXISTS (SELECT 1 FROM resolution_cases rc WHERE rc.order_id = ${orders.id}
+              AND rc.status NOT IN ('resolved', 'closed', 'denied')
+              AND NOT EXISTS (SELECT 1 FROM resolution_late_reviews lr WHERE lr.case_id = rc.id AND lr.payout_hold = 0))
+            OR EXISTS (SELECT 1 FROM disputes d WHERE (d.order_id = ${orders.id} OR d.stripe_charge_id = ${orders.stripeChargeId})
+              AND d.status NOT IN ('won', 'prevented', 'warning_closed'))
+            OR EXISTS (SELECT 1 FROM preorder_refund_requests pr WHERE pr.order_id = ${orders.id} AND pr.status IN ('pending', 'failed'))
+          )`.mapWith(Boolean),
         })
         .from(orders)
         .where(
           and(
             eq(orders.sellerId, seller.id),
-            inArray(orders.paymentStatus, ["paid", "partially_refunded"]),
+            inArray(orders.paymentStatus, ["paid", "partially_refunded", "refunded"]),
           ),
         )
         .orderBy(desc(orders.createdAt))
@@ -488,6 +499,18 @@ export async function getGarageData(userId: string) {
         .select()
         .from(orderItems)
         .where(inArray(orderItems.orderId, saleIds))
+    : [];
+  const saleShipmentLinks = saleIds.length
+    ? await db.select({ orderId: shipmentOrders.orderId, shipment: shipments })
+        .from(shipmentOrders)
+        .innerJoin(shipments, eq(shipmentOrders.shipmentId, shipments.id))
+        .where(inArray(shipmentOrders.orderId, saleIds))
+    : [];
+  const saleShipmentIds = [...new Set(saleShipmentLinks.map(link => link.shipment.id))];
+  const saleShipmentEvents = saleShipmentIds.length
+    ? await db.select().from(trackingEvents)
+        .where(inArray(trackingEvents.shipmentId, saleShipmentIds))
+        .orderBy(desc(trackingEvents.statusDate))
     : [];
   return {
     wishlist,
@@ -509,9 +532,16 @@ export async function getGarageData(userId: string) {
     hunts: huntRows,
     seller,
     listings: listingRows,
-    sales: saleRows.map((order) => ({
+    shipping: {
+      configured: Boolean(config.shippoApiKey),
+      insuranceThresholdCents: config.shippoInsuranceThresholdCents,
+      signatureThresholdCents: config.shippoSignatureThresholdCents,
+    },
+    payments: saleRows,
+    sales: saleRows.filter(order => order.paymentStatus !== "refunded").map((order) => ({
       ...order,
       items: saleItems.filter((item) => item.orderId === order.id),
+      shipment: shipmentForBuyerOrder(order.id, saleShipmentLinks, saleShipmentEvents),
     })),
   };
 }

@@ -27,7 +27,7 @@ export async function reconcileCheckoutRefunds(event: { id: string; type: string
     const amount = amounts.get(order.id)! + shared[index];
     let reversed = order.sellerTransferReversedCents;
     if (order.stripeTransferId && order.sellerTransferAmountCents > 0) {
-      const target = sellerTransferReversalTarget({ totalCents: order.totalCents, refundedAmountCents: amount, sellerTransferAmountCents: order.sellerTransferAmountCents, sellerProceedsCents: order.sellerProceedsCents ?? order.sellerTransferAmountCents });
+      const target = sellerTransferReversalTarget({ totalCents: order.totalCents, refundedAmountCents: amount, sellerTransferAmountCents: order.sellerTransferAmountCents, shippingLabelCostCents: order.shippingLabelCostCents, sellerProceedsCents: order.sellerProceedsCents ?? order.sellerTransferAmountCents });
       if (target > reversed) {
         await reverseSellerTransfer({ transferId: order.stripeTransferId, orderId: order.id, amountCents: target - reversed, targetReversedCents: target });
         reversed = target;

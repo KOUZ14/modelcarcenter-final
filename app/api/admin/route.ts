@@ -1221,6 +1221,7 @@ async function refundOrder(payload: Record<string, unknown>) {
     sellerTransferAmountCents: order.sellerTransferAmountCents,
     sellerTransferReversedCents: order.sellerTransferReversedCents,
     sellerProceedsCents: order.sellerProceedsCents,
+    shippingLabelCostCents: order.shippingLabelCostCents,
   });
   if (refund.status !== "succeeded")
     return { refundId: refund.id, refundStatus: refund.status, pending: true };

@@ -29,7 +29,7 @@ export function sellerPaymentStatus(store: { status: string; stripeChargesEnable
 export type PayoutOrder = {
   paymentFlow: string; paymentStatus: string; sellerTransferStatus: string;
   sellerTransferAmountCents: number; sellerTransferReversedCents: number;
-  sellerProceedsCents: number | null; totalCents: number; refundedAmountCents: number;
+  shippingLabelCostCents?: number; sellerProceedsCents: number | null; totalCents: number; refundedAmountCents: number;
 };
 export function sellerOrderPayout(order: PayoutOrder) {
   if (!["paid", "partially_refunded", "refunded"].includes(order.paymentStatus)) return { label: "Payment not completed", amount: null, legacy: false };

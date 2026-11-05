@@ -747,6 +747,7 @@ export async function issueResolutionRefund(
     sellerTransferAmountCents: access.order.sellerTransferAmountCents,
     sellerTransferReversedCents:
       access.order.sellerTransferReversedCents,
+    shippingLabelCostCents: access.order.shippingLabelCostCents,
     sellerProceedsCents: access.order.sellerProceedsCents,
   });
   const succeeded = refund.status === "succeeded";
@@ -991,6 +992,7 @@ export async function decideAdminResolutionCase(
     sellerTransferAmountCents: row.order.sellerTransferAmountCents,
     sellerTransferReversedCents:
       row.order.sellerTransferReversedCents,
+    shippingLabelCostCents: row.order.shippingLabelCostCents,
     sellerProceedsCents: row.order.sellerProceedsCents,
   });
   const succeeded = refund.status === "succeeded";

@@ -4,11 +4,15 @@ export function SellerOrderAmounts({ order }: { order: SellerFeeAmounts & {
   currency: string; subtotalCents: number; shippingCents: number;
   marketplaceFeeBps: number; sellerProceedsCents: number | null;
   refundedAmountCents: number; paymentStatus: string;
+  shippingLabelCostCents?: number;
 } }) {
   const money = (cents: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: order.currency }).format(cents / 100);
   const deduction = sellerProcessingDeduction(order);
   const sellerPays = order.processingFeePayer === "seller";
   const refunded = order.paymentStatus === "refunded" || order.refundedAmountCents > 0;
+  const labelCost = order.shippingLabelCostCents ?? 0;
+  const beforeLabel = order.sellerProceedsCents == null ? null : order.paymentStatus === "refunded" ? 0 :
+    sellerProceedsAfterRefund({ ...order, sellerProceedsCents: order.sellerProceedsCents, shippingLabelCostCents: 0 });
   const remaining = order.sellerProceedsCents == null ? null : order.paymentStatus === "refunded" ? 0 :
     sellerProceedsAfterRefund({ ...order, sellerProceedsCents: order.sellerProceedsCents });
   return <dl className="store-order-totals seller-order-amounts">
@@ -24,6 +28,7 @@ export function SellerOrderAmounts({ order }: { order: SellerFeeAmounts & {
     <div><dt>Your proceeds {refunded ? "before refunds" : "before fulfillment costs"}</dt><dd>{order.sellerProceedsCents == null
       ? sellerPays ? "Pending - waiting for Stripe fee" : "Not recorded for this order"
       : money(order.sellerProceedsCents)}</dd></div>
-    {refunded && <><div><dt>Customer refunds</dt><dd>{money(order.refundedAmountCents)}</dd></div><div><dt>Your proceeds after refunds, before fulfillment costs</dt><dd>{remaining == null ? "Pending" : money(remaining)}</dd></div></>}
+    {refunded && <><div><dt>Customer refunds</dt><dd>{money(order.refundedAmountCents)}</dd></div><div><dt>Your proceeds after refunds, before fulfillment costs</dt><dd>{beforeLabel == null ? "Pending" : money(beforeLabel)}</dd></div></>}
+    {labelCost > 0 && <><div><dt>MCC shipping label</dt><dd>−{money(labelCost)}</dd></div><div><dt>Your proceeds after label costs{refunded ? " and refunds" : ""}</dt><dd>{remaining == null ? "Pending" : money(remaining)}</dd></div></>}
   </dl>;
 }

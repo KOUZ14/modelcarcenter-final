@@ -14,6 +14,7 @@ import "./seller-workflows.css";
 import "./seller-dashboard.css";
 import { SellerNavigation } from "./seller-navigation";
 import { needsShipment, prioritizeOrders, sellerOrderPayout } from "@/lib/seller-dashboard";
+import { SellerShipmentPanel } from "./seller-shipment-panel";
 import { SellerOrderAmounts } from "./seller-order-amounts";
 import { PreorderSeller, SellerPreorderOrders } from "./preorder-seller";
 
@@ -38,7 +39,6 @@ import {
   RequiredPhotoChecklist,
 } from "@/components/collectible-listing-fields";
 import {
-  ShipmentTimeline,
   type ShipmentTimelineData,
 } from "@/components/shipment-timeline";
 import { POLICY_VERSION } from "@/lib/legal";
@@ -164,6 +164,7 @@ export type StoreOrder = {
   processingFeePayer: "platform" | "seller";
   paymentProcessingFeeCents: number | null;
   sellerProceedsCents: number | null;
+  shippingLabelCostCents: number;
   paymentFlow: "destination" | "separate";
   sellerTransferStatus: string;
   sellerTransferAmountCents: number;
@@ -795,7 +796,7 @@ function ProductEditor({
             </div>
             {availabilityType === "preorder" && <>
               <div className="form-row"><label>Close preorders on (optional)<input name="preorderCutoff" type="date" defaultValue={product?.preorder?.cutoff ?? ""}/></label><label>Maximum per buyer<input name="preorderBuyerLimit" type="number" min="1" max="10" defaultValue={product?.preorder?.buyerLimit ?? 10}/></label></div>
-              <div className="preorder-deposit-preview"><strong>10% deposit{Number(price) > 0 ? ` · ${formatMoney(Math.round(Number(price) * 10), "usd")} per item` : ""}</strong><p>Buyers pay the deposit now and the remaining balance when you mark stock ready. Shipping and applicable tax are shown before payment.</p><p>The deposit is non-refundable for a change of mind, unless you approve a refund. If you cannot fulfill, the buyer is refunded. Required refunds for delays and other consumer rights still apply.</p></div>
+              <div className="preorder-deposit-preview"><strong>10% deposit{Number(price) > 0 ? ` · ${formatMoney(Math.round(Number(price) * 10), "usd")} per item` : ""}</strong><p>Buyers pay the deposit now and the remaining balance when you mark stock ready. Shipping and applicable tax are shown before payment.</p><p>New deposits are refundable before shipment, including buyer cancellation or a missed balance deadline. Existing reservations keep their accepted terms and remain subject to applicable consumer rights.</p></div>
             </>}
           </fieldset>
           <details><summary>Package override (optional)</summary><p className="form-note">Leave all four blank to use the store default package for calculated checkout rates.</p><div className="parcel-grid"><label>Length (in)<input name="packageLength" inputMode="decimal" defaultValue={product?.packageLength ?? ""} /></label><label>Width (in)<input name="packageWidth" inputMode="decimal" defaultValue={product?.packageWidth ?? ""} /></label><label>Height (in)<input name="packageHeight" inputMode="decimal" defaultValue={product?.packageHeight ?? ""} /></label><label>Weight (lb)<input name="packageWeight" inputMode="decimal" defaultValue={product?.packageWeight ?? ""} /></label></div></details>
@@ -890,233 +891,11 @@ function SellerOrderCard({ order, rows, store, shipping, disabled, action }: {
     {readyToShip && <p className="seller-dispatch-date">{order.shipByAt ? `Dispatch deadline: ${dateTime(order.shipByAt)}` : "Dispatch deadline not recorded - check with support."}</p>}
     <details className="seller-fulfillment"><summary>{readyToShip && order.items.length && !order.shipment ? "Create shipment" : "Delivery & tracking details"}</summary><div className="seller-fulfillment-content"><h4>Ship to</h4><p><strong>{order.buyerName || "Customer"}</strong><br/>{formatAddress(order.shippingAddress)}</p><p><a href={`mailto:${order.buyerEmail}`}>{order.buyerEmail}</a></p>
       {order.shippingMode === "calculated" && <p><b>Buyer selected:</b> {order.selectedShippingCarrier} {order.selectedShippingService}{order.selectedShippingEstimatedDays == null ? "" : ` · about ${order.selectedShippingEstimatedDays} business days`}. Use this service or an equal/faster one.</p>}
-      {["paid", "partially_refunded"].includes(order.paymentStatus) && (order.items.length || !readyToShip) ? <ShipmentPanel order={order} compatibleOrders={compatibleOrdersFor(order, rows).filter(candidate => candidate.items.length > 0)} store={store} shipping={shipping} disabled={disabled} action={action}/> : <p>{readyToShip ? "Shipment creation is unavailable until this order’s items are confirmed." : "Shipment creation requires a paid order."}</p>}
+      {["paid", "partially_refunded"].includes(order.paymentStatus) && (order.items.length || !readyToShip) ? <SellerShipmentPanel order={order} compatibleOrders={compatibleOrdersFor(order, rows).filter(candidate => candidate.items.length > 0)} store={store} shipping={shipping} disabled={disabled} action={action}/> : <p>{readyToShip ? "Shipment creation is unavailable until this order’s items are confirmed." : "Shipment creation requires a paid order."}</p>}
     </div></details>
     <details className="seller-order-finances"><summary>Payment & fee details</summary><SellerOrderAmounts order={order}/><p><b>Payout:</b> {sellerOrderPayout(order).label}</p>{order.processingFeePayer === "platform" && <p>This order records processing paid by MCC under its earlier fee arrangement. New orders deduct actual processing from seller proceeds.</p>}{order.paymentFlow === "destination" && <p>Legacy direct payouts are excluded from MCC’s held/released totals. Check Stripe for this payment’s payout history.</p>}</details>
     <div className="seller-task-links"><Link href={`/store?view=messages`}>Buyer messages →</Link><Link href={`/resolution?order=${order.id}`}>Order support →</Link></div>
   </article>;
-}
-
-function ShipmentPanel({
-  order,
-  compatibleOrders,
-  store,
-  shipping,
-  disabled,
-  action,
-}: {
-  order: StoreOrder;
-  compatibleOrders: StoreOrder[];
-  store: Store;
-  shipping: StoreData["shipping"];
-  disabled: boolean;
-  action(
-    payload: Record<string, unknown>,
-    options?: { reload?: boolean; message?: string },
-  ): Promise<Record<string, unknown>>;
-}) {
-  const [quote, setQuote] = useState<ShippingQuote | null>(null);
-  const [selectedOrders, setSelectedOrders] = useState<string[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-
-  if (order.shipment)
-    return <ShipmentDetails shipment={order.shipment} order={order} />;
-
-  async function quoteRates(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setBusy(true);
-    setError("");
-    try {
-      const form = Object.fromEntries(new FormData(event.currentTarget));
-      const response = await shippingRequest({
-        action: "quote",
-        orderIds: [order.id, ...selectedOrders],
-        length: form.length,
-        width: form.width,
-        height: form.height,
-        weight: form.weight,
-      });
-      setQuote(response.quote as ShippingQuote);
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Rates are unavailable.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function buyLabel(rateId: string) {
-    if (!quote) return;
-    setBusy(true);
-    setError("");
-    try {
-      await shippingRequest({ action: "buy_label", quoteId: quote.id, rateId });
-      window.location.reload();
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "The label could not be purchased.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function manualTracking(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    await action(
-      {
-        action: "ship_order",
-        orderId: order.id,
-        ...Object.fromEntries(new FormData(event.currentTarget)),
-      },
-      { reload: true, message: "Order marked shipped and customer notified." },
-    );
-  }
-
-  if (!shipping.configured)
-    return (
-      <div className="store-shipment-form">
-        <p className="form-note">Shippo is not configured on the server. Manual tracking remains available.</p>
-        <ManualTrackingForm disabled={disabled} order={order} onSubmit={manualTracking} />
-      </div>
-    );
-
-  return (
-    <div className="store-shipment-form shipping-workflow">
-      <h4>Create protected shipment</h4>
-      {compatibleOrders.length > 0 && (
-        <fieldset className="combined-orders">
-          <legend>Combine orders to this same buyer and address</legend>
-          {compatibleOrders.map((candidate) => (
-            <label key={candidate.id}>
-              <input
-                type="checkbox"
-                checked={selectedOrders.includes(candidate.id)}
-                disabled={disabled || busy || Boolean(quote)}
-                onChange={(event) =>
-                  setSelectedOrders((current) =>
-                    event.target.checked
-                      ? [...current, candidate.id]
-                      : current.filter((id) => id !== candidate.id),
-                  )
-                }
-              />
-              {candidate.orderNumber} · {formatMoney(candidate.subtotalCents, candidate.currency)}
-            </label>
-          ))}
-        </fieldset>
-      )}
-      {!quote ? (
-        <form onSubmit={quoteRates}>
-          <div className="parcel-grid">
-            <label>Length (in)<input name="length" inputMode="decimal" required defaultValue={store.defaultPackageLength} disabled={disabled || busy} /></label>
-            <label>Width (in)<input name="width" inputMode="decimal" required defaultValue={store.defaultPackageWidth} disabled={disabled || busy} /></label>
-            <label>Height (in)<input name="height" inputMode="decimal" required defaultValue={store.defaultPackageHeight} disabled={disabled || busy} /></label>
-            <label>Weight (lb)<input name="weight" inputMode="decimal" required defaultValue={store.defaultPackageWeight} disabled={disabled || busy} /></label>
-          </div>
-          <p className="shipping-rule-note">Insurance is automatic at {formatMoney(shipping.insuranceThresholdCents)}; signature is automatic at {formatMoney(shipping.signatureThresholdCents)}. The server enforces both rules.</p>
-          <button className="button dark small" disabled={disabled || busy}>{busy ? "Getting rates…" : "Get carrier rates"}</button>
-        </form>
-      ) : (
-        <div className="shipping-rates">
-          <div className="shipping-guardrails">
-            <b>{quote.orderNumbers.length > 1 ? `${quote.orderNumbers.length} orders combined` : "Single order"}</b>
-            <span>{quote.insuranceRequired ? `Insured for ${formatMoney(quote.declaredValueCents)}` : "Insurance below threshold"}</span>
-            <span>{quote.signatureRequired ? "Signature required" : "No signature required"}</span>
-          </div>
-          <small>Rates expire {dateTime(quote.expiresAt)}. Buying a rate charges the connected Shippo account and creates one label.</small>
-          {quote.selectedServices.length > 0 && <p className="shipping-rule-note">Only the buyer-selected service or objectively equal/faster services are shown.</p>}
-          {quote.rates.map((rate) => (
-            <button type="button" key={rate.id} disabled={disabled || busy} onClick={() => void buyLabel(rate.id)}>
-              <span><b>{rate.provider}</b><small>{rate.serviceLevel}{rate.estimatedDays == null ? "" : ` · ${rate.estimatedDays} day${rate.estimatedDays === 1 ? "" : "s"}`}</small></span>
-              <strong>Buy · {formatMoney(rate.amountCents, rate.currency)}</strong>
-            </button>
-          ))}
-          <button type="button" className="text-button" disabled={busy} onClick={() => setQuote(null)}>Change package or refresh rates</button>
-        </div>
-      )}
-      {error && <p className="form-error" role="alert">{error}</p>}
-      <details className="manual-tracking">
-        <summary>Use a label bought elsewhere</summary>
-        <ManualTrackingForm disabled={disabled || busy} order={order} onSubmit={manualTracking} />
-      </details>
-    </div>
-  );
-}
-
-type ShippingQuote = {
-  id: string;
-  expiresAt: string;
-  orderNumbers: string[];
-  declaredValueCents: number;
-  insuranceRequired: boolean;
-  signatureRequired: boolean;
-  selectedServices: Array<{
-    carrier: string | null;
-    serviceToken: string | null;
-    estimatedDays: number | null;
-  }>;
-  rates: Array<{
-    id: string;
-    provider: string;
-    serviceLevel: string;
-    amountCents: number;
-    currency: string;
-    estimatedDays: number | null;
-  }>;
-};
-
-function ManualTrackingForm({
-  disabled,
-  order,
-  onSubmit,
-}: {
-  disabled: boolean;
-  order: StoreOrder;
-  onSubmit(event: FormEvent<HTMLFormElement>): Promise<void>;
-}) {
-  const protectedService = order.shippingMode === "calculated";
-  return <form onSubmit={onSubmit}><label>Carrier<input name="carrier" required maxLength={100} disabled={disabled} defaultValue={protectedService ? order.selectedShippingCarrier ?? "" : ""} /></label><label>Carrier service<input name="fulfillmentService" required={protectedService} maxLength={150} disabled={disabled} defaultValue={protectedService ? order.selectedShippingService ?? "" : ""} /></label><label>Estimated transit days<input name="fulfillmentEstimatedDays" type="number" min={0} max={60} required={protectedService} disabled={disabled} defaultValue={protectedService ? order.selectedShippingEstimatedDays ?? "" : ""} /></label><label>Tracking number<input name="trackingNumber" required maxLength={200} disabled={disabled} /></label>{protectedService && <p className="form-note">By submitting, you confirm this service matches or improves on the buyer&apos;s selection.</p>}<button className="button outline small" disabled={disabled}>Mark shipped manually</button></form>;
-}
-
-function ShipmentDetails({ shipment, order }: { shipment: Shipment; order: StoreOrder }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  async function sync() {
-    setBusy(true);
-    setError("");
-    try {
-      await shippingRequest({ action: "sync_tracking", shipmentId: shipment.id });
-      window.location.reload();
-    } catch (nextError) {
-      setError(nextError instanceof Error ? nextError.message : "Tracking could not be refreshed.");
-      setBusy(false);
-    }
-  }
-  return (
-    <>
-      <ShipmentTimeline
-        shipment={shipment}
-        actions={
-          <>
-            <a className="button dark small" href={`/api/shipping/label?shipment_id=${encodeURIComponent(shipment.id)}`} target="_blank" rel="noreferrer">Print 4×6 label</a>
-            <button className="button outline small" disabled={busy} onClick={() => void sync()}>{busy ? "Refreshing…" : "Refresh events"}</button>
-          </>
-        }
-        note={order.fulfillmentStatus === "processing" ? <p className="form-note">A label is ready, but handling remains open until the carrier records the package in transit.</p> : null}
-      />
-      {error && <p className="form-error" role="alert">{error}</p>}
-    </>
-  );
-}
-
-async function shippingRequest(payload: Record<string, unknown>) {
-  const response = await fetch("/api/shipping", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  const body = (await response.json()) as Record<string, unknown> & { error?: string };
-  if (!response.ok) throw new Error(body.error || "The shipping request failed.");
-  return body;
 }
 
 function StoreSettings({

@@ -1,6 +1,9 @@
 "use client";
 
+import { SellerShipmentPanel, type SellerShipmentOrder, type SellerShippingSettings } from "./seller-shipment-panel";
 import { SellerOrderAmounts } from "./seller-order-amounts";
+import { CollectorPayments } from "./collector-payments";
+import type { CollectorPayment } from "@/lib/collector-payments";
 import { OrderProtectionSummary } from "./order-protection-summary";
 import { PreorderDashboard, PreorderOrderHistory } from "./preorder-dashboard";
 
@@ -29,8 +32,10 @@ type GarageData = {
   hunts: Array<Record<string, unknown>>;
   seller: (Record<string, unknown> & { id: string }) | null;
   listings: Array<Record<string, unknown>>;
+  shipping: SellerShippingSettings;
+  payments?: CollectorPayment[];
   sales: Array<
-    Record<string, unknown> & { items: Array<Record<string, unknown>> }
+    SellerShipmentOrder & Record<string, unknown> & { items: Array<Record<string, unknown>> }
   >;
 };
 type Profile = {
@@ -48,11 +53,12 @@ const tabs = [
   "orders",
   "listings",
   "sales",
+  "payments",
   "profile",
 ] as const;
 const tabLabels: Record<(typeof tabs)[number], string> = {
   overview: "Overview", wishlist: "Wishlist", hunts: "Model Hunts", orders: "My Orders",
-  listings: "My Listings", sales: "My Sales", profile: "Account settings",
+  listings: "My Listings", sales: "My Sales", payments: "Payments", profile: "Account settings",
 };
 const sectionHref = (view: string) => `/account?view=${view}#account-content`;
 
@@ -62,12 +68,14 @@ export function AccountDashboard({
   profile,
   email,
   isNew,
+  paymentSetup,
 }: {
   initialView: string;
   data: GarageData;
   profile: Profile;
   email: string;
   isNew: boolean;
+  paymentSetup?: string;
 }) {
   const router = useRouter();
   const view = tabs.includes(initialView as never) ? initialView as (typeof tabs)[number] : "overview";
@@ -133,7 +141,7 @@ export function AccountDashboard({
             {error}
           </p>
         )}
-        <GarageView view={view} data={data} profile={profile} action={action} />
+        <GarageView view={view} data={data} profile={profile} action={action} paymentSetup={paymentSetup} />
       </section>
     </div>
   );
@@ -144,12 +152,15 @@ function GarageView({
   data,
   profile,
   action,
+  paymentSetup,
 }: {
   view: string;
   data: GarageData;
   profile: Profile;
   action(payload: Record<string, unknown>): Promise<unknown>;
+  paymentSetup?: string;
 }) {
+  if (view === "payments") return <CollectorPayments seller={data.seller} orders={data.payments ?? []} setup={paymentSetup} />;
   if (view === "overview") return <Overview data={data} />;
   if (view === "wishlist") return <SavedModels data={data}/>;
   if (view === "hunts") return <Hunts rows={data.hunts} />;
@@ -158,7 +169,7 @@ function GarageView({
     return (
       <Listings rows={data.listings} seller={data.seller} action={action} />
     );
-  if (view === "sales") return <Sales rows={data.sales} action={action} />;
+  if (view === "sales") return <Sales rows={data.sales} seller={data.seller} shipping={data.shipping} action={action} />;
   return (
     <ProfileForm
       profile={profile}
@@ -627,9 +638,13 @@ function AccountListingCard({ listing, action }: {
 
 function Sales({
   rows,
+  seller,
+  shipping,
   action,
 }: {
   rows: GarageData["sales"];
+  seller: GarageData["seller"];
+  shipping: SellerShippingSettings;
   action(payload: Record<string, unknown>): Promise<unknown>;
 }) {
   if (!rows.length)
@@ -644,9 +659,10 @@ function Sales({
     <div className="garage-section">
       <p className="eyebrow">My Sales</p>
       <h2>Orders to fulfill</h2>
+      <Link className="account-inline-link" href="/account?view=payments#account-content">View payments &amp; payout history</Link>
       <div className="garage-list">
         {rows.map((sale) => (
-          <article key={String(sale.id)}>
+          <article key={String(sale.id)} id={`sale-${sale.id}`}>
             <div>
               <b>{String(sale.orderNumber)}</b>
               <span>{date(String(sale.createdAt))}</span>
@@ -670,6 +686,7 @@ function Sales({
               processingFeePayer: sale.processingFeePayer === "seller" ? "seller" : "platform",
               paymentProcessingFeeCents: sale.paymentProcessingFeeCents == null ? null : Number(sale.paymentProcessingFeeCents),
               sellerProceedsCents: sale.sellerProceedsCents == null ? null : Number(sale.sellerProceedsCents),
+              shippingLabelCostCents: Number(sale.shippingLabelCostCents ?? 0),
               refundedAmountCents: Number(sale.refundedAmountCents), paymentStatus: String(sale.paymentStatus),
             }} />
             <p><b>Payout:</b> {collectorPayoutLabel(sale)}</p>
@@ -679,51 +696,17 @@ function Sales({
               </span>
             </p>
             {String(sale.shippingMode) === "calculated" && <p className="shipping-service-commitment"><b>Buyer selected:</b> {String(sale.selectedShippingCarrier ?? "")} {String(sale.selectedShippingService ?? "")}{sale.selectedShippingEstimatedDays == null ? "" : ` (about ${Number(sale.selectedShippingEstimatedDays)} business days)`}. Use this service or an equal/faster one.</p>}
-            {String(sale.fulfillmentStatus) !== "shipped" && (
-              <ShipmentForm orderId={String(sale.id)} sale={sale} action={action} />
-            )}
+            <SellerShipmentPanel order={sale} compatibleOrders={[]} shipping={shipping} disabled={!sale.items.length}
+              store={{
+                defaultPackageLength: String(seller?.defaultPackageLength ?? ""),
+                defaultPackageWidth: String(seller?.defaultPackageWidth ?? ""),
+                defaultPackageHeight: String(seller?.defaultPackageHeight ?? ""),
+                defaultPackageWeight: String(seller?.defaultPackageWeight ?? ""),
+              }} action={action} manualTrackingAction="ship_sale" />
           </article>
         ))}
       </div>
     </div>
-  );
-}
-
-function ShipmentForm({
-  orderId,
-  sale,
-  action,
-}: {
-  orderId: string;
-  sale: GarageData["sales"][number];
-  action(payload: Record<string, unknown>): Promise<unknown>;
-}) {
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const data = Object.fromEntries(new FormData(event.currentTarget));
-    await action({ action: "ship_sale", orderId, ...data });
-    location.reload();
-  }
-  return (
-    <form className="fulfillment-controls" onSubmit={submit}>
-      <label>
-        Carrier
-        <input name="carrier" required maxLength={100} defaultValue={String(sale.selectedShippingCarrier ?? "")} />
-      </label>
-      <label>
-        Carrier service
-        <input name="fulfillmentService" required={String(sale.shippingMode) === "calculated"} maxLength={150} defaultValue={String(sale.selectedShippingService ?? "")} />
-      </label>
-      <label>
-        Estimated transit days
-        <input name="fulfillmentEstimatedDays" type="number" min={0} max={60} required={String(sale.shippingMode) === "calculated"} defaultValue={sale.selectedShippingEstimatedDays == null ? "" : String(sale.selectedShippingEstimatedDays)} />
-      </label>
-      <label>
-        Tracking number
-        <input name="trackingNumber" required maxLength={200} />
-      </label>
-      <button className="button dark small">Mark Shipped</button>
-    </form>
   );
 }
 

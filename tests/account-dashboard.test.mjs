@@ -92,6 +92,29 @@ test("account views expose real activity, actionable counts and concise order su
     assert.match(unavailable, /href="\/wishlist"/);
     assert.equal((render("listings").match(/>Sell a Model</g) || []).length, 1);
   });
+  await t.test("collector sales can create labels and reprint shipped labels without exposing seller actions to buyers", () => {
+    const shipping = { configured: true, insuranceThresholdCents: 25000, signatureThresholdCents: 75000 };
+    const sale = { ...order, shippingMode: "calculated", shippingCents: 950, subtotalCents: 25000, fulfillmentStatus: "unfulfilled", selectedShippingCarrier: "USPS", selectedShippingService: "Priority Mail", selectedShippingEstimatedDays: 3 };
+    const seller = { id: "collector", sellerType: "collector", defaultPackageLength: "12", defaultPackageWidth: "8", defaultPackageHeight: "6", defaultPackageWeight: "2" };
+    const html = render("sales", { sales: [sale], shipping, seller });
+    assert.match(html, /Create shipping label/);
+    assert.match(html, /Get carrier rates/);
+    assert.match(html, /The buyer paid.*\$9\.50.*Checkout does not buy a label/);
+    assert.match(html, /name="length"[^>]*value="12"/);
+    const shipment = { id: "owned-shipment", carrier: "USPS", serviceLevel: "Priority Mail", currency: "usd", parcelLength: "12", parcelWidth: "8", parcelHeight: "6", parcelWeight: "2", declaredValueCents: 25000, insuranceRequired: true, signatureRequired: false, trackingNumber: "940001", trackingUrl: null, status: "in_transit", statusDetails: "", eta: null, combinedOrderIds: [sale.id], events: [] };
+    const shipped = { ...sale, fulfillmentStatus: "shipped", shipment };
+    const existing = render("sales", { sales: [shipped], shipping: { ...shipping, configured: false }, seller });
+    assert.match(existing, /href="\/api\/shipping\/label\?shipment_id=owned-shipment"/);
+    assert.match(existing, /Print 4×6 label/);
+    assert.doesNotMatch(existing, /Get carrier rates|Buy label/);
+    assert.doesNotMatch(render("orders", { orders: [shipped] }), /Print 4×6 label|\/api\/shipping\/label/);
+    for (const fulfillmentStatus of ["processing", "shipped", "delivered", "cancelled"]) {
+      assert.doesNotMatch(render("sales", { sales: [{ ...sale, fulfillmentStatus }], shipping, seller }), /Get carrier rates|Mark shipped manually/);
+    }
+    const unavailable = render("sales", { sales: [sale], shipping: { ...shipping, configured: false }, seller });
+    assert.match(unavailable, /Label purchasing is temporarily unavailable/);
+    assert.match(unavailable, /Mark shipped manually/);
+  });
   await t.test("listing cards keep draft actions private and offer live controls only for published listings", () => {
     const listing = { id: "my-listing", slug: "mclaren-f1", title: "UT Models Mclaren F1 LM Orange 1:18", status: "draft", priceCents: 100, currency: "usd", inventoryQuantity: 1, reservedQuantity: 0, primaryImageUrl: "/car.png" };
     const draft = render("listings", { listings: [listing] });
@@ -115,6 +138,24 @@ test("account views expose real activity, actionable counts and concise order su
     const rejected = render("listings", { listings: [{ ...listing, status: "rejected", rejectionReason: "Disclose the chipped paint." }] });
     assert.match(rejected, />Fix listing<\/a>/);
     assert.match(rejected, /Marketplace note<\/strong>Disclose the chipped paint/);
+  });
+  await t.test("Payments exposes Stripe management and explains release totals without claiming bank deposits", () => {
+    const seller = { id: "collector", sellerType: "collector", status: "active", stripeAccountId: "acct_fixture", stripeChargesEnabled: true, stripePayoutsEnabled: true };
+    const payment = { ...order, subtotalCents: 25000, shippingCents: 695, taxCents: 0, marketplaceFeeBps: 1000, platformFeeCents: 2500, processingFeePayer: "seller", paymentProcessingFeeCents: 800, sellerProceedsCents: 22395, shippingLabelCostCents: 695, refundedAmountCents: 0, paymentFlow: "separate", sellerTransferStatus: "transferred", sellerTransferAmountCents: 21700, sellerTransferReversedCents: 1000, sellerTransferredAt: "2026-10-05", payoutEligibleAt: "2026-10-05", payoutHold: false, isTestOrder: false };
+    const html = render("payments", { seller, payments: [payment, { ...payment, id: "refunded", orderNumber: "MCC-REFUNDED", paymentStatus: "refunded", sellerTransferStatus: "reversed", sellerTransferReversedCents: 21700 }] });
+    assert.match(html, /value="payments" selected=""/);
+    assert.match(html, /Manage payouts &amp; bank details/);
+    assert.match(html, /\$207\.00/);
+    assert.match(html, /not your current Stripe balance or money deposited into your bank/);
+    assert.match(html, /MCC-REFUNDED/);
+    assert.match(html, /Release reversed/);
+    assert.match(html, /view=sales#sale-order-1/);
+    assert.match(render("payments", { seller, payments: [] }), /No payments yet/);
+    assert.match(render("payments", { seller: null }), /Start a collector listing/);
+    assert.match(render("payments", { seller: { ...seller, sellerType: "professional" } }), /href="\/store\?view=payments"/);
+    const setup = render("payments", { seller: { ...seller, stripeAccountId: null, stripePayoutsEnabled: false } });
+    assert.match(setup, /disabled="">Connect payout account/);
+    assert.doesNotMatch(setup, /Manage payouts &amp; bank details/);
   });
 });
 

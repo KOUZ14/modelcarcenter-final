@@ -195,5 +195,8 @@ test("seller disclosures render the applicable rate and accurate actual, pending
   assert.doesNotMatch(view({ paymentProcessingFeeCents: null, sellerProceedsCents: null }), /NaN|−\$0\.00<\/dd><\/div><div><dt>Your proceeds/);
   assert.match(view({ processingFeePayer: "platform", sellerProceedsCents: 19600 }), /\$0\.00 deducted from you/);
   assert.match(view({ paymentStatus: "partially_refunded", refundedAmountCents: 11500 }), /\$94\.52/);
+  assert.match(view({ shippingLabelCostCents: 950 }), /MCC shipping label<\/dt><dd>−\$9\.50/);
+  assert.match(view({ shippingLabelCostCents: 950 }), /Your proceeds after label costs<\/dt><dd>\$179\.53/);
+  assert.match(view({ shippingLabelCostCents: 950, paymentStatus: "partially_refunded", refundedAmountCents: 11500 }), /Your proceeds after label costs and refunds<\/dt><dd>\$85\.02/);
   assert.match(view({ totalCents: 100, sellerProceedsCents: 50, paymentStatus: "partially_refunded", refundedAmountCents: 55 }), /\$0\.23/);
 });

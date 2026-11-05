@@ -67,7 +67,7 @@ export async function reconcilePreorderOrderRefunds(orderId:string) {
   const payments=await paymentBalances(order),returned=payments.reduce((n,p)=>n+p.returned,0);
   let reversed=order.sellerTransferReversedCents;
   if(order.stripeTransferId) {
-    const target=sellerTransferReversalTarget({totalCents:order.totalCents,refundedAmountCents:returned,sellerTransferAmountCents:order.sellerTransferAmountCents,sellerProceedsCents:order.sellerProceedsCents ?? order.sellerTransferAmountCents});
+    const target=sellerTransferReversalTarget({totalCents:order.totalCents,refundedAmountCents:returned,sellerTransferAmountCents:order.sellerTransferAmountCents,shippingLabelCostCents: order.shippingLabelCostCents, sellerProceedsCents:order.sellerProceedsCents ?? order.sellerTransferAmountCents});
     if(target>reversed) {
       await reverseSellerTransfer({transferId:order.stripeTransferId,orderId,amountCents:target-reversed,targetReversedCents:target});
       reversed=target;
