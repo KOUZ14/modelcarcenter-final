@@ -35,6 +35,7 @@ export function CartPage({ automaticTax, taxBehavior }: { automaticTax: boolean;
   const [calculating, setCalculating] = useState<Record<string, boolean>>({});
   const [requesting, setRequesting] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const [checkoutError, setCheckoutError] = useState("");
   const [requestError, setRequestError] = useState("");
   const [acceptedPolicies, setAcceptedPolicies] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -44,7 +45,11 @@ export function CartPage({ automaticTax, taxBehavior }: { automaticTax: boolean;
   const revision = useRef(0);
   const mounted = useRef(true);
   const checkoutLock = useRef(false);
+  const checkoutErrorRef = useRef<HTMLParagraphElement>(null);
   const automaticAttempt = useRef("");
+  useEffect(() => {
+    if (checkoutError) checkoutErrorRef.current?.focus();
+  }, [checkoutError]);
   const sourceStorageKey = `mcc-shipping-choices-${collector?.id ?? "guest"}`;
   function chooseSource(sellerId: string, source: string) {
     setSources((current) => {
@@ -192,7 +197,7 @@ export function CartPage({ automaticTax, taxBehavior }: { automaticTax: boolean;
     // eslint-disable-next-line react-hooks/purity -- Payment click handlers must check the current quote expiry, not the last rendered clock.
     const checkoutTime = Date.now();
     if (selected.some((group) => !shippingFor(group, checkoutTime).selection)) { setClock(checkoutTime); setError("A shipping quote expired. Refresh carrier options or choose standard shipping before paying."); return; }
-    checkoutLock.current = true; setLoading(true); setError("");
+    checkoutLock.current = true; setLoading(true); setError(""); setCheckoutError("");
     trackEvent("shipping_completed", { result: "success", count: selected.length });
     trackEvent("checkout_started", { count: selected.length });
     try {
@@ -204,7 +209,13 @@ export function CartPage({ automaticTax, taxBehavior }: { automaticTax: boolean;
       if (!response.ok || !data.url) throw new Error(data.error || "Checkout could not be started. Your cart is kept.");
       if (data.reservationId) { try { sessionStorage.setItem(CHECKOUT_SESSION_KEY, data.reservationId); } catch { /* Return cookie also tracks this checkout. */ } }
       task.complete(); window.location.assign(data.url);
-    } catch (reason) { setQuotes({}); setRates({}); setError(reason instanceof Error ? reason.message : "Checkout could not be started."); checkoutLock.current = false; setLoading(false); }
+    } catch (reason) {
+      // Shipping must be refreshed if a failed checkout consumed its quote.
+      // Keep the payment error separate so automatic rate refresh cannot erase it.
+      setQuotes({}); setRates({});
+      setCheckoutError(reason instanceof Error ? reason.message : "Checkout could not be started. Your cart is kept.");
+      checkoutLock.current = false; setLoading(false);
+    }
   }
   function shippingControls(group: typeof groups[number]) {
     const details = shippingFor(group);
@@ -290,6 +301,7 @@ export function CartPage({ automaticTax, taxBehavior }: { automaticTax: boolean;
       <p>Damage or inaccurate listing? Submit a platform request within {REFUND_REQUEST_DAYS_AFTER_DELIVERY} calendar days after recorded delivery. Change-of-mind returns follow the seller’s policy. <Link href="/protection">Protection deadlines</Link> · <Link href="/returns">Returns &amp; postage</Link></p>
       {selected.some((group) => group.items.some((item) => item.availabilityType === "preorder")) && <p className="checkout-preorder-notice">Upcoming releases must be reserved separately on their seller offer. Remove them from this cart; pay through My Orders once stock is inspected and allocated.</p>}
       <label className="consent-check checkout-consent"><input id="checkout-agreement" type="checkbox" checked={acceptedPolicies} disabled={loading} onChange={(event) => setAcceptedPolicies(event.target.checked)}/><span>I am at least 18 years old and agree to the <Link href="/terms">Marketplace Terms</Link> and acknowledge the <Link href="/privacy">Privacy Policy</Link>, <Link href="/shipping">Shipping Policy</Link>, and <Link href="/returns">Returns &amp; Refunds Policy</Link>.</span></label>
+      {checkoutError && <p ref={checkoutErrorRef} className="form-error" role="alert" tabIndex={-1}>{checkoutError}</p>}
       {error && <p className="form-error" role="alert">{error}</p>}{requestError && <p className="form-error" role="alert">{requestError}</p>}{blockedReason && <p id="checkout-blocker" className="checkout-blocker" role="status">{blockerTarget && !working && !requesting ? <a href={`#${blockerTarget}`} onClick={(event) => { event.preventDefault(); if (blockerTarget === "delivery-address-heading") enterDelivery(); else goToSection(blockerTarget); }}>{blockedReason}</a> : blockedReason}</p>}<button className="button dark checkout-button" type="button" aria-describedby={blockedReason ? "checkout-blocker" : undefined} disabled={loading || working || requesting !== null || !addressComplete || !acceptedPolicies || !ready} onClick={checkout}>{loading ? "Starting secure checkout…" : "Continue to secure payment"}</button>
       <p className="checkout-payment-note">Secure payment by Stripe.{!collector && <> No account needed. <Link className="text-link" href="/sign-in?returnTo=/cart">Sign in</Link></>}</p>
     </aside></div>

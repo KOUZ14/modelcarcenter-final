@@ -71,6 +71,9 @@ test("checkout reuses the quoted destination and closes old payment sessions bef
     if (path === "/v1/accounts/acct_test") return Response.json({ charges_enabled: true, payouts_enabled: true });
     if (path === "/v1/customers") return Response.json({ id: `cus_${fixture.requests.length}` });
     if (path === "/v1/checkout/sessions") {
+      if (body.get("automatic_tax[enabled]") === "true" && [...body.keys()].some(key => key.startsWith("payment_intent_data[shipping]"))) {
+        return Response.json({ error: { message: "You cannot enable automatic tax calculation with `payment_intent_data[shipping]` set." } }, { status: 400 });
+      }
       fixture.operations.push("create-session");
       const id = `cs_test_${fixture.sessions.size + 1}`;
       const session = { id, url: `https://checkout.stripe.com/${id}`, status: "open", payment_status: "unpaid", metadata: {
@@ -155,7 +158,7 @@ test("checkout reuses the quoted destination and closes old payment sessions bef
     assert.match(session.get("customer"), /^cus_/);
     assert.equal(session.get("customer_email"), null);
     assert.equal(session.get("automatic_tax[enabled]"), "true");
-    assert.equal(session.get("payment_intent_data[shipping][address][postal_code]"), "90012");
+    assert.equal([...session.keys()].some(key => key.startsWith("payment_intent_data[shipping]")), false);
     assert.equal([...session.keys()].some((key) => key.startsWith("shipping_address_collection")), false);
     assert.equal(session.get("metadata[delivery_address_source]"), "cart");
     assert.equal(session.get("line_items[1][price_data][unit_amount]"), "900");
@@ -194,7 +197,7 @@ test("checkout reuses the quoted destination and closes old payment sessions bef
     const customer = fixture.requests.findLast((entry) => entry.path === "/v1/customers").body;
     assert.equal(session.get("line_items[1][price_data][unit_amount]"), "1900");
     assert.equal(customer.get("shipping[address][state]"), "NY");
-    assert.equal(session.get("payment_intent_data[shipping][address][state]"), "NY");
+    assert.equal(session.get("payment_intent_data[shipping][address][state]"), null);
     assert.equal(fixture.sessions.get("cs_test_1").status, "expired");
     firstCookie = response.headers.get("set-cookie").split(";")[0];
   });

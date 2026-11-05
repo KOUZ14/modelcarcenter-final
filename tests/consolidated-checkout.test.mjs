@@ -68,6 +68,8 @@ test("consolidated payments, quotes, inventory, refunds, and payouts use distinc
     if (url.pathname.startsWith("/v1/accounts/")) return Response.json({ charges_enabled: true, payouts_enabled: true });
     if (url.pathname === "/v1/customers") return Response.json({ id: `cus_${requests.length}` });
     if (url.pathname === "/v1/checkout/sessions") {
+      assert.equal(body.get("automatic_tax[enabled]"), "true");
+      assert.equal([...body.keys()].some(key => key.startsWith("payment_intent_data[shipping]")), false, "Stripe rejects PaymentIntent shipping with automatic tax");
       const id = `cs_test_${sessions.size + 1}`;
       const metadata = Object.fromEntries([...body].filter(([key]) => /^metadata\[/.test(key)).map(([key, value]) => [key.slice(9, -1), value]));
       const lines = [];

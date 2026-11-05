@@ -141,9 +141,14 @@ export function buildCheckoutSessionBody(input: CheckoutSessionInput) {
     body.set("billing_address_collection", "auto");
     body.set("metadata[delivery_address_source]", "cart");
     const shipping = stripeShippingAddress(input.deliveryAddress);
-    body.set("payment_intent_data[shipping][name]", shipping.name);
-    for (const [key, value] of Object.entries(shipping.address)) {
-      body.set(`payment_intent_data[shipping][address][${key}]`, value);
+    // Stripe rejects PaymentIntent shipping when Checkout automatic tax is on.
+    // The dedicated Customer.shipping supplies the fixed tax destination; order
+    // fulfillment uses the same address captured in our reservation.
+    if (!config.automaticTax) {
+      body.set("payment_intent_data[shipping][name]", shipping.name);
+      for (const [key, value] of Object.entries(shipping.address)) {
+        body.set(`payment_intent_data[shipping][address][${key}]`, value);
+      }
     }
     // Hosted Checkout cannot re-quote carrier services on address changes.
     // Keep this destination fixed; its Customer.shipping also drives Stripe Tax.
