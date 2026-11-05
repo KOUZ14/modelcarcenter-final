@@ -5,7 +5,7 @@ const localBeta = process.env.NODE_ENV !== "production" && process.env.MCC_BETA_
 const betaOverrides: Record<string, string> = {
   SITE_URL: "http://127.0.0.1:5173", MARKETPLACE_MODE: "test", ADMIN_DEV_BYPASS: "false",
   STRIPE_SECRET_KEY: "", STRIPE_WEBHOOK_SECRET: "", STRIPE_CONNECT_WEBHOOK_SECRET: "",
-  SHIPPO_API_KEY: "", SHIPPO_WEBHOOK_SECRET: "", RESEND_API_KEY: "", GOOGLE_PLACES_API_KEY: "",
+  SHIPPO_API_KEY: "", SHIPPO_WEBHOOK_SECRET: "", SHIPPO_HMAC_SECRET: "", RESEND_API_KEY: "", GOOGLE_PLACES_API_KEY: "",
 };
 
 function textEnv(name: string, fallback = "") {
@@ -72,6 +72,7 @@ export const config = {
   ),
   shippoApiKey: textEnv("SHIPPO_API_KEY"),
   shippoWebhookSecret: textEnv("SHIPPO_WEBHOOK_SECRET"),
+  shippoHmacSecret: textEnv("SHIPPO_HMAC_SECRET"),
   shippoApiVersion: textEnv("SHIPPO_API_VERSION", "2018-02-08"),
   shippoInsuranceThresholdCents: integerEnv(
     "SHIPPO_INSURANCE_THRESHOLD_CENTS",

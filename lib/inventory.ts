@@ -1,3 +1,4 @@
+import { logSecurityEvent } from "./security-events.ts";
 import { ACTIVE_PROTECTION_POLICY_VERSION } from "./protection";
 import { and, eq, inArray, lt, or, sql } from "drizzle-orm";
 import { getD1, getDb } from "@/db";
@@ -164,8 +165,8 @@ export async function reserveCart(
 ) {
   const reservation = buildCartReservation(input, buyerUserId, policyVersion, shipping);
   try { await getD1().batch(reservation.statements); }
-  catch (error) {
-    console.error("Checkout reservation batch failed.", error);
+  catch {
+    logSecurityEvent("operation_failed", { scope: "lib/inventory" });
     throw new Error("Inventory changed while checkout was starting. Review your cart and try again.");
   }
   return { reservationId: reservation.reservationId, expiresAt: reservation.expiresAt };

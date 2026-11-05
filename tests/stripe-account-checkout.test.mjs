@@ -6,19 +6,19 @@ import { ValidationError } from "../lib/validation.ts";
 
 test("checkout handles unavailable seller accounts without hiding diagnostics or exposing credentials", async (t) => {
   const originalFetch = globalThis.fetch;
-  const originalLog = console.error;
+  const originalLog = console.info;
   const originalKey = config.stripeSecretKey;
   const logs = [], requests = [];
   let status = 200, body = { charges_enabled: true, payouts_enabled: true };
   config.stripeSecretKey = "sk_test_account_error_fixture";
-  console.error = (...args) => logs.push(args);
+  console.info = message => logs.push(JSON.parse(message));
   globalThis.fetch = async (url, init) => {
     requests.push({ url, method: init.method });
     assert.equal(url, "https://api.stripe.com/v1/accounts/acct_fixture");
     assert.equal(init.method, "GET", "Checking a seller must never create a payment");
     return Response.json(body, { status, headers: { "Request-Id": "req_fixture" } });
   };
-  t.after(() => { globalThis.fetch = originalFetch; console.error = originalLog; config.stripeSecretKey = originalKey; });
+  t.after(() => { globalThis.fetch = originalFetch; console.info = originalLog; config.stripeSecretKey = originalKey; });
 
   await assertSellerPaymentsReady("acct_fixture", "Apex");
 
@@ -36,8 +36,9 @@ test("checkout handles unavailable seller accounts without hiding diagnostics or
   body = { error: { type: "invalid_request_error", code: "resource_missing", message: "No such account: acct_fixture" } };
   await assert.rejects(() => assertSellerPaymentsReady("acct_fixture", "Apex"), (error) =>
     error instanceof ValidationError && /Apex.*payment connection needs attention/.test(error.message));
-  assert.equal(logs.at(-1)[1].code, "resource_missing");
-  assert.equal(logs.at(-1)[1].requestId, "req_fixture");
+  assert.equal(logs.at(-1).reason, "resource_missing");
+  assert.equal(logs.at(-1).status, 404);
+  assert.ok(!JSON.stringify(logs).includes("acct_fixture"));
 
   status = 403;
   body = { error: { type: "invalid_request_error", code: "account_invalid", message: "The account is not connected to this platform" } };

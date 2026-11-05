@@ -1,12 +1,20 @@
 import { releaseReservation } from "./inventory";
 import { expireCheckoutSession, retrieveCheckoutSession } from "./stripe";
 import { config } from "./config";
+import { receiptCookie } from "./receipt-access";
 
 const COOKIE_NAME = "mcc-checkout-return";
 
 export function checkoutReturnCookie(reservationId: string, sessionId = "", token = "") {
   const value = sessionId ? encodeURIComponent(JSON.stringify({ sessionId, token })) : "";
   return `${COOKIE_NAME}-${reservationId}=${value}; Path=/api/checkout; HttpOnly; SameSite=Lax; Max-Age=${sessionId ? 86400 : 0}${config.siteUrl.startsWith("https:") ? "; Secure" : ""}`;
+}
+
+export async function checkoutResponseHeaders(reservationId: string, sessionId: string, token = "") {
+  const headers = new Headers({ "Cache-Control": "private, no-store" });
+  headers.append("Set-Cookie", checkoutReturnCookie(reservationId, token ? sessionId : "", token));
+  headers.append("Set-Cookie", await receiptCookie(sessionId, config.betterAuthSecret, config.siteUrl.startsWith("https:")));
+  return headers;
 }
 
 export async function closePreviousCheckout(request: Request, reservationId: unknown) {

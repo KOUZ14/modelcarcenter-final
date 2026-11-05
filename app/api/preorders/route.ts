@@ -7,7 +7,7 @@ import { preorderShippingQuote, startPreorderPayment, closePreorderPayment } fro
 import { getD1 } from "@/db";
 import { required } from "@/lib/preorder-rules";
 import { requireAdultConsent } from "@/lib/form-consent";
-import { checkoutReturnCookie } from "@/lib/checkout-return";
+import { checkoutResponseHeaders } from "@/lib/checkout-return";
 import { deliverPreorderNotices, processPreorders } from "@/lib/preorder-maintenance";
 import { joinPreorderWaitlist, buyerWaitlist, cancelWaitlist, inviteNextWaitlisted } from "@/lib/preorder-waitlist";
 import { startPreorderDeposit, refundPreorderDeposit } from "@/lib/preorder-deposits";
@@ -70,7 +70,7 @@ export async function POST(request:Request) {
     else if(action==="pay") {
       requireAdultConsent(input.adultConsent);
       const checkout=await startPreorderPayment(user,required(input.id,"reservation",100),input);
-      return Response.json({url:checkout.url},{headers:{"Set-Cookie":checkoutReturnCookie(checkout.reservationId,checkout.sessionId,checkout.returnToken)}});
+      return Response.json({url:checkout.url},{headers:await checkoutResponseHeaders(checkout.reservationId,checkout.sessionId,checkout.returnToken)});
     } else await updateBuyerPreorder(user.id,required(input.id,"reservation",100),input);
     await deliverPreorderNotices(3);
     return Response.json(result);

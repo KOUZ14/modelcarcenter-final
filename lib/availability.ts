@@ -1,3 +1,4 @@
+import { logSecurityEvent } from "./security-events.ts";
 import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
@@ -157,8 +158,8 @@ export async function notifyRestockSubscribers(productId: string) {
           ),
         );
       notified += 1;
-    } catch (error) {
-      console.error(`Restock alert ${alert.id} could not be sent.`, error);
+    } catch {
+      logSecurityEvent("operation_failed", { scope: "lib/availability" });
     }
   }
   return { notified };

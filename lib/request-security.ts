@@ -23,6 +23,13 @@ export function securityPath(request: Request) {
   }
 }
 
+export function securityPolicyPath(request: Request) {
+  // Vinext collapses repeated slashes and strips .rsc before dispatching
+  // pages AND API handlers. Apply limits to the destination, not its alias.
+  // Keep webhook exemptions on securityPath so aliases gain no exemption.
+  return securityPath(request).replace(/\/{2,}/g, "/").replace(/\.rsc$/, "") || "/";
+}
+
 export function isWebhookRequest(request: Request) {
   return request.method === "POST" && webhookPaths.has(securityPath(request));
 }
@@ -42,14 +49,14 @@ export function assertRequestOrigin(request: Request, siteUrl: string, productio
 }
 
 export function requestBodyLimit(request: Request) {
-  const path = securityPath(request);
+  const path = securityPolicyPath(request);
   if (path.startsWith("/api/auth/")) return 16 * KiB;
   if (path === "/api/addresses/autocomplete") return 4 * KiB;
   if (path === "/api/promotions/events") return 4 * KiB;
   if (path === "/api/measurement") return 2 * KiB;
   if (webhookPaths.has(path)) return MiB;
   const multipart = request.headers.get("content-type")?.toLowerCase().startsWith("multipart/form-data");
-  if (multipart && ["/api/listings/images", "/api/admin/images", "/api/resolution", "/api/collectors/photos"].includes(path)) return 11 * MiB;
+  if (multipart && ["/api/listings/images", "/api/admin/images", "/api/resolution", "/api/collectors/photos", "/api/store/logo"].includes(path)) return 11 * MiB;
   // Room for the existing 5 MB CSV import and JSON framing.
   if (["/api/admin", "/api/store"].includes(path)) return 6 * MiB;
   return 64 * KiB;
@@ -89,7 +96,7 @@ export async function boundRequestBody(request: Request, limit = requestBodyLimi
 }
 
 export function requestRateRules(request: Request): RateLimitRule[] {
-  const path = securityPath(request);
+  const path = securityPolicyPath(request);
   if (!path.startsWith("/api/") || isWebhookRequest(request) || request.method === "OPTIONS") return [];
   const rules: RateLimitRule[] = [{ scope: "api", max: 300, windowSeconds: 60 }];
   if (path.startsWith("/api/auth/") && !["/api/auth/get-session", "/api/auth/ok"].includes(path)) {
@@ -97,7 +104,7 @@ export function requestRateRules(request: Request): RateLimitRule[] {
     if (request.method === "POST" && path === "/api/auth/sign-in/magic-link") {
       rules.push({ scope: "magic-link-ip", max: 5, windowSeconds: 600 });
     }
-  } else if (["/api/community", "/api/model-hunts", "/api/seller-applications", "/api/availability-alerts"].includes(path)) {
+  } else if (["/api/reports", "/api/community", "/api/model-hunts", "/api/seller-applications", "/api/availability-alerts"].includes(path)) {
     rules.push({ scope: "public-submissions", max: 10, windowSeconds: 600 });
   } else if (path.startsWith("/api/collectors") && request.method === "POST") {
     rules.push({ scope: "community-writes", max: 30, windowSeconds: 60 });

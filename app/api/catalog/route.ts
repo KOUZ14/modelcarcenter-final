@@ -1,3 +1,4 @@
+import { logSecurityEvent } from "@/lib/security-events";
 import { catalogErrorMessage, searchCatalog } from "@/lib/catalog";
 import { readMarketplaceFilters } from "@/lib/discovery";
 import { ValidationError } from "@/lib/validation";
@@ -14,7 +15,7 @@ export async function GET(request: Request) {
     return Response.json(result, { headers: { "Cache-Control": "public, max-age=30" } });
   } catch (error) {
     if (error instanceof ValidationError) return Response.json({ error: error.message }, { status: 400 });
-    console.error(error);
+    logSecurityEvent("operation_failed", { scope: "app/api/catalog/route" });
     return Response.json({ error: catalogErrorMessage(error) }, { status: 503 });
   }
 }

@@ -1,3 +1,4 @@
+import { logSecurityEvent } from "@/lib/security-events";
 import { getD1 } from "@/db";
 import { config } from "@/lib/config";
 import { productionReadiness } from "@/lib/production-readiness";
@@ -12,7 +13,7 @@ export async function GET() {
     await getD1().prepare("SELECT (SELECT 1 FROM sellers LIMIT 1) AS sellers, (SELECT 1 FROM stripe_events LIMIT 1) AS events, (SELECT 1 FROM checkout_reservations LIMIT 1) AS reservations").first();
     databaseAvailable = true;
   } catch {
-    console.error("Production health check: database unavailable");
+    logSecurityEvent("operation_failed", { scope: "app/api/health/route" });
   }
   const healthy = databaseAvailable && (config.marketplaceMode === "test" || readiness.configurationReady);
   if (!readiness.configurationReady) {

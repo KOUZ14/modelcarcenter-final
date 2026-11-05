@@ -1,14 +1,16 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 import { env } from "cloudflare:workers";
-import { getDb } from "@/db";
+import { getDb, getD1 } from "@/db";
 import { productImages, products } from "@/db/schema";
 import {
-  detectListingImageType,
   validateListingImageBatch,
   validateListingImageOrder,
 } from "@/lib/listing-images";
 import { ValidationError } from "@/lib/validation";
 import { photoAltForViews, photoViews } from "./listing-evidence";
+import { sanitizeUploadedImage } from "./image-sanitization";
+import { assertUploadRate, putManagedUpload, deleteManagedUpload } from "./managed-uploads";
+import { config } from "./config";
 
 type Product = typeof products.$inferSelect;
 
@@ -43,6 +45,8 @@ export async function uploadProductImages(input: {
   });
   if (batchError) throw new ValidationError(batchError);
   if (!env.IMAGES) throw new Error("R2 image storage is unavailable.");
+  const ownerId = `seller:${input.product.sellerId}`;
+  await assertUploadRate(getD1(), ownerId, config.betterAuthSecret);
 
   const uploaded: Array<{
     id: string;
@@ -55,20 +59,11 @@ export async function uploadProductImages(input: {
   try {
     for (let index = 0; index < input.files.length; index += 1) {
       const file = input.files[index];
-      const bytes = await file.arrayBuffer();
-      const type = detectListingImageType(new Uint8Array(bytes), file.type);
-      if (!type)
-        throw new ValidationError(
-          "Photos must be valid JPEG, PNG, or WebP images.",
-        );
+      const type = sanitizeUploadedImage(new Uint8Array(await file.arrayBuffer()), file.type);
       const id = crypto.randomUUID();
       const key = `listings/${input.product.sellerId}/${input.product.id}/${crypto.randomUUID()}.${type.extension}`;
-      await env.IMAGES.put(key, bytes, {
-        httpMetadata: {
-          contentType: type.mime,
-          cacheControl: "public, max-age=31536000, immutable",
-        },
-        customMetadata: {
+      await putManagedUpload({ database: getD1(), storage: env.IMAGES, ownerId, key, bytes: type.bytes, mime: type.mime,
+        metadata: {
           productId: input.product.id,
           uploadedBy: input.uploadedByUserId ?? "admin",
         },
@@ -122,9 +117,7 @@ export async function uploadProductImages(input: {
     }));
   } catch (error) {
     if (uploaded.length && !metadataSaved)
-      await env.IMAGES.delete(uploaded.map((image) => image.key)).catch(
-        () => undefined,
-      );
+      await Promise.allSettled(uploaded.map(image => deleteManagedUpload(getD1(), env.IMAGES, image.key)));
     throw error;
   }
 }
@@ -146,7 +139,7 @@ export async function removeProductImage(input: {
   const image = rows[0];
   if (!image) throw new ValidationError("Photo not found.");
   if (image.source === "r2" && image.storageKey)
-    await env.IMAGES.delete(image.storageKey);
+    await deleteManagedUpload(getD1(), env.IMAGES, image.storageKey);
   await getDb()
     .delete(productImages)
     .where(

@@ -74,6 +74,8 @@ export default defineConfig(async ({ command, mode }) => {
 
   return {
     cacheDir,
+    // Tests use Photon's Node export; Workers import a precompiled Wasm module.
+    resolve: { alias: [{ find: /^@cf-wasm\/photon$/, replacement: "@cf-wasm/photon/workerd" }] },
     server: {
       host: "0.0.0.0",
       port: localPort,

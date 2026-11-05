@@ -11,6 +11,7 @@ export function CheckoutSuccess({ sessionId }: { sessionId: string }) {
   const [order, setOrder] = useState<Order | null>(null);
   const [pending, setPending] = useState(true);
   const [error, setError] = useState("");
+  const [needsReceiptSignIn, setNeedsReceiptSignIn] = useState(false);
   const { completeCheckout, authReady, cart, collector } = useMarketplace();
   useEffect(() => {
     let stopped = false; let attempts = 0;
@@ -21,6 +22,7 @@ export function CheckoutSuccess({ sessionId }: { sessionId: string }) {
         const data = await response.json() as { order?: Order; pending?: boolean; error?: string };
         if (response.ok && data.order) { if (!stopped) { setOrder(data.order); setPending(false); } return; }
         if (response.status === 202 && attempts < 6) { setTimeout(check, 1500); return; }
+        if (!stopped && [403, 404].includes(response.status)) setNeedsReceiptSignIn(true);
         if (!response.ok) throw new Error(data.error || "Confirmation unavailable.");
         if (!stopped) setPending(false);
       } catch (reason) { if (!stopped) { setError(reason instanceof Error ? reason.message : "Confirmation unavailable."); setPending(false); } }
@@ -31,6 +33,7 @@ export function CheckoutSuccess({ sessionId }: { sessionId: string }) {
     if (authReady && order) completeCheckout(sessionId, order.items);
   }, [authReady, completeCheckout, order, sessionId]);
   if (pending) return <div className="empty-state" role="status"><p className="eyebrow">Payment returned</p><h1>Confirming your order…</h1><p>Stripe is securely confirming payment with Model Car Center. This usually takes a few seconds.</p></div>;
+  if (needsReceiptSignIn) return <div className="empty-state"><p className="eyebrow">Private receipt</p><h1>Verify your email to view this receipt.</h1><p>Open it in the browser you used for checkout, or request a sign-in link using your checkout email. Please don&apos;t place the order again.</p><Link className="button dark" href={`/sign-in?reauth=1&returnTo=${encodeURIComponent(`/checkout/success?session_id=${sessionId}`)}`}>Sign in with checkout email</Link><Link className="button outline" href="/contact">Contact support</Link></div>;
   if (error || !order) return <div className="empty-state"><p className="eyebrow">Confirmation pending</p><h1>We couldn&apos;t confirm your order yet.</h1><p>Please don&apos;t place the order again. Check the email you used at checkout, including spam, for confirmation. If you need help, contact support from that email and include the payment reference below. No account is needed.</p><code>{sessionId}</code><Link className="button outline" href="/contact">Contact support</Link></div>;
   return (
     <div className="order-confirmation">
@@ -56,7 +59,7 @@ export function CheckoutSuccess({ sessionId }: { sessionId: string }) {
         <section className="post-purchase-account" aria-labelledby="save-order-title">
           <p className="eyebrow">Optional account</p>
           <h2 id="save-order-title">Save this order in My Garage</h2>
-          <p>Create an account to keep your orders, wishlist, and Model Hunt preferences together across devices. Use <b>{order.buyerEmail}</b> and verify the email link to add this guest order automatically.</p>
+          <p>Create an account to keep your orders, wishlist, and Model Hunt preferences together across devices. Use the email you entered at checkout and verify the email link to add this guest order automatically.</p>
           <p>Your purchase is complete. Tracking emails and support remain available if you skip this.</p>
           <Link className="button outline" href="/sign-in?returnTo=%2Faccount%3Fview%3Dorders&intent=save-order">Create an account (optional)</Link>
         </section>

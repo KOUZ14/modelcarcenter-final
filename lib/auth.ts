@@ -66,6 +66,10 @@ function createCollectorAuth() {
             logSecurityEvent("rate_limited", { scope: "magic-link-email" });
             return;
           }
+          if (!(await consumeRateLimit(getD1(), { scope: "magic-link-site", max: 2000, windowSeconds: 86400 }, "site", secret)).allowed) {
+            logSecurityEvent("rate_limited", { scope: "magic-link-site" });
+            return;
+          }
           try {
             const delivery = await sendAuthMagicLinkEmail({ email: normalizedEmail, url });
             if (!delivery.sent) logSecurityEvent("magic_link_delivery_failed");

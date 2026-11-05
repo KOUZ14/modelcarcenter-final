@@ -1,3 +1,4 @@
+import { logSecurityEvent } from "@/lib/security-events";
 import { getCollectorAuth } from "@/lib/auth";
 import { getPromotionPlacements } from "@/lib/promotion-placements";
 import { readMarketplaceFilters } from "@/lib/discovery";
@@ -10,8 +11,8 @@ export async function GET(request: Request) {
     const session = await getCollectorAuth().api.getSession({ headers: request.headers });
     const placements = await getPromotionPlacements(filters, session?.user?.id ?? null);
     return Response.json({ placements }, { headers });
-  } catch (error) {
-    console.error("Promotion placements unavailable", error instanceof Error ? error.name : "Error");
+  } catch {
+    logSecurityEvent("operation_failed", { scope: "app/api/promotions/placements/route" });
     return Response.json({ placements: [] }, { headers });
   }
 }

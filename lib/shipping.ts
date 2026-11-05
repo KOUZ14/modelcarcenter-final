@@ -332,9 +332,11 @@ export async function processShippoTrackingWebhook(payload: unknown) {
   };
   if (webhook.event !== "track_updated" || !webhook.data)
     return { ignored: true };
-  if (config.shippoApiKey.startsWith("shippo_test_") && webhook.test === false)
-    throw new ValidationError("Live Shippo events cannot update a test-mode integration.");
+  if ((config.shippoApiKey.startsWith("shippo_test_") && webhook.test === false) ||
+      (config.shippoApiKey.startsWith("shippo_live_") && webhook.test === true))
+    throw new ValidationError("Shippo event mode does not match this integration.");
   const data = webhook.data;
+  if ([data.transaction, data.carrier, data.tracking_number].some(value => value !== undefined && (typeof value !== "string" || value.length > 200))) throw new ValidationError("Invalid tracking reference.");
   const db = getDb();
   const rows = data.transaction
     ? await db
@@ -368,13 +370,20 @@ export async function processShippoTrackingWebhook(payload: unknown) {
             )
         : [];
     if (!directOrders.length) return { ignored: true };
+    // Webhook contents are an untrusted notification. Fetch authoritative
+    // tracking with our server credential before changing delivery/payout state.
+    const verified = await retrieveShippoTracking(data.carrier!, data.tracking_number!);
+    assertTrackingIdentity(verified, data.carrier!, data.tracking_number!);
     await recordOrderTrackingUpdate(
       directOrders.map((order) => order.id),
-      data,
+      verified,
     );
     return { updated: true, orderIds: directOrders.map((order) => order.id) };
   }
-  await recordTrackingUpdate(rows[0], data, "webhook");
+  const shipment = rows[0];
+  const verified = await retrieveShippoTracking(shipment.carrier, shipment.trackingNumber);
+  assertTrackingIdentity(verified, shipment.carrier, shipment.trackingNumber);
+  await recordTrackingUpdate(shipment, verified, "webhook");
   return { updated: true, shipmentId: rows[0].id };
 }
 
@@ -657,4 +666,8 @@ function safeHttpsUrl(value: string | null | undefined) {
   } catch {
     return null;
   }
+}
+
+function assertTrackingIdentity(tracking: ShippoTracking, carrier: string, trackingNumber: string) {
+  if (tracking.carrier?.toLowerCase() !== carrier.toLowerCase() || tracking.tracking_number !== trackingNumber) throw new ShippoApiError("Tracking verification is temporarily unavailable.");
 }

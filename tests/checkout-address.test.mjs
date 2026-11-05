@@ -100,7 +100,7 @@ test("checkout reuses the quoted destination and closes old payment sessions bef
   const mocks = {
     consolidated: "export const startConsolidatedCheckout = () => { throw new Error('Legacy client must not invoke consolidated checkout'); };",
     db: "export const getDb = () => globalThis.__checkoutAddressTest.db;",
-    config: `export const config = { siteUrl: 'https://shop.example', marketplaceMode: 'test', stripeSecretKey: 'sk_test_fixture', stripeApiVersion: '2026-02-25.clover', automaticTax: true, stripeTaxBehavior: 'exclusive', stripeShippingTaxCode: 'txcd_92010001', shippingCountries: ['US'], shippoInsuranceThresholdCents: 50000, shippoSignatureThresholdCents: 50000, shippoMaxLabelCostCents: 50000, shippoQuoteExpirationMinutes: 30 }; export const requireConfig = key => config[key];`,
+    config: `export const config = { siteUrl: 'https://shop.example', betterAuthSecret: 'test-only-secret-with-more-than-32-characters', marketplaceMode: 'test', stripeSecretKey: 'sk_test_fixture', stripeApiVersion: '2026-02-25.clover', automaticTax: true, stripeTaxBehavior: 'exclusive', stripeShippingTaxCode: 'txcd_92010001', shippingCountries: ['US'], shippoInsuranceThresholdCents: 50000, shippoSignatureThresholdCents: 50000, shippoMaxLabelCostCents: 50000, shippoQuoteExpirationMinutes: 30 }; export const requireConfig = key => config[key];`,
     auth: "export const getCurrentCollector = async () => null;",
     shippo: "export const createShippoShipment = input => globalThis.__checkoutAddressTest.shipment(input); export const createShippoEstimate = () => { throw new Error('Unexpected estimate'); };",
     inventory: `const f = () => globalThis.__checkoutAddressTest;
@@ -213,7 +213,10 @@ test("checkout reuses the quoted destination and closes old payment sessions bef
     fixture.operations = [];
     const response = await api.returnFromStripe(new Request(`https://shop.example/api/checkout/return?reservation_id=${fixture.sessions.get("cs_test_2").metadata.reservation_id}`, { headers: { cookie: firstCookie } }));
     assert.equal(response.status, 303);
-    assert.match(response.headers.get("location"), /checkout\/success\?session_id=cs_test_2$/);
+    assert.match(response.headers.get("location"), /checkout\/return\?reservation_id=/);
+    const confirmed = await api.close(new Request("https://shop.example/api/checkout/return", { method: "POST", headers: { cookie: firstCookie, origin: "https://shop.example", "content-type": "application/json" }, body: JSON.stringify({ reservationId: fixture.sessions.get("cs_test_2").metadata.reservation_id }) }));
+    assert.equal(confirmed.status, 200);
+    assert.equal((await confirmed.json()).completedSessionId, "cs_test_2");
     assert.deepEqual(fixture.operations, []);
   });
   await t.test("free and flat shipping still validate and preserve the delivery destination", async () => {
@@ -235,6 +238,9 @@ test("checkout reuses the quoted destination and closes old payment sessions bef
     const cookies = [first, second].map((response) => response.headers.get("set-cookie").split(";")[0]).join("; ");
     const response = await api.returnFromStripe(new Request(`https://shop.example/api/checkout/return?reservation_id=${firstBody.reservationId}`, { headers: { cookie: cookies } }));
     assert.equal(response.status, 303);
+    assert.equal(fixture.sessions.get(firstId).status, "open", "GET navigation must not cancel a payment");
+    const closed = await api.close(new Request("https://shop.example/api/checkout/return", { method: "POST", headers: { cookie: cookies, origin: "https://shop.example", "content-type": "application/json" }, body: JSON.stringify({ reservationId: firstBody.reservationId }) }));
+    assert.equal(closed.status, 200);
     assert.equal(fixture.sessions.get(firstId).status, "expired");
     assert.equal(fixture.sessions.get(secondId).status, "open");
   });

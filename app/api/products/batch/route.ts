@@ -1,3 +1,4 @@
+import { logSecurityEvent } from "@/lib/security-events";
 import { and, eq, inArray } from "drizzle-orm";
 import { getDb } from "@/db";
 import { products, sellers } from "@/db/schema";
@@ -78,8 +79,8 @@ export async function POST(request: Request) {
           ),
         })),
     });
-  } catch (error) {
-    console.error(error);
+  } catch {
+    logSecurityEvent("operation_failed", { scope: "app/api/products/batch/route" });
     return Response.json(
       { error: "Saved items are temporarily unavailable." },
       { status: 503 },

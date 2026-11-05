@@ -1,3 +1,4 @@
+import { logSecurityEvent } from "./security-events.ts";
 import { getD1 } from "@/db";
 import { config } from "./config";
 import { sendEmail } from "./email";
@@ -111,9 +112,7 @@ export async function deliverResolutionNotifications(
       sent += 1;
     } catch (error) {
       await markNotificationPending(database, row.id, errorMessage(error));
-      console.error(
-        `[resolution notification pending] ${row.eventKey}: ${errorMessage(error)}`,
-      );
+      logSecurityEvent("operation_failed", { scope: "lib/resolution-notifications" });
     }
   }
   return { sent, pending: (rows.results?.length ?? 0) - sent };
@@ -125,10 +124,8 @@ export async function safelyDeliverResolutionNotifications(
 ) {
   try {
     return await deliverResolutionNotifications(notificationIds, database);
-  } catch (error) {
-    console.error(
-      `[resolution notification dispatch failed] ${errorMessage(error)}`,
-    );
+  } catch {
+    logSecurityEvent("operation_failed", { scope: "lib/resolution-notifications" });
     return { sent: 0, pending: notificationIds.length };
   }
 }

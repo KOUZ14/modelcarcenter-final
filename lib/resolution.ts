@@ -11,6 +11,8 @@ import {
 } from "@/db/schema";
 import { config } from "./config";
 import { POLICY_VERSION } from "./legal";
+import { sanitizeUploadedImage } from "./image-sanitization";
+import { assertUploadRate, deleteManagedUpload, putManagedUpload } from "./managed-uploads";
 import {
   addCalendarDays,
   BUYER_ESCALATION_DAYS,
@@ -262,6 +264,7 @@ export async function openResolutionCase(input: {
   const notificationId = crypto.randomUUID();
   const prepared = await storeResolutionFiles({
     storage: input.storage,
+    ownerId: input.userId,
     caseId,
     files: input.files,
   });
@@ -332,7 +335,7 @@ export async function openResolutionCase(input: {
     await d1.batch(statements);
   } catch (error) {
     await Promise.allSettled(
-      prepared.map((file) => input.storage.delete(file.storageKey)),
+      prepared.map((file) => deleteManagedUpload(getD1(), input.storage, file.storageKey)),
     );
     throw error;
   }
@@ -359,6 +362,7 @@ export async function addResolutionEvidence(input: {
   const caption = cleanText(input.caption, 500);
   const prepared = await storeResolutionFiles({
     storage: input.storage,
+    ownerId: input.userId,
     caseId: input.caseId,
     files: input.files,
   });
@@ -426,7 +430,7 @@ export async function addResolutionEvidence(input: {
     ]);
   } catch (error) {
     await Promise.allSettled(
-      prepared.map((file) => input.storage.delete(file.storageKey)),
+      prepared.map((file) => deleteManagedUpload(getD1(), input.storage, file.storageKey)),
     );
     throw error;
   }
@@ -501,6 +505,7 @@ export async function authorizeResolutionReturn(input: {
   );
   const prepared = await storeResolutionFiles({
     storage: input.storage,
+    ownerId: input.userId,
     caseId,
     files: [input.label],
   });
@@ -568,7 +573,7 @@ export async function authorizeResolutionReturn(input: {
       }),
     ]);
   } catch (error) {
-    await input.storage.delete(file.storageKey);
+    await deleteManagedUpload(getD1(), input.storage, file.storageKey);
     throw error;
   }
   await safelyDeliverResolutionNotifications([notificationId]);
@@ -1131,25 +1136,26 @@ function assertCaseOpen(status: string) {
 
 async function storeResolutionFiles(input: {
   storage: ResolutionStorage;
+  ownerId: string;
   caseId: string;
   files: File[];
 }) {
   const prepared: PreparedFile[] = [];
+  if (input.files.length) await assertUploadRate(getD1(), input.ownerId, config.betterAuthSecret);
   try {
     for (const file of input.files) {
       if (file.size < 1 || file.size > MAX_RESOLUTION_FILE_BYTES)
         throw new ValidationError("Each evidence or label file must be 10 MB or smaller.");
-      const bytes = new Uint8Array(await file.arrayBuffer());
+      let bytes: Uint8Array = new Uint8Array(await file.arrayBuffer());
       const detected = detectResolutionFileType(bytes, file.type);
       if (!detected)
         throw new ValidationError("Evidence must be a PDF, JPG, PNG, or WebP file.");
       if (bytes.length < 1 || bytes.length > MAX_RESOLUTION_FILE_BYTES)
         throw new ValidationError("Each evidence or label file must be 10 MB or smaller.");
+      if (detected.mimeType !== "application/pdf") bytes = sanitizeUploadedImage(bytes, file.type).bytes;
       const id = crypto.randomUUID();
       const storageKey = `resolution/${input.caseId}/${id}.${detected.extension}`;
-      await input.storage.put(storageKey, bytes.buffer as ArrayBuffer, {
-        httpMetadata: { contentType: detected.mimeType },
-      });
+      await putManagedUpload({ database: getD1(), storage: input.storage, ownerId: input.ownerId, key: storageKey, bytes, mime: detected.mimeType });
       prepared.push({
         id,
         storageKey,
@@ -1161,7 +1167,7 @@ async function storeResolutionFiles(input: {
     return prepared;
   } catch (error) {
     await Promise.allSettled(
-      prepared.map((file) => input.storage.delete(file.storageKey)),
+      prepared.map((file) => deleteManagedUpload(getD1(), input.storage, file.storageKey)),
     );
     throw error;
   }

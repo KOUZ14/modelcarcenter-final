@@ -7,7 +7,9 @@ type SecurityEvent =
   | "auth_result"
   | "magic_link_requested"
   | "magic_link_delivery_failed"
-  | "webhook_rejected";
+  | "webhook_rejected"
+  | "upload_limited"
+  | "operation_failed";
 
 // Deliberately exclude bodies, URLs/queries, cookies, headers, email addresses,
 // tokens, and upstream exception messages from security telemetry.

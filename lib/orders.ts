@@ -1,4 +1,5 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
+import { maskedReceiptEmail } from "./receipt-access";
 import { guardCollectionPayment } from "./collection-payment-guard";
 import { getD1, getDb } from "@/db";
 import {
@@ -815,4 +816,18 @@ export async function getPublicOrderBySession(sessionId: string) {
     totalCents: orderRows.reduce((sum, order) => sum + order.totalCents, 0),
     items, orders: sellerOrders,
   };
+}
+
+export async function getAuthorizedOrderReceipt(sessionId: string, access: { guestAuthorized: boolean; userId?: string; verifiedEmail?: string }) {
+  if (!access.guestAuthorized) {
+    if (!access.userId || !access.verifiedEmail) return null;
+    const rows = await getDb().select({ buyerUserId: orders.buyerUserId, buyerEmail: orders.buyerEmail }).from(orders).where(eq(orders.stripeCheckoutSessionId, sessionId));
+    if (!rows.length || rows.some(row => row.buyerUserId
+      ? row.buyerUserId !== access.userId
+      : row.buyerEmail.trim().toLowerCase() !== access.verifiedEmail!.trim().toLowerCase())) return null;
+  }
+  const receipt = await getPublicOrderBySession(sessionId);
+  if (!receipt) return null;
+  // Even the guest capability discloses only the email hint needed on the receipt.
+  return { ...receipt, buyerEmail: maskedReceiptEmail(receipt.buyerEmail), orders: receipt.orders.map(order => ({ ...order, buyerEmail: maskedReceiptEmail(order.buyerEmail) })) };
 }

@@ -1,8 +1,9 @@
+import { logSecurityEvent } from "@/lib/security-events";
 import { requireAdultConsent } from "@/lib/form-consent";
 import { attachStripeSession, loadAuthoritativeCart, releaseReservation, releaseStaleReservations, reserveCart } from "@/lib/inventory";
 import { readJsonObject } from "@/lib/http";
 import { assertSellerPaymentsReady, createCheckoutSession, expireCheckoutSession } from "@/lib/stripe";
-import { checkoutReturnCookie, closePreviousCheckout } from "@/lib/checkout-return";
+import { checkoutResponseHeaders, closePreviousCheckout } from "@/lib/checkout-return";
 import { parseCheckoutShippingAddress } from "@/lib/shipping-rules";
 import { ValidationError } from "@/lib/validation";
 import { getCurrentCollector } from "@/lib/collector-auth";
@@ -28,7 +29,7 @@ export async function POST(request: Request) {
     const previous = await closePreviousCheckout(request, payload.previousReservationId);
     if (previous?.completedSessionId) {
       return Response.json({ url: `${config.siteUrl}/checkout/success?session_id=${encodeURIComponent(previous.completedSessionId)}` }, {
-        headers: { "Cache-Control": "no-store", "Set-Cookie": checkoutReturnCookie(String(payload.previousReservationId)) },
+        headers: await checkoutResponseHeaders(String(payload.previousReservationId), previous.completedSessionId),
       });
     }
     const collector = await getCurrentCollector(request.headers).catch(() => null);
@@ -40,9 +41,7 @@ export async function POST(request: Request) {
     await releaseStaleReservations();
     if (payload.sellerSelections !== undefined) {
       const result = await startConsolidatedCheckout(requested, payload.sellerSelections, payload.destination, collector?.user ?? null);
-      return Response.json({ url: result.url, reservationId: result.reservationId }, { headers: {
-        "Cache-Control": "no-store", "Set-Cookie": checkoutReturnCookie(result.reservationId, result.sessionId, result.returnToken),
-      } });
+      return Response.json({ url: result.url, reservationId: result.reservationId }, { headers: await checkoutResponseHeaders(result.reservationId, result.sessionId, result.returnToken) });
     }
     const loadedCart = await loadAuthoritativeCart(requested);
     await assertSellerPaymentsReady(loadedCart.seller.sellerStripeAccountId!, loadedCart.seller.sellerName);
@@ -96,20 +95,18 @@ export async function POST(request: Request) {
     sessionId = session.id;
     if (!session.url) throw new Error("Stripe did not return a checkout URL.");
     await attachStripeSession(reservationId, session.id);
-    return Response.json({ url: session.url, reservationId }, { headers: {
-      "Cache-Control": "no-store", "Set-Cookie": checkoutReturnCookie(reservationId, session.id, returnToken),
-    } });
+    return Response.json({ url: session.url, reservationId }, { headers: await checkoutResponseHeaders(reservationId, session.id, returnToken) });
   } catch (error) {
     const closed = !sessionId || await expireCheckoutSession(sessionId).then(() => true).catch(() => false);
-    if (reservationId && closed) await releaseReservation(reservationId).catch(console.error);
+    if (reservationId && closed) await releaseReservation(reservationId).catch(() => logSecurityEvent("operation_failed", { scope: "app/api/checkout/route" }));
     if (error instanceof LiveCheckoutUnavailable) {
       return Response.json({ error: error.message }, { status: 503, headers: { "Cache-Control": "no-store" } });
     }
     const message = error instanceof Error ? error.message : "Checkout could not be started.";
-    const safe = error instanceof ValidationError || /cart|product|inventory|available|seller|checkout|configured|payment/i.test(message)
+    const safe = error instanceof ValidationError
       ? message
       : "Checkout could not be started. Please try again.";
-    console.error(error);
+    logSecurityEvent("operation_failed", { scope: "app/api/checkout/route" });
     return Response.json({ error: safe, ...(error instanceof ValidationError ? { fields: error.fields } : {}) }, { status: 400, headers: { "Cache-Control": "no-store" } });
   }
 }

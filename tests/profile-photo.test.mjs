@@ -5,6 +5,7 @@ import { mkdtemp, readFile, readdir, writeFile, unlink, rmdir } from "node:fs/pr
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { build } from "esbuild";
+import { sqliteBinding, jpegWithMetadata } from "./fixtures/security-database.mjs";
 import { defaultPhotoCrop, movePhotoCrop, parsePhotoCrop, photoCropRect } from "../lib/profile-photo.ts";
 
 test("photo crops match both frames, move with the pointer, and never reveal blank edges", () => {
@@ -35,12 +36,14 @@ test("profile photo uploads preserve owner-only originals and immutable public c
   const db = new DatabaseSync(":memory:");
   for (const name of (await readdir(join(root, "drizzle"))).filter(name => name.endsWith(".sql")).sort()) db.exec(await readFile(join(root, "drizzle", name), "utf8"));
   const objects = new Map();
-  const fixture = { viewer: "owner", db, env: { IMAGES: {
+  const fixture = { viewer: "owner", db, binding: sqliteBinding(db), env: { IMAGES: {
     async put(key, bytes, options) { objects.set(key, { body: bytes, customMetadata: options.customMetadata }); },
     async get(key) { return objects.get(key) || null; },
+    async delete(key) { objects.delete(key); },
   } } };
   globalThis.__profilePhotoFixture = fixture;
   const mocks = {
+    "@/db": "export const getD1=()=>globalThis.__profilePhotoFixture.binding;",
     "cloudflare:workers": "export const env=globalThis.__profilePhotoFixture.env;",
     "@/lib/collector-auth": "export const getCurrentCollector=async()=>globalThis.__profilePhotoFixture.viewer?{user:{id:globalThis.__profilePhotoFixture.viewer}}:null; export const requireCollectorApi=async()=>await getCurrentCollector()||Response.json({error:'Sign in'},{status:401});",
     "@/lib/community": "export const one=async(sql,...args)=>globalThis.__profilePhotoFixture.db.prepare(sql).get(...args)||null; export const run=async(sql,...args)=>globalThis.__profilePhotoFixture.db.prepare(sql).run(...args); export const blockSQL=()=> '(? IS ?)' ;",
@@ -57,7 +60,7 @@ test("profile photo uploads preserve owner-only originals and immutable public c
   db.prepare("INSERT INTO user (id,name,email,created_at,updated_at) VALUES ('owner','Owner','owner@example.test',0,0)").run();
   db.prepare("INSERT INTO collector_profiles (id,user_id,display_name,handle) VALUES ('owner','owner','Owner','owner')").run();
   db.prepare("INSERT INTO community_settings (user_id,published) VALUES ('owner',0)").run();
-  const jpeg = new Uint8Array([255,216,255,225,0,8,71,80,83,49,50,51,255,219,0,4,0,1,255,218,0,2,1,2,255,217]);
+  const jpeg = jpegWithMetadata();
   const crop = { kind: "cover", x: 0.75, y: 0.9, zoom: 1.4 };
   function upload(extra = true, cropText = JSON.stringify(crop), original = new Blob([jpeg], { type: "image/jpeg" })) {
     const form = new FormData(); form.set("photo", new Blob([jpeg], { type: "image/jpeg" }), "photo.jpg");

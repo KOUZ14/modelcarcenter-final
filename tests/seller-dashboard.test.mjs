@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { securityDatabase, jpegWithMetadata } from "./fixtures/security-database.mjs";
 import test from "node:test";
 import { mkdtemp, writeFile, unlink, rmdir, readdir, readFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
@@ -74,16 +75,18 @@ test("payment state gives one actionable blocker and keeps legacy releases disti
 test("logo uploads require an eligible store, strip metadata, and only expose the public logo path", async t => {
   const root = fileURLToPath(new URL("../", import.meta.url)), scratch = await mkdtemp(join(root, ".sites-runtime/seller-logo-test-")), bundle = join(scratch, "logo.mjs");
   const objects = new Map();
+  const { binding } = await securityDatabase(t);
   const boundary = { account: { user: { id: "owner" }, seller: { id: "seller-one", sellerType: "professional", status: "active" } }, env: { IMAGES: { async put(key, bytes, options) { objects.set(key, { bytes, options }); }, async get(key) { const object = objects.get(key); return object ? { body: object.bytes, httpEtag: '"logo-etag"', writeHttpMetadata(headers) { headers.set("Content-Type", object.options.httpMetadata.contentType); } } : null; } } } };
   globalThis.__sellerLogoTest = boundary;
+  boundary.env.DB = binding;
   t.after(async () => { delete globalThis.__sellerLogoTest; await unlink(bundle).catch(() => {}); await rmdir(scratch); });
   const output = await build({ stdin: { contents: "export {POST} from './app/api/store/logo/route.ts'; export {GET} from './app/media/[...key]/route.ts';", resolveDir: root }, bundle: true, platform: "node", format: "esm", packages: "external", write: false, plugins: [{ name: "logo-boundaries", setup(builder) {
     builder.onResolve({ filter: /^(cloudflare:workers|@\/lib\/collector-auth)$/ }, ({ path }) => ({ path, namespace: "logo-test" }));
     builder.onLoad({ filter: /.*/, namespace: "logo-test" }, ({ path }) => ({ contents: path === "cloudflare:workers" ? "export const env=globalThis.__sellerLogoTest.env;" : "export const requireCollectorApi=async()=>globalThis.__sellerLogoTest.account;" }));
   } }] });
   await writeFile(bundle, output.outputFiles[0].contents); const { POST, GET } = await import(pathToFileURL(bundle).href);
-  const jpeg = new Uint8Array([255,216,255,225,0,5,71,80,83,255,218,0,2,12,255,217]);
-  const request = (bytes = jpeg, name = "logo.jpg") => { const form = new FormData(); form.set("photo", new File([bytes], name)); return new Request("http://localhost/api/store/logo", { method: "POST", body: form }); };
+  const jpeg = jpegWithMetadata();
+  const request = (bytes = jpeg, name = "logo.jpg") => { const form = new FormData(); form.set("photo", new File([bytes], name, { type: name.endsWith(".jpg") ? "image/jpeg" : "image/svg+xml" })); return new Request("http://localhost/api/store/logo", { method: "POST", body: form }); };
   const validAccount = boundary.account;
   boundary.account = new Response("Unauthorized", { status: 401 }); assert.equal((await POST(request())).status, 401);
   boundary.account = { ...validAccount, seller: null }; assert.equal((await POST(request())).status, 403);

@@ -39,5 +39,7 @@ export async function GET(
   );
   headers.set("Cache-Control", "private, no-store");
   headers.set("X-Content-Type-Options", "nosniff");
+  headers.set("Content-Security-Policy", "default-src 'none'; sandbox; frame-ancestors 'none'");
+  headers.set("Referrer-Policy", "no-referrer");
   return new Response(object.body, { headers });
 }

@@ -1,3 +1,4 @@
+import { logSecurityEvent } from "./security-events.ts";
 import { and, desc, eq, or } from "drizzle-orm";
 import { getDb } from "@/db";
 import { combinedShippingRequests, sellers, user } from "@/db/schema";
@@ -15,7 +16,7 @@ async function notifyShippingRequest(id: string, to: string, subject: string, de
     await sendEmail({ to, subject, text: `${detail}\n\nReview shipping requests: ${url}`,
       html: `<h1>${escapeHtml(subject)}</h1><p>${escapeHtml(detail)}</p><p><a href="${escapeHtml(url)}">Review shipping requests</a></p>`,
       idempotencyKey: `combined-shipping-${id}-${event}` });
-  } catch { console.error("Combined shipping email failed; the request remains available in Messages."); }
+  } catch { logSecurityEvent("operation_failed", { scope: "lib/combined-shipping" }); }
 }
 
 export async function listCombinedShippingRequests(userId: string) {

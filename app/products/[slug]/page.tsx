@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import { ModelCommunity } from "@/components/model-community";
 import { notFound } from "next/navigation";
 import { getCatalogListings, getProductBySlug, getRelatedProducts } from "@/lib/catalog";
@@ -98,6 +99,7 @@ export default async function ProductPage({
         {product.catalogProductId && <ModelCommunity catalogId={product.catalogProductId} preview />}
       </div>
       <script
+        nonce={(await headers()).get("x-nonce") ?? undefined}
         type="application/ld+json"
         dangerouslySetInnerHTML={{
           __html: JSON.stringify(productJsonLd).replaceAll("<", "\\u003c"),

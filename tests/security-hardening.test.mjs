@@ -8,6 +8,7 @@ import { build } from "esbuild";
 import { memoryAdapter } from "better-auth/adapters/memory";
 import { assertRequestOrigin, boundRequestBody, protectRequest, requestBodyLimit, requestRateRules, requestSecurityFailure } from "../lib/request-security.ts";
 import { clientRateLimitIdentity, consumeRateLimit, pruneSecurityRateLimits } from "../lib/security-rate-limit.ts";
+import { normalizeRscRequest } from "../node_modules/vinext/dist/server/app-rsc-request-normalization.js";
 
 const origin = "https://shop.example.test";
 const secret = "test-only-security-secret-with-at-least-32-characters";
@@ -59,9 +60,30 @@ test("only exact authenticated webhook routes bypass the browser origin guard", 
     assert.doesNotThrow(() => assertRequestOrigin(request, origin, true));
     assert.deepEqual(requestRateRules(request), []);
   }
-  for (const path of ["/api/stripe/webhook/other", "/api/stripe/webhook-connect-other", "/api/account?webhook=1"]) {
+  for (const path of ["/api/stripe/webhook/other", "/api/stripe/webhook-connect-other", "/api/stripe/webhook.rsc", "/api//stripe/webhook", "/api/account?webhook=1"]) {
     assert.throws(() => assertRequestOrigin(post(path, { origin: "null" }), origin, true), { status: 403 });
   }
+});
+
+test("Vinext route aliases retain the destination's body budgets and shared rate limits", async (t) => {
+  const { binding } = await database(t);
+  for (const canonical of ["/api/auth/sign-in/magic-link", "/api/addresses/autocomplete", "/api/measurement", "/api/checkout"]) {
+    for (const alias of [canonical + ".rsc", canonical.replace("/api/", "/api//"), canonical.replace("/api/", "/%61pi/") + ".rsc"]) {
+      const request = post(alias);
+      const normalized = normalizeRscRequest(request, "");
+      assert.equal(normalized.cleanPathname, canonical, "Verify aliases against the installed runtime");
+      assert.deepEqual(requestRateRules(request), requestRateRules(post(canonical)));
+      assert.equal(requestBodyLimit(request), requestBodyLimit(post(canonical)));
+    }
+  }
+  const options = { database: binding, siteUrl: origin, secret, production: true };
+  for (let i = 0; i < 5; i++) {
+    assert.ok(await protectRequest(post("/api/auth/sign-in/magic-link"), options) instanceof Request);
+  }
+  for (const path of ["/api/auth/sign-in/magic-link.rsc", "/api//auth/sign-in/magic-link", "/%61pi/auth/sign-in/magic-link.rsc"]) {
+    assert.equal((await protectRequest(post(path), options)).status, 429, "Aliases cannot reset the login bucket");
+  }
+  await assert.rejects(protectRequest(post("/api/addresses/autocomplete.rsc", {}, "x".repeat(4097)), options), { status: 413 });
 });
 
 test("byte limits reject dishonest and absent lengths before parsing and preserve webhook bytes", async () => {
@@ -142,9 +164,15 @@ test("Worker ingress enforces guards before dispatch and preserves security head
   const mocks = {
     "vinext/server/app-router-entry": `export default { async fetch(request) {
       globalThis.__securityWorkerTest.calls.push(await request.text());
-      return new Response("ok", { headers: { "Set-Cookie": "session=value; HttpOnly; Secure; SameSite=Lax", "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": "true" } });
+      const headers = new Headers({ "Cache-Control": "public, max-age=3600", "CDN-Cache-Control": "public, max-age=3600", "Cloudflare-CDN-Cache-Control": "public, max-age=3600", "Surrogate-Control": "max-age=3600", "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": "true" });
+      if (request.method === "POST") headers.set("Set-Cookie", "session=value; HttpOnly; Secure; SameSite=Lax");
+      if (new URL(request.url).pathname === "/api/shipping/label") headers.set("Referrer-Policy", "no-referrer");
+      return new Response("ok", { headers });
     } };`,
     "vinext/server/image-optimization": "export const DEFAULT_DEVICE_SIZES = []; export const DEFAULT_IMAGE_SIZES = []; export function handleImageOptimization() { throw new Error('Unexpected image optimization'); }",
+    "../lib/consumer-shipping": "export const processShippingDelays=async()=>({}); export const deliverLegalNotices=async()=>({});",
+    "../lib/seller-compliance": "export const processSellerCompliance=async()=>({});",
+    "../lib/compliance-admin": "export const reconcileCounterNotices=async()=>({});",
     "../lib/resolution-notifications": "export const processResolutionNotifications = async () => ({});",
     "../lib/seller-transfers": "export const processEligibleSellerTransfers = async () => ({});",
     "../lib/preorder-maintenance": "export const processPreorders = async () => ({});",
@@ -180,6 +208,28 @@ test("Worker ingress enforces guards before dispatch and preserves security head
   assert.equal(auth.headers.get("access-control-allow-origin"), null);
   assert.equal(auth.headers.get("access-control-allow-credentials"), null);
   assert.match(auth.headers.get("set-cookie"), /HttpOnly; Secure; SameSite=Lax/);
+  const assertPrivate = (response) => {
+    assert.equal(response.headers.get("cache-control"), "private, no-store");
+    assert.equal(response.headers.get("cdn-cache-control"), "no-store");
+    assert.equal(response.headers.get("cloudflare-cdn-cache-control"), "no-store");
+    assert.equal(response.headers.get("surrogate-control"), "no-store");
+  };
+  for (const path of ["/account", "/%61ccount?view=orders", "/account.rsc", "/%61dmin.rsc", "/admin", "/admin/preorders", "/store?view=orders", "/resolution", "/sell/model", "/cart", "/wishlist", "/checkout/success?session_id=cs_test_private", "/sign-in", "/unsubscribe?token=private", "/community"]) {
+    assertPrivate(await execute(new Request(origin + path)));
+  }
+  // Cover header/query-based page data requests as well as .rsc URLs above.
+  assertPrivate(await execute(new Request(origin + "/account?_rsc=flight", { headers: { RSC: "1" } })));
+  for (const headers of [{ cookie: "mcc.session_token=private" }, { authorization: "Bearer private" }, { "oai-authenticated-user-email": "admin@example.test" }]) {
+    assertPrivate(await execute(new Request(origin + "/marketplace", { headers })));
+  }
+  assertPrivate(await execute(post("/some-action"))); // A response setting a cookie.
+  assertPrivate(denied);
+  for (const path of ["/api/shipping/label", "/api/orders/by-session?session_id=cs_test_private", "/checkout/success?session_id=cs_test_private", "/unsubscribe?token=private"]) {
+    assert.equal((await execute(new Request(origin + path))).headers.get("referrer-policy"), "no-referrer");
+  }
+  const publicResponse = await execute(new Request(origin + "/media/listings/example/photo.jpg"));
+  assert.equal(publicResponse.headers.get("cache-control"), "public, max-age=3600");
+  assert.equal(publicResponse.headers.get("referrer-policy"), "strict-origin-when-cross-origin");
 });
 
 test("real Better Auth magic links are hashed, single-use, expiring, and uniformly throttled", async (t) => {

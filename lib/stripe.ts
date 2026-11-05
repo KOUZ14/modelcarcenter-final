@@ -1,3 +1,4 @@
+import { logSecurityEvent } from "./security-events.ts";
 import { config, requireConfig } from "./config.ts";
 import { assertLiveCheckoutConfigured } from "./production-readiness.ts";
 import { sellerProcessingDeduction, sellerProceedsAfterRefund } from "./seller-proceeds.ts";
@@ -48,11 +49,7 @@ async function stripeRequest<T>(
       .replaceAll(requireConfig("stripeSecretKey"), "[redacted]")
       .replace(/\b(?:sk|rk|pk)_(?:live|test)_[A-Za-z0-9_]+/g, "[redacted]");
     const requestId = response.headers.get("request-id");
-    console.error("Stripe API request failed", {
-      path: path.split("?")[0], status: response.status,
-      type: data.error?.type, code: data.error?.code,
-      param: data.error?.param, requestId, message,
-    });
+    logSecurityEvent("operation_failed", { scope: "stripe", status: response.status, reason: /^[a-z_]{1,60}$/.test(data.error?.code ?? "") ? data.error!.code : "provider_error" });
     throw new StripeApiError(message, response.status, data.error?.code ?? null, requestId);
   }
   return data;
