@@ -13,6 +13,7 @@ test('optional measurement enforces consent, excludes staff and test activity, a
   const sqlite = new DatabaseSync(':memory:');
   const migration = await readFile(join(root, 'drizzle/0035_marketplace_usability.sql'), 'utf8');
   sqlite.exec(migration.split('ALTER TABLE')[0]);
+  sqlite.exec(await readFile(join(root, 'drizzle/0042_user_traffic_analytics.sql'), 'utf8'));
   const binding = { prepare(sql) {
     let params = [];
     return { bind(...values) { params = values; return this; },
@@ -30,7 +31,7 @@ test('optional measurement enforces consent, excludes staff and test activity, a
     sqlite.close(); await unlink(bundle).catch(() => {}); await rmdir(scratch);
   });
   const result = await build({
-    stdin: { contents: `export * from './lib/measurement.ts'; export {GET, POST} from './app/api/measurement/route.ts';`, resolveDir: root },
+    stdin: { contents: `export * from './lib/measurement.ts'; export {GET, POST} from './app/api/measurement/route.ts'; export {POST as trafficPOST} from './app/api/traffic/route.ts';`, resolveDir: root },
     bundle: true, platform: 'node', format: 'esm', packages: 'external', write: false,
     plugins: [{ name: 'measurement-boundaries', setup(builder) {
       builder.onResolve({ filter: /^(?:@\/db|\.\/config|\.\/auth|@\/lib\/admin-auth)$/ }, ({path}) => ({path, namespace:'fixture'}));
@@ -60,6 +61,23 @@ test('optional measurement enforces consent, excludes staff and test activity, a
     assert.equal(await api.mayMeasure(request()), false);
   }
   fixture.session = null;
+  const trafficEvent = { id: crypto.randomUUID(), visitorId: crypto.randomUUID(), page: 'listing', source: 'search', path: '/private', email: 'private@test.invalid' };
+  const trafficRequest = (body = trafficEvent, headers = {}) => new Request('https://store.test/api/traffic', {method:'POST',headers:{origin:'https://store.test',cookie:'mcc_analytics=yes; mcc_traffic=yes',...headers},body:JSON.stringify(body)});
+  const trafficCount = () => sqlite.prepare('SELECT count(*) n FROM traffic_measurements').get().n;
+  assert.equal((await api.trafficPOST(trafficRequest(trafficEvent, {cookie:'mcc_analytics=yes'}))).status, 204); assert.equal(trafficCount(), 0);
+  assert.equal((await api.trafficPOST(trafficRequest(trafficEvent, {origin:'https://evil.test'}))).status, 403);
+  for (const headers of [{dnt:'1'}, {'sec-gpc':'1'}, {'user-agent':'Googlebot'}, {'oai-authenticated-user-email':'owner@store.test'}]) {
+    assert.equal((await api.trafficPOST(trafficRequest(trafficEvent, headers))).status, 204); assert.equal(trafficCount(), 0);
+  }
+  fixture.config.marketplaceMode = 'test';
+  assert.equal((await api.trafficPOST(trafficRequest())).status, 204); assert.equal(trafficCount(), 0);
+  fixture.config.marketplaceMode = 'live';
+  assert.equal((await api.trafficPOST(trafficRequest({...trafficEvent,page:'/private-url'}))).status, 400);
+  assert.equal((await api.trafficPOST(trafficRequest({...trafficEvent,source:'https://private.test'}))).status, 400);
+  assert.equal((await api.trafficPOST(trafficRequest({...trafficEvent,visitorId:'account-id'}))).status, 400);
+  assert.equal((await api.trafficPOST(trafficRequest())).status, 204);
+  assert.equal((await api.trafficPOST(trafficRequest())).status, 204); assert.equal(trafficCount(), 1);
+  assert.doesNotMatch(JSON.stringify(sqlite.prepare('SELECT * FROM traffic_measurements').all()), /private|email|path/);
   assert.equal(await api.mayMeasure(request()), true);
   assert.equal((await api.POST(request({}, event))).status, 204);
   assert.equal((await api.POST(request({}, event))).status, 204);
@@ -85,7 +103,9 @@ test('optional measurement enforces consent, excludes staff and test activity, a
   assert.equal('id' in reportBody.measurements[0], false);
 
   sqlite.prepare("INSERT INTO task_measurements (id,name,day) VALUES ('old','buyer_search','2000-01-01')").run();
+  sqlite.prepare("INSERT INTO traffic_measurements(id,day,visitor_id,page,source) VALUES('old','2000-01-01','old','home','direct')").run();
   await api.pruneMeasurementRecords(binding);
+  assert.equal(trafficCount(), 1);
   assert.equal(count(), 2);
   await api.measureConfirmedPurchase(request(), 'cs_live_old', 1, '2000-01-01T00:00:00Z');
   assert.equal(count(), 2);

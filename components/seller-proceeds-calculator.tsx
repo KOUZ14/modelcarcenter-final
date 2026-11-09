@@ -5,15 +5,14 @@ import { estimateSellerProceeds } from "@/lib/seller-calculator";
 import { formatMoney } from "@/lib/format";
 import "./seller-proceeds-calculator.css";
 
-export function SellerProceedsCalculator({ rates }: { rates: { collector: number; professional: number; founding: number } }) {
-  const [type, setType] = useState<keyof typeof rates>("collector");
+export function SellerProceedsCalculator({ marketplaceFeeBps }: { marketplaceFeeBps: number }) {
   const [item, setItem] = useState("200");
   const [shipping, setShipping] = useState("10");
   const [tax, setTax] = useState("20");
   const [processing, setProcessing] = useState("2.9");
   const [fixed, setFixed] = useState("0.30");
   const valid = [item, shipping, tax, processing, fixed].every(value => value.trim() !== "" && Number.isFinite(Number(value)) && Number(value) >= 0 && Number(value) <= 1000000) && Number(processing) <= 100;
-  const result = valid ? estimateSellerProceeds({ itemCents: Math.round(Number(item) * 100), shippingCents: Math.round(Number(shipping) * 100), taxCents: Math.round(Number(tax) * 100), feeBps: rates[type], processingBps: Math.round(Number(processing) * 100), processingFixedCents: Math.round(Number(fixed) * 100) }) : null;
+  const result = valid ? estimateSellerProceeds({ itemCents: Math.round(Number(item) * 100), shippingCents: Math.round(Number(shipping) * 100), taxCents: Math.round(Number(tax) * 100), feeBps: marketplaceFeeBps, processingBps: Math.round(Number(processing) * 100), processingFixedCents: Math.round(Number(fixed) * 100) }) : null;
 
   return <section className="seller-proceeds-calculator" aria-labelledby="proceeds-title">
     <div className="seller-calculator-heading">
@@ -22,12 +21,7 @@ export function SellerProceedsCalculator({ rates }: { rates: { collector: number
       <p>Adjust the example to estimate your proceeds before costs.</p>
     </div>
     <div className="seller-calculator-primary">
-      <label>Seller type<select value={type} onChange={event => setType(event.target.value as keyof typeof rates)}>
-        <option value="collector">Collector - {rates.collector / 100}%</option>
-        <option value="professional">Store - {rates.professional / 100}%</option>
-        <option value="founding">Eligible founding store - {rates.founding / 100}%</option>
-      </select></label>
-      {type === "founding" && <p className="seller-calculator-note">This rate applies only during a store’s assigned founding offer.</p>}
+      <p className="seller-calculator-note"><strong>{marketplaceFeeBps / 100}% standard marketplace fee.</strong> Shipping and tax are excluded. This estimate does not include an admin-granted founding-store offer.</p>
       <div className="seller-calculator-fields">
         {[{ label: "Item price (USD)", value: item, set: setItem }, { label: "Buyer-paid shipping (USD)", value: shipping, set: setShipping }].map(field => <label key={field.label}>{field.label}<input type="number" min="0" max="1000000" step="0.01" inputMode="decimal" value={field.value} onChange={event => field.set(event.target.value)} /></label>)}
       </div>
@@ -47,7 +41,7 @@ export function SellerProceedsCalculator({ rates }: { rates: { collector: number
             <div><dt>Buyer-paid shipping</dt><dd>{formatMoney(Math.round(Number(shipping) * 100))}</dd></div>
             <div><dt>Customer pays, including tax</dt><dd>{formatMoney(result.totalCents)}</dd></div>
             <div><dt>Tax withheld</dt><dd>{`−${formatMoney(Math.round(Number(tax) * 100))}`}</dd></div>
-            <div><dt>Marketplace fee ({rates[type] / 100}%)</dt><dd>{`−${formatMoney(result.platformFeeCents)}`}</dd></div>
+            <div><dt>Marketplace fee ({marketplaceFeeBps / 100}%)</dt><dd>{`−${formatMoney(result.platformFeeCents)}`}</dd></div>
             <div><dt>Estimated processing deduction</dt><dd>{`−${formatMoney(result.processingDeductionCents)}`}</dd></div>
           </dl>
         </details>

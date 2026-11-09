@@ -46,6 +46,26 @@
 .admin-shell .tax-command-bar h2 { font-size: 25px; }
 .admin-shell .tax-readiness-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .admin-shell pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.admin-analytics { display: grid; gap: 24px; }
+.admin-analytics > .admin-queue-filters { margin-bottom: 0; }
+.admin-analytics > .admin-queue-filters label { flex: 0 1 240px; }
+.admin-analytics .metric-grid small { display: block; color: #555; }
+.admin-signup-trend { margin: 20px 0; padding: 18px; border: 1px solid #d8d4cc; background: white; }
+.admin-signup-trend figcaption { margin-bottom: 16px; font-weight: 600; }
+.admin-signup-bars { display: flex; align-items: end; height: 130px; gap: 2px; border-bottom: 1px solid #ccc; }
+.admin-signup-bars > div { display: flex; align-items: end; flex: 1; height: 100%; }
+.admin-signup-bars span { display: block; width: 100%; background: #817042; }
+.admin-signup-axis { display: flex; justify-content: space-between; gap: 12px; margin-top: 8px; color: #555; font-size: 12px; }
+.admin-analytics-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 16px; margin: 18px 0; }
+.admin-analytics-card { padding: 18px; background: white; border: 1px solid #d8d4cc; }
+.admin-analytics-card h3 { margin: 0 0 12px; }
+.admin-analytics-card dl { margin: 0; }
+.admin-analytics-card dl > div { display: flex; justify-content: space-between; gap: 16px; padding: 10px 0; border-bottom: 1px solid #eee; }
+.admin-analytics-card dd { margin: 0; font-weight: 700; }
+.admin-analytics-daily summary { cursor: pointer; padding: 12px 0; font-weight: 600; }
+.admin-analytics-daily table { width: 100%; border-collapse: collapse; }
+.admin-analytics-daily :is(th, td) { padding: 10px; text-align: left; border-bottom: 1px solid #d8d4cc; }
+.admin-analytics-daily caption { text-align: left; padding: 12px 10px; color: #555; }
 @media (max-width: 700px) {
   .admin-header { padding: 12px 15px; flex-direction: column; }
   .admin-header > div:last-child { align-items: flex-start; flex-direction: row; font-size: 11px; }

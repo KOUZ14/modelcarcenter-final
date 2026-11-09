@@ -1,3 +1,4 @@
+import { newConditionDefaults } from "./condition-defaults";
 import { and, eq } from "drizzle-orm";
 import { sellerPublicProfileComplete } from "./seller-setup";
 import { getDb } from "@/db";
@@ -87,7 +88,7 @@ export async function saveCollectorListing(input: {
   const owned = input.productId ? await getOwnedProduct(input.user.id, input.productId) : null;
   if (input.productId && !owned) throw new ValidationError("Listing not found.");
   const catalog = await prepareListingCatalog(input.payload, input.user.id, owned?.product.catalogProductId);
-  const values = parseCollectorListing(listingPayloadWithCatalog(input.payload, catalog.model));
+  const values = parseCollectorListing(newConditionDefaults(listingPayloadWithCatalog(input.payload, catalog.model), owned?.product));
   const seller = await getOrCreateCollectorSeller(input.user, input.profile);
   if (seller.status === "suspended") throw new ValidationError("This seller is suspended.");
   const db = getDb();

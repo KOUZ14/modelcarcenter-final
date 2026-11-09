@@ -3,8 +3,10 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { ANALYTICS_CONSENT_KEY } from "@/lib/analytics-rules";
+import { CONSENT_CHANGED_EVENT, TRAFFIC_CONSENT_KEY, TRAFFIC_COOKIE } from "@/lib/traffic-rules";
+import { clearTrafficStorage } from "@/lib/traffic-client";
 
-const NOTICE_KEY = "mcc-storage-notice-v1";
+const NOTICE_KEY = "mcc-storage-notice-v2";
 const OPEN_EVENT = "mcc:storage-settings";
 
 export function CookieSettingsButton() {
@@ -41,12 +43,16 @@ export function CookieNotice() {
     const allow = allowAnalytics && !(navigator as Navigator & { globalPrivacyControl?: boolean }).globalPrivacyControl && navigator.doNotTrack !== "1";
     try { localStorage.setItem(ANALYTICS_CONSENT_KEY, allow ? "yes" : "no"); } catch { /* Optional measurement stays off. */ }
     document.cookie = `mcc_analytics=${allow ? "yes" : "no"}; Path=/; Max-Age=31536000; SameSite=Lax${location.protocol === "https:" ? "; Secure" : ""}`;
+    try { localStorage.setItem(TRAFFIC_CONSENT_KEY, allow ? "yes" : "no"); } catch { /* Optional measurement stays off. */ }
+    document.cookie = `${TRAFFIC_COOKIE}=${allow ? "yes" : "no"}; Path=/; Max-Age=31536000; SameSite=Lax${location.protocol === "https:" ? "; Secure" : ""}`;
+    if (!allow) clearTrafficStorage();
+    window.dispatchEvent(new Event(CONSENT_CHANGED_EVENT));
     setVisible(false);
     returnFocus.current?.focus();
   }
   if (!visible) return null;
   return <section ref={panel} tabIndex={-1} className="cookie-notice" aria-labelledby="cookie-notice-title" onKeyDown={(event) => { if (event.key === "Escape") dismiss(); }}>
-    <div><h2 id="cookie-notice-title">Your privacy choices</h2><p>Necessary storage keeps sign-in and shopping working. Optional usage measurement helps us improve shopping and seller setup. It excludes search text, private form contents and payment details. No advertising tracking.</p><Link href="/cookies">Read the cookie policy</Link></div>
+    <div><h2 id="cookie-notice-title">Your privacy choices</h2><p>Necessary storage keeps sign-in and shopping working. Optional usage measurement counts page views, traffic sources, shopping and seller tasks. A random browser identifier lasts up to 90 days to count returning browsers. It excludes search text, private form contents and payment details. No advertising tracking.</p><Link href="/cookies">Read the cookie policy</Link></div>
     <div className="cookie-notice-actions"><button type="button" className="button dark" onClick={() => dismiss(false)}>Continue with necessary only</button><button type="button" className="button outline" onClick={() => dismiss(true)}>Allow usage measurement</button></div>
   </section>;
 }

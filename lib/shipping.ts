@@ -9,6 +9,7 @@ import {
   trackingEvents,
 } from "@/db/schema";
 import { config } from "./config";
+import { trackingEvidence } from "./tracking-evidence";
 import { sendLabelCreatedEmail, sendShipmentEmail } from "./email";
 import {
   createShippoShipment,
@@ -332,6 +333,7 @@ export async function syncOwnedShipment(userId: string, shipmentId: string) {
     row.shipment.carrier,
     row.shipment.trackingNumber,
   );
+  assertTrackingIdentity(tracking, row.shipment.carrier, row.shipment.trackingNumber);
   await recordTrackingUpdate(row.shipment, tracking, "poll");
   return { shipmentId, synced: true };
 }
@@ -419,11 +421,11 @@ async function recordTrackingUpdate(
   tracking: ShippoTracking,
   source: "poll" | "webhook",
 ) {
-  const history = [...(tracking.tracking_history ?? [])];
-  if (tracking.tracking_status) history.push(tracking.tracking_status);
+  const now = new Date().toISOString();
+  const evidence = trackingEvidence(tracking, new Date(now));
   const unique = new Map<string, ShippoTrackingEvent>();
-  for (const event of history) {
-    const statusDate = validDate(event.status_date) ?? new Date().toISOString();
+  for (const event of evidence.events) {
+    const statusDate = event.status_date;
     const key =
       cleanText(event.object_id, 200) ||
       `${shipment.id}:${String(event.status ?? "UNKNOWN").toUpperCase()}:${statusDate}`;
@@ -447,14 +449,15 @@ async function recordTrackingUpdate(
       })
       .onConflictDoNothing();
   }
-  const latest = tracking.tracking_status ?? history.at(-1);
+  const latest = evidence.latest;
   if (!latest) return;
-  const nextStatus = mapShippoTrackingStatus(latest.status);
-  const now = new Date().toISOString();
-  const eventAt = validDate(latest.status_date) ?? now;
+  let nextStatus = mapShippoTrackingStatus(latest.status);
+  if (nextStatus !== "returned") {
+    if (shipment.deliveredAt || evidence.deliveredAt) nextStatus = "delivered";
+    else if ((shipment.shippedAt || evidence.shippedAt) && ["pre_transit", "unknown"].includes(nextStatus)) nextStatus = "in_transit";
+  }
   const startedTransit =
-    nextStatus === "in_transit" &&
-    !["in_transit", "delivered"].includes(shipment.status);
+    nextStatus === "in_transit" && !!evidence.shippedAt && !shipment.shippedAt;
   await db
     .update(shipments)
     .set({
@@ -463,14 +466,8 @@ async function recordTrackingUpdate(
         cleanText(latest.status_details, 1_000) ||
         cleanText(latest.substatus?.text, 1_000),
       eta: validDate(tracking.eta) ?? shipment.eta,
-      shippedAt:
-        ["in_transit", "delivered"].includes(nextStatus) && !shipment.shippedAt
-          ? validDate(latest.status_date) ?? now
-          : shipment.shippedAt,
-      deliveredAt:
-        nextStatus === "delivered" && !shipment.deliveredAt
-          ? eventAt
-          : shipment.deliveredAt,
+      shippedAt: evidence.shippedAt ? earliestShipmentDate(shipments.shippedAt, evidence.shippedAt) : shipments.shippedAt,
+      deliveredAt: evidence.deliveredAt ? sql`COALESCE(${shipments.deliveredAt}, ${evidence.deliveredAt})` : shipments.deliveredAt,
       updatedAt: now,
     })
     .where(eq(shipments.id, shipment.id));
@@ -482,8 +479,8 @@ async function recordTrackingUpdate(
   if (!orderIds.length) return;
   await applyOrderTrackingStatus({
     orderIds,
-    nextStatus,
-    eventAt,
+    shippedAt: evidence.shippedAt,
+    deliveredAt: evidence.deliveredAt,
     now,
   });
   if (startedTransit) {
@@ -510,42 +507,45 @@ export async function recordOrderTrackingUpdate(
   orderIds: string[],
   tracking: ShippoTracking,
 ) {
-  const history = tracking.tracking_history ?? [];
-  const latest = tracking.tracking_status ?? history.at(-1);
-  if (!latest || !orderIds.length) return;
-  const nextStatus = mapShippoTrackingStatus(latest.status);
+  if (!orderIds.length) return;
   const now = new Date().toISOString();
-  const eventAt = validDate(latest.status_date) ?? now;
+  const evidence = trackingEvidence(tracking, new Date(now));
   await applyOrderTrackingStatus({
     orderIds,
-    nextStatus,
-    eventAt,
+    shippedAt: evidence.shippedAt,
+    deliveredAt: evidence.deliveredAt,
     now,
   });
 }
 
 async function applyOrderTrackingStatus(input: {
   orderIds: string[];
-  nextStatus: ReturnType<typeof mapShippoTrackingStatus>;
-  eventAt: string;
+  shippedAt: string | null;
+  deliveredAt: string | null;
   now: string;
 }) {
-  if (!["in_transit", "delivered"].includes(input.nextStatus)) return;
+  if (!input.shippedAt) return;
   const rows = await getDb().select().from(orders).where(inArray(orders.id, input.orderIds));
   for (const order of rows) {
     if (order.fulfillmentStatus === "cancelled" || await getD1().prepare("SELECT 1 FROM order_shipping_delays WHERE order_id=? AND status IN ('cancel_requested','refunding','refunded')").bind(order.id).first()) continue;
     // A combined shipment can contain orders with different sold-under terms.
-    const deliveryDeadline = input.nextStatus === "delivered"
-      ? reportDeadlineForOrder({ ...order, deliveredAt: order.deliveredAt ?? input.eventAt }) : null;
+    const deliveryDeadline = input.deliveredAt
+      ? reportDeadlineForOrder({ ...order, deliveredAt: order.deliveredAt ?? input.deliveredAt }) : null;
     await getDb().update(orders).set({
-      fulfillmentStatus: input.nextStatus === "delivered" ? "delivered" : sql`CASE WHEN ${orders.deliveredAt} IS NOT NULL THEN ${orders.fulfillmentStatus} ELSE 'shipped' END`,
-      shippedAt: sql`COALESCE(${orders.shippedAt}, ${input.eventAt})`,
-      deliveredAt: input.nextStatus === "delivered" ? sql`COALESCE(${orders.deliveredAt}, ${input.eventAt})` : orders.deliveredAt,
-      refundRequestDeadline: input.nextStatus === "delivered" ? sql`COALESCE(${orders.refundRequestDeadline}, ${deliveryDeadline})` : orders.refundRequestDeadline,
-      payoutEligibleAt: input.nextStatus === "delivered" ? sql`COALESCE(${orders.payoutEligibleAt}, ${deliveryDeadline})` : orders.payoutEligibleAt,
+      fulfillmentStatus: input.deliveredAt ? "delivered" : sql`CASE WHEN ${orders.deliveredAt} IS NOT NULL THEN ${orders.fulfillmentStatus} ELSE 'shipped' END`,
+      shippedAt: earliestShipmentDate(orders.shippedAt, input.shippedAt),
+      deliveredAt: input.deliveredAt ? sql`COALESCE(${orders.deliveredAt}, ${input.deliveredAt})` : orders.deliveredAt,
+      refundRequestDeadline: input.deliveredAt ? sql`COALESCE(${orders.refundRequestDeadline}, ${deliveryDeadline})` : orders.refundRequestDeadline,
+      payoutEligibleAt: input.deliveredAt ? sql`COALESCE(${orders.payoutEligibleAt}, ${deliveryDeadline})` : orders.payoutEligibleAt,
       updatedAt: input.now,
     }).where(eq(orders.id, order.id));
   }
+}
+
+function earliestShipmentDate(column: typeof orders.shippedAt | typeof shipments.shippedAt, at: string) {
+  // Resolve competing/replayed updates in SQL; a stale read must never move the
+  // ship date forward after another request has already recovered an earlier scan.
+  return sql`CASE WHEN julianday(${column}) IS NULL OR julianday(${at}) < julianday(${column}) THEN ${at} ELSE ${column} END`;
 }
 
 async function loadOwnedOrders(userId: string, orderIds: string[]) {

@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import { photoViews, photoViewsFromAlt } from "@/lib/listing-evidence";
+import { productImageSources } from "@/lib/product-image-sources";
 import {
   useCallback,
   useEffect,
@@ -265,13 +266,14 @@ export function ProductGallery({
                 aria-pressed={index === activeIndex}
                 onClick={() => selectImage(index)}
               >
-                <Image
-                  src={image.url}
+                {/* Native srcset uses the bounded media variants, including in Vinext. */}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  {...productImageSources(image.url, true)}
                   alt=""
-                  fill
-                  style={{ objectFit: "contain" }}
-                  sizes="96px"
-                  unoptimized
+                  className="gallery-photo"
+                  loading="lazy"
+                  decoding="async"
                 />
                 <span>{String(index + 1).padStart(2, "0")}</span>
               </button>
@@ -288,15 +290,15 @@ export function ProductGallery({
               aria-label={`Enlarge photo ${activeIndex + 1} of ${count}`}
               onClick={openViewer}
             >
-              <Image
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
                 key={activeImage.id}
-                src={activeImage.url}
+                {...productImageSources(activeImage.url)}
                 alt={activeAlt}
-                fill
-                style={{ objectFit: "contain" }}
-                priority={activeIndex === 0}
-                sizes="(max-width: 1000px) calc(100vw - 38px), 65vw"
-                unoptimized
+                className="gallery-photo"
+                fetchPriority={activeIndex === 0 ? "high" : "auto"}
+                loading="eager"
+                decoding="async"
               />
               <span className="gallery-inspect-hint">
                 <b aria-hidden="true">+</b>

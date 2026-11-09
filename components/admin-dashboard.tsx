@@ -5,6 +5,8 @@ import { CatalogModelPicker } from "@/components/catalog-model-picker";
 import Image from "next/image";
 import { useSearchParams } from "next/navigation";
 import { adminSections } from "@/components/admin-frame";
+import { AdminAnalytics } from "@/components/admin-analytics";
+import type { AdminAnalyticsReport } from "@/lib/admin-analytics";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { adminTimestamp, awaitingShipment, overdueShipment, orderItemProblem } from "@/lib/admin-order-rules";
 import { modelHuntMatches } from "@/lib/business";
@@ -25,6 +27,7 @@ import {
 type AdminData = Record<string, unknown> & { section?: string };
 const tabs = [
   "overview",
+  "analytics",
   "sellers",
   "products",
   "import",
@@ -165,6 +168,7 @@ function AdminSection({
   action(payload: Record<string, unknown>): Promise<Record<string, unknown>>;
 }) {
   if (tab === "overview") return <Overview data={data} />;
+  if (tab === "analytics") return <AdminAnalytics report={data.analytics as AdminAnalyticsReport} />;
   if (tab === "production") return <ProductionReadiness checks={(data.checks as ReadinessCheck[]) ?? []} configurationReady={data.configurationReady === true} checkedAt={String(data.checkedAt || "")} />;
   if (tab === "sellers") return <Sellers data={data} action={action} />;
   if (tab === "products") return <Products data={data} action={action} />;
@@ -246,12 +250,9 @@ type Seller = {
   returnPolicySummary: string;
   sellerType?: string;
   ownerUserId?: string | null;
-  isFoundingSeller: boolean;
-  foundingRateStartsAt?: string | null;
-  foundingRateEndsAt?: string | null;
   marketplaceFeeBps: number;
-  standardMarketplaceFeeBps: number;
-  foundingPromotionActive: boolean;
+  foundingFeeGrantedAt?: string | null;
+  foundingFeeOffer?: { active: boolean; used: number; reserved: number; remaining: number };
 };
 function Sellers({
   data,
@@ -330,6 +331,7 @@ function Sellers({
       <section className="admin-panel">
         <div className="panel-heading">
           <h2>Sellers</h2>
+          <WeeklyPayoutSetup action={action} />
           <button
             className="button dark small"
             onClick={() => setEditing(emptySeller())}
@@ -344,7 +346,7 @@ function Sellers({
               <tr>
                 <th>Seller</th>
                 <th>Type / rate</th>
-                <th>Founding program</th>
+                <th>Founding-store offer</th>
                 <th>Stripe</th>
                 <th>Shipping</th>
                 <th>Actions</th>
@@ -376,40 +378,19 @@ function Sellers({
                         : "Professional store"}
                     </b>
                     <br />
-                    Standard {feePercent(seller.standardMarketplaceFeeBps)}
-                    <br />
                     <span className="status active">
-                      Current {feePercent(seller.marketplaceFeeBps)}
+                      {feePercent(seller.marketplaceFeeBps)} marketplace fee
                     </span>
                   </td>
                   <td>
-                    {seller.isFoundingSeller ? (
-                      <>
-                        <b>
-                          {seller.foundingPromotionActive
-                            ? "Active"
-                            : "Founding history retained"}
-                        </b>
-                        <br />
-                        <small>
-                          {shortDate(seller.foundingRateStartsAt)} –{" "}
-                          {shortDate(seller.foundingRateEndsAt)}
-                        </small>
-                      </>
-                    ) : seller.sellerType === "professional" ? (
-                      <button
-                        onClick={() =>
-                          void action({
-                            action: "assign_founding_seller",
-                            sellerId: seller.id,
-                          })
-                        }
-                      >
-                        Assign 6-month rate
-                      </button>
-                    ) : (
-                      <small>Not eligible</small>
-                    )}
+                    {seller.sellerType === "professional" ? seller.foundingFeeOffer?.active ? <>
+                      <b>0% on the first 10 units after activation</b>
+                      <p>{seller.foundingFeeOffer.used}/10 sold · {seller.foundingFeeOffer.reserved} in checkout · {seller.foundingFeeOffer.remaining} available</p>
+                      <small>{seller.foundingFeeOffer.used === 10 ? "Offer used up. Standard 7% applies." : "Then 7%. Processing is separate."} Granted {shortDate(seller.foundingFeeGrantedAt)}.</small>
+                    </> : <>
+                      <button onClick={() => void action({action:"grant_founding_fee_offer",sellerId:seller.id})}>Grant 10 fee-free items</button>
+                      <p><small>One-time grant: 0% marketplace fee on the next 10 units sold, then 7%. Processing stays separate.</small></p>
+                    </> : <small>Store accounts only</small>}
                   </td>
                   <td>
                     <b>{seller.stripeChargesEnabled && seller.stripePayoutsEnabled ? "Payments ready" : seller.stripeAccountId ? "Setup needs attention" : "Not connected"}</b>
@@ -512,10 +493,7 @@ function emptySeller(): Seller {
     returnPolicySummary: "",
     sellerType: "professional",
     ownerUserId: null,
-    isFoundingSeller: false,
     marketplaceFeeBps: 0,
-    standardMarketplaceFeeBps: 0,
-    foundingPromotionActive: false,
   };
 }
 function SellerEditor({
@@ -1176,7 +1154,7 @@ function Importer({
           Download template
         </a>
       </div>
-      <details open><summary>Before importing</summary><p>CSV only, up to 5 MB and 5,000 rows. Prices use USD dollars, for example 249.95. New listings become drafts.</p><p>Required columns: seller_sku, title, scale, model_manufacturer, vehicle_make, vehicle_model, model_condition, packaging_condition, original_box, missing_parts, defects, restoration_customization, material, coa, accessories, price, inventory_quantity.</p><p>Matching seller SKUs update listing descriptions, condition, price, quantity and other imported fields. Blank optional cells clear those values; blanks do not mean &quot;keep existing.&quot; Shared catalog identity stays linked to the existing model. Photos and reserved stock are retained. Existing listing status is retained; restocked sold-out listings can become active.</p><p>Use product editing for a small change. Upload photos after importing; image URLs are not accepted.</p></details>
+      <details open><summary>Before importing</summary><p>CSV only, up to 5 MB and 5,000 rows. Prices use USD dollars, for example 249.95. New listings become drafts.</p><p>Required columns: seller_sku, title, scale, model_manufacturer, vehicle_make, vehicle_model, model_condition, packaging_condition, original_box, coa, price, inventory_quantity. Describe missing_parts, defects and restoration_customization for used items. For New items (model_condition=new), blank disclosure cells keep existing answers or default to None known. Material and accessories are optional.</p><p>Matching seller SKUs update listing descriptions, condition, price, quantity and other imported fields. Other blank optional cells clear those values. Shared catalog identity stays linked to the existing model. Photos and reserved stock are retained. Existing listing status is retained; restocked sold-out listings can become active.</p><p>Use product editing for a small change. Upload photos after importing; image URLs are not accepted.</p></details>
       {fileError && <p role="alert" className="form-error">{fileError}</p>}
       <label>
         Seller
@@ -1306,6 +1284,20 @@ type Candidate = {
   priceCents: number;
   currency: string;
 };
+function WeeklyPayoutSetup({ action }: { action: (payload: Record<string, unknown>) => Promise<Record<string, unknown>> }) {
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  async function sync() {
+    setBusy(true); setMessage("");
+    try {
+      const result = await action({ action: "sync_weekly_payouts" });
+      setMessage(`${result.verified} accounts verified this batch; ${result.failed} need retry or review. ${result.pendingNotices} payout emails await delivery. Up to 5 accounts are checked per batch; recently checked accounts are skipped.`);
+    } catch (error) { setMessage(error instanceof Error ? error.message : "Payout schedules could not be checked."); }
+    finally { setBusy(false); }
+  }
+  return <div><button className="button outline small" disabled={busy} onClick={() => void sync()}>{busy ? "Checking payouts…" : "Set weekly payouts & notify sellers"}</button>{message && <p role="status">{message}</p>}</div>;
+}
+
 function Hunts({
   data,
   action,
@@ -2261,6 +2253,8 @@ type AdminOrder = {
   shippingCents: number;
   taxCents: number;
   marketplaceFeeBps: number;
+  foundingFeeFreeUnits?: number;
+  foundingFeeFreeSubtotalCents?: number;
   platformFeeCents: number;
   paymentProcessingFeeCents?: number | null;
   processingFeePayer?: "platform" | "seller";
@@ -2502,7 +2496,7 @@ function OrderPanel({
           {order.items.map(item => <div className="admin-item" key={item.id}>{item.imageUrlSnapshot && <Image src={item.imageUrlSnapshot} alt="" width={64} height={52} unoptimized />}<div><b>{item.productTitleSnapshot}</b><p>SKU {item.sellerSkuSnapshot} · Quantity {item.quantity} · {money(item.unitPriceCents * item.quantity, order.currency)}</p>{item.availabilityTypeSnapshot === "preorder" && <small>Preorder - Expected release {shortDate(item.releaseDateSnapshot)}</small>}</div></div>)}
           <h3>Financial record</h3><p>Paid: {order.paidAt ? shortDateTime(order.paidAt) : "Not recorded"}<br/>Merchandise {money(order.subtotalCents, order.currency)} · Shipping {money(order.shippingCents, order.currency)} · Tax {money(order.taxCents, order.currency)}<br/>Refunded {money(order.refundedAmountCents, order.currency)} · Seller transfer: {order.sellerTransferStatus.replaceAll("_", " ")}</p>
           <p>
-            Model Car Center fee ({feePercent(order.marketplaceFeeBps)}):{" "}
+            Model Car Center fee ({feePercent(order.marketplaceFeeBps)}{order.foundingFeeFreeUnits ? `; ${order.foundingFeeFreeUnits} fee-free units` : ""}):{" "}
             <b>{money(order.platformFeeCents, order.currency)}</b>
             <br />
             Stripe processing ({order.processingFeePayer === "seller" ? "deducted from seller proceeds" : "paid by platform"}): {order.paymentProcessingFeeCents == null

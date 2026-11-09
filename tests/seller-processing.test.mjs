@@ -88,7 +88,9 @@ test("paid-order persistence and delayed fee reconciliation use actual fees with
   sqlite.exec("INSERT INTO catalog_products (id, model_car_manufacturer, manufacturer_key, scale, vehicle_make, vehicle_model, title) VALUES ('catalog-fixture', 'Maker', 'maker', '1:18', 'Make', 'Model', 'Model')");
   sqlite.exec("INSERT INTO products (catalog_product_id, id, seller_id, slug, seller_sku, title, scale, model_manufacturer, vehicle_make, vehicle_model, price_cents, inventory_quantity, reserved_quantity) VALUES ('catalog-fixture', 'product', 'seller', 'product', 'sku', 'Model', '1:18', 'Maker', 'Make', 'Model', 20000, 5, 5)");
   for (const [id, fee, payer] of [["new",697,"seller"], ["pending",null,"seller"], ["zero",0,"seller"], ["legacy",697,null], ["early-refund",null,"seller"]]) {
-    sqlite.prepare("INSERT INTO checkout_reservations (id, seller_id, subtotal_cents, shipping_cents, platform_fee_cents, marketplace_fee_bps, currency, expires_at) VALUES (?, 'seller', 20000, 1000, 1400, 700, 'usd', '2026-09-16')").run(id);
+    const feeBps = id === "legacy" ? 500 : 700;
+    const commission = 20000 * feeBps / 10000;
+    sqlite.prepare("INSERT INTO checkout_reservations (id, seller_id, subtotal_cents, shipping_cents, platform_fee_cents, marketplace_fee_bps, currency, expires_at) VALUES (?, 'seller', 20000, 1000, ?, ?, 'usd', '2026-09-16')").run(id, commission, feeBps);
     sqlite.prepare("INSERT INTO checkout_reservation_items (id, reservation_id, product_id, product_title_snapshot, seller_sku_snapshot, scale_snapshot, manufacturer_snapshot, unit_price_cents, quantity) VALUES (?, ?, 'product', 'Model', 'sku', '1:18', 'Maker', 20000, 1)").run(id,id);
     const event = { id: `evt_${id}`, type: "checkout.session.completed", data: { object: {} } };
     const paidSession = session(id,fee,payer);
@@ -103,11 +105,11 @@ test("paid-order persistence and delayed fee reconciliation use actual fees with
     const order = sqlite.prepare("SELECT * FROM orders WHERE stripe_checkout_session_id = ?").get(`cs_${id}`);
     assert.equal(order.processing_fee_payer, payer ?? "platform");
     assert.equal(order.payment_processing_fee_cents, fee);
-    assert.equal(order.seller_proceeds_cents, fee == null ? null : payer && fee ? 18903 : 19600);
+    assert.equal(order.seller_proceeds_cents, fee == null ? null : 21000 - commission - (payer ? fee : 0));
     assert.equal(order.tax_cents, 2000);
     assert.equal(order.total_cents, 23000);
-    assert.equal(order.marketplace_fee_bps, 700);
-    assert.equal(order.platform_fee_cents, 1400);
+    assert.equal(order.marketplace_fee_bps, feeBps);
+    assert.equal(order.platform_fee_cents, commission);
     if (id === "new") {
       const shipping = JSON.parse(order.shipping_address);
       assert.equal(shipping.name, delivery.name);
@@ -179,7 +181,7 @@ test("seller disclosures render the applicable rate and accurate actual, pending
   });
   await writeFile(bundlePath, built.outputFiles[0].contents);
   const { SellerFeeDisclosure, SellerOrderAmounts } = await import(pathToFileURL(bundlePath).href);
-  for (const [marketplaceFeeBps, proceeds] of [[850,"186.03"],[700,"189.03"],[500,"193.03"]]) {
+  for (const [marketplaceFeeBps, proceeds] of [[700,"189.03"]]) {
     const html = renderToStaticMarkup(createElement(SellerFeeDisclosure, { marketplaceFeeBps }));
     assert.ok(html.includes(`${marketplaceFeeBps / 100}%`));
     assert.ok(html.includes(`$${proceeds}`));

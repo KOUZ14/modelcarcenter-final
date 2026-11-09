@@ -60,11 +60,39 @@ test("admin recovery, API payloads, editor initial state, and maintenance previe
   t.after(async () => { delete globalThis.__adminWorkflow; sqlite.close(); await unlink(bundle).catch(() => {}); await unlink(view).catch(() => {}); await rmdir(scratch); });
   const boundary = { name: "admin-test", setup(builder) {
     builder.onResolve({ filter: /^@\/db$|^@\/lib\/admin-auth$/ }, ({ path }) => ({ path, namespace: "mock" }));
-    builder.onLoad({ filter: /.*/, namespace: "mock" }, ({ path }) => ({ contents: path === "@/db" ? "export const getDb=()=>globalThis.__adminWorkflow.db; export const getD1=()=>globalThis.__adminWorkflow.binding;" : "export const requireAdminApi=async()=>({email:'founder@example.test'});" }));
+    builder.onLoad({ filter: /.*/, namespace: "mock" }, ({ path }) => ({ contents: path === "@/db" ? "export const getDb=()=>globalThis.__adminWorkflow.db; export const getD1=()=>globalThis.__adminWorkflow.binding;" : "export const requireAdminApi=async()=>globalThis.__adminWorkflow.denied ? new Response('Forbidden',{status:403}) : {email:'founder@example.test'};" }));
   } };
   const compiled = await build({ stdin: { contents: "export {GET,POST} from './app/api/admin/route.ts'; export {previewPreorderMaintenance} from './lib/preorder-preview.ts';", resolveDir: root }, bundle: true, format: "esm", platform: "node", packages: "external", write: false, plugins: [boundary] });
   await writeFile(bundle, compiled.outputFiles[0].contents);
   const api = await import(pathToFileURL(bundle).href);
+  await t.test("user analytics requires admin access and returns private aggregates", async () => {
+    globalThis.__adminWorkflow.denied = true;
+    assert.equal((await api.GET(new Request("http://localhost/api/admin?section=analytics"))).status, 403);
+    globalThis.__adminWorkflow.denied = false;
+    const response = await api.GET(new Request("http://localhost/api/admin?section=analytics"));
+    assert.equal(response.status, 200); assert.equal(response.headers.get("cache-control"), "private, no-store");
+    const data = await response.json();
+    assert.equal(data.section, "analytics"); assert.equal(data.analytics.accounts.total, 0);
+    assert.deepEqual(data.analytics.traffic.visitors, { 7: 0, 30: 0, 90: 0 });
+    assert.doesNotMatch(JSON.stringify(data), /owner@example|buyer@example|visitor_id/);
+  });
+  await t.test("only admins can grant the one-time founding-store offer and collectors cannot receive it", async () => {
+    const grant = sellerId => api.POST(new Request("http://localhost/api/admin", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"grant_founding_fee_offer",sellerId})}));
+    globalThis.__adminWorkflow.denied = true;
+    assert.equal((await grant("seller")).status,403);
+    assert.equal(sqlite.prepare("SELECT founding_fee_granted_at value FROM sellers WHERE id='seller'").get().value,null);
+    globalThis.__adminWorkflow.denied = false;
+    sqlite.exec("INSERT INTO sellers(id,slug,store_name,contact_name,contact_email,seller_type) VALUES('collector','collector','Collector','Owner','collector@example.test','collector')");
+    assert.equal((await grant("collector")).status,400);
+    assert.equal((await grant("seller")).status,200);
+    assert.equal((await grant("seller")).status,200);
+    assert.equal(sqlite.prepare("SELECT count(*) n FROM admin_activity WHERE action='grant_founding_fee_offer'").get().n,1);
+    const response = await api.GET(new Request("http://localhost/api/admin?section=sellers"));
+    assert.equal(response.status,200);
+    const seller=(await response.json()).sellers.find(row=>row.id==='seller');
+    assert.deepEqual(seller.foundingFeeOffer,{active:true,used:0,reserved:0,remaining:10});
+    assert.equal(seller.foundingFeeGrantedBy,'founder@example.test');
+  });
   const productsResponse = await api.GET(new Request("http://localhost/api/admin?section=products"));
   assert.equal(productsResponse.status, 200);
   const products = await productsResponse.json(), product = products.products[0];
@@ -87,12 +115,21 @@ test("admin recovery, API payloads, editor initial state, and maintenance previe
     assert.equal(sqlite.prepare("SELECT total_changes() n").get().n, before);
   });
   const componentSource = await readFile(join(root, "components/admin-dashboard.tsx"), "utf8");
-  const compiledView = await build({ stdin: { contents: componentSource + "\nexport {ProductEditor, Orders};", resolveDir: root, loader: "tsx" }, jsx: "automatic", bundle: true, format: "esm", platform: "node", packages: "external", write: false, loader: { ".css": "empty", ".module.css": "empty" }, plugins: [{ name: "next-test", setup(builder) {
+  const compiledView = await build({ stdin: { contents: componentSource + "\nexport {ProductEditor, Orders, Sellers};", resolveDir: root, loader: "tsx" }, jsx: "automatic", bundle: true, format: "esm", platform: "node", packages: "external", write: false, loader: { ".css": "empty", ".module.css": "empty" }, plugins: [{ name: "next-test", setup(builder) {
     builder.onResolve({ filter: /^next\/(link|image|navigation)$/ }, ({ path }) => ({ path, namespace: "next" }));
     builder.onLoad({ filter: /.*/, namespace: "next" }, ({ path }) => ({ contents: path === "next/navigation" ? "export const useSearchParams=()=>new URLSearchParams(); export const usePathname=()=>'/admin';" : "export default function NextStub(){return null;}" }));
   } }] });
   await writeFile(view, compiledView.outputFiles[0].contents);
   const ui = await import(pathToFileURL(view).href);
+  await t.test("admin UI shows a grant button for unenrolled stores and progress for granted stores", async () => {
+    const response=await api.GET(new Request('http://localhost/api/admin?section=sellers'));
+    const data=await response.json();
+    const html=renderToStaticMarkup(createElement(ui.Sellers,{data,action:async()=>({})}));
+    assert.match(html,/0% on the first 10 units after activation/);assert.match(html,/Store accounts only/);
+    assert.doesNotMatch(html,/Grant 10 fee-free items/);
+    data.sellers=data.sellers.filter(seller=>seller.id==='seller').map(seller=>({...seller,foundingFeeOffer:{active:false,used:0,reserved:0,remaining:0}}));
+    assert.match(renderToStaticMarkup(createElement(ui.Sellers,{data,action:async()=>({})})),/Grant 10 fee-free items/);
+  });
   await t.test("existing product editor immediately renders editable current listing fields", () => {
     const html = renderToStaticMarkup(createElement(ui.ProductEditor, { product, sellers: products.sellers, action: async () => ({}), onClose() {} }));
     assert.match(html, /name="price"[^>]*value="25.00"/); assert.match(html, /name="inventoryQuantity"[^>]*value="3"/);

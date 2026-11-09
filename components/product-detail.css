@@ -118,3 +118,67 @@ html:has(.listing-preview-page[open]) { overflow: hidden; }
 .listing-report-form label { display: grid; gap: .35rem; }
 .listing-report-form select, .listing-report-form textarea { width: 100%; min-width: 0; padding: .7rem; border: 1px solid var(--line, #dedbd5); background: var(--paper, #fff); color: inherit; font: inherit; }
 .listing-report-form p { margin: 0; }
+
+/* Keep the model identity, photo and purchase action together at every width. */
+.product-detail-page .product-detail { grid-template-areas: "gallery heading" "gallery summary"; grid-template-rows: auto 1fr; row-gap: 12px; column-gap: 32px; }
+.product-detail-page .product-heading { grid-area: heading; min-width: 0; }
+.product-detail-page .product-heading h1 { margin: 0; font-size: clamp(28px, 2.5vw, 38px); line-height: 1.15; font-weight: 500; letter-spacing: -.025em; overflow-wrap: anywhere; }
+.product-heading .eyebrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 8px; font-size: 12px; }
+.listing-preorder-badge { display: inline-flex; padding: 4px 8px; border-radius: 4px; background: #e8f0ed; color: #173d35; font-size: 11px; }
+.product-detail-page .product-gallery { grid-area: gallery; }
+.product-detail-page .product-summary { grid-area: summary; position: static; max-width: none; }
+.product-detail-page .listing-condition-summary { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 0 0 12px; font-size: 13px; }
+.listing-condition-summary a { text-decoration: underline; text-underline-offset: 3px; }
+.product-detail-page .preorder-purchase { padding: 16px; border-radius: 8px; scroll-margin-top: 24px; }
+.preorder-purchase .preorder-batch + .preorder-batch { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
+.preorder-purchase .preorder-terms-summary { margin: 0; }
+.preorder-purchase .preorder-price-breakdown { margin: 0; padding: 0 0 12px; border-top: 0; gap: 12px; }
+.preorder-purchase .preorder-price-breakdown > div { gap: 4px; }
+.preorder-purchase .preorder-price-breakdown strong { font-size: 22px; }
+.preorder-purchase p { margin: 8px 0; font-size: 13px; line-height: 1.5; }
+.preorder-purchase .preorder-cancellation-terms { font-size: 12px; }
+.preorder-purchase details { padding: 8px 0; }
+.preorder-purchase details summary { font-size: 13px; min-height: 28px; display: flex; align-items: center; gap: 8px; }
+.preorder-purchase details summary::before { content: "+"; font-size: 18px; }
+.preorder-purchase details[open] > summary::before { content: "−"; }
+.preorder-purchase .preorder-form { gap: 10px; margin: 8px 0 0; }
+.preorder-purchase .preorder-form > label { max-width: none; font-size: 13px; line-height: 1.5; }
+.preorder-purchase .preorder-form > .preorder-quantity { display: flex; align-items: center; gap: 12px; max-width: 160px; }
+.preorder-purchase .preorder-quantity input { width: 76px; min-height: 40px; padding: 8px; }
+.preorder-purchase .preorder-form > .adult-consent { display: flex; align-items: flex-start; gap: 8px; }
+.preorder-purchase .adult-consent input { flex: 0 0 16px; width: 16px; height: 16px; margin: 2px 0 0; }
+.preorder-purchase .adult-consent span { min-width: 0; }
+.preorder-purchase .preorder-submit { display: flex; justify-content: center; align-items: center; width: 100%; min-height: 48px; justify-self: stretch; padding: 12px; font-size: 14px; text-align: center; }
+.preorder-purchase .form-note { margin: 0; font-size: 12px; }
+.preorder-purchase > details { margin-top: 12px; padding-bottom: 0; }
+.preorder-action-target:focus-visible { outline: 2px solid var(--ink); outline-offset: 4px; }
+.product-model-details, .product-delivery-details { margin-top: 32px; padding-top: 24px; border-top: 1px solid var(--line); scroll-margin-top: 24px; }
+.product-model-details > h2, .product-delivery-details > h2 { margin: 0 0 20px; font-size: 26px; line-height: 1.2; }
+.product-description, .product-delivery-details > p { font-size: 14px; line-height: 1.6; white-space: pre-line; overflow-wrap: anywhere; }
+.product-model-details .product-condition-details { margin-top: 20px; padding-top: 0; border: 0; }
+.product-model-details .product-information { margin-top: 24px; padding-top: 20px; }
+.product-seller-details .seller-reputation-new, .product-seller-details .reputation-compact { margin-top: 20px; }
+.product-seller-details .seller-reputation-new h2, .product-seller-details .reputation-compact h2 { font-size: 18px; margin-bottom: 8px; }
+
+@media (max-width: 1000px) {
+  .product-detail-page .product-detail { grid-template-areas: "heading" "gallery" "summary"; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; gap: 16px; }
+  .product-detail-page .product-heading h1 { font-size: clamp(26px, 4vw, 32px); }
+  .product-detail-page .gallery-main-frame { width: 100%; max-width: 560px; max-height: 36svh; aspect-ratio: 4 / 3; margin-inline: auto; }
+  .product-detail-page .gallery-open > img { padding: 8px; }
+  .product-detail-page .gallery-layout { max-width: 660px; margin-inline: auto; }
+  .product-detail-page .preorder-sticky-purchase { position: fixed; z-index: 100; inset: auto 0 0; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 12px; min-height: 76px; padding: 8px max(16px, env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); background: white; border-top: 1px solid var(--line); box-shadow: 0 -4px 20px #0001; }
+  .preorder-sticky-purchase .buy-button { width: 100%; min-height: 48px; padding: 10px; font-size: 14px; }
+  .preorder-sticky-purchase .sticky-price { display: grid; gap: 3px; }
+  .preorder-sticky-purchase .sticky-price strong { font-size: 18px; }
+  .preorder-sticky-purchase .sticky-price span { font-size: 11px; color: var(--muted); }
+  html:has(.preorder-sticky-purchase) { --mobile-nav-height: calc(76px + env(safe-area-inset-bottom)); scroll-padding-bottom: var(--mobile-nav-height); }
+  .product-detail-page:has(.preorder-sticky-purchase) { padding-bottom: calc(76px + env(safe-area-inset-bottom)); }
+  .product-detail-page:has(.preorder-sticky-purchase) .collector-main-nav { display: none; }
+}
+
+@media (max-width: 480px) {
+  .product-detail-page .preorder-purchase { padding: 12px; }
+  .preorder-purchase .preorder-price-breakdown { gap: 8px; }
+  .preorder-purchase .preorder-price-breakdown strong { font-size: 19px; }
+  .product-detail-page .gallery-main-frame { max-height: 30svh; }
+}

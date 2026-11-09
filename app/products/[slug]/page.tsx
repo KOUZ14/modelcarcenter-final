@@ -12,6 +12,8 @@ import { SellerReputation } from "@/components/seller-reputation";
 import { getSellerReputation } from "@/lib/reputation";
 import { ProductListingView } from "@/components/product-listing-view";
 import { ProductOtherOffers } from "@/components/product-other-offers";
+import { publicPreorderOffers } from "@/lib/preorders";
+import { productDisplayTitle } from "@/lib/product-presentation";
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +25,7 @@ export async function generateMetadata({
   try {
     const product = await getProductBySlug((await params).slug);
     if (!product) return { title: "Model not found" };
-    const title = `${product.title} ${product.scale} by ${product.modelManufacturer}`;
+    const title = `${productDisplayTitle(product)} · ${product.modelManufacturer} ${product.scale}`;
     return {
       title,
       description:
@@ -48,10 +50,11 @@ export default async function ProductPage({
 }) {
   const product = await getProductBySlug((await params).slug);
   if (!product) notFound();
-  const [related, reputation, catalogOffers] = await Promise.all([
+  const [related, reputation, catalogOffers, preorderOffers] = await Promise.all([
     getRelatedProducts(product),
     getSellerReputation(product.sellerId),
     product.catalogProductId ? getCatalogListings(product.catalogProductId) : Promise.resolve(null),
+    product.availabilityType === "preorder" ? publicPreorderOffers(product.id) : Promise.resolve(undefined),
   ]);
   const otherOffers = catalogOffers?.listings.filter(offer => offer.id !== product.id) ?? [];
   const productJsonLd = {
@@ -75,15 +78,8 @@ export default async function ProductPage({
       <TrackEvent name="listing_viewed" />
       <SiteHeader />
       <div id="main-content" tabIndex={-1} className="inner-page product-page shell">
-        <ProductListingView product={product} />
+        <ProductListingView product={product} preorderOffers={preorderOffers} sellerHistory={reputation ? <SellerReputation reputation={reputation} sellerSlug={product.sellerSlug} compact /> : undefined} />
         {product.catalogProductId && <ProductOtherOffers catalogId={product.catalogProductId} offers={otherOffers} totalOffers={catalogOffers?.listings.length ?? 0} />}
-        {reputation && (
-          <SellerReputation
-            reputation={reputation}
-            sellerSlug={product.sellerSlug}
-            compact
-          />
-        )}
         {related.length > 0 && (
           <section className="related-section">
             <div className="section-heading">

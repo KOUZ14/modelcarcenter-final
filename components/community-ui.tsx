@@ -18,13 +18,13 @@ export function Action({payload,children,className='button outline',endpoint,onD
   const [busy,setBusy]=useState(false),[error,setError]=useState(''),router=useRouter();
   return <span className="community-action"><button type="button" className={className} disabled={busy} onClick={async()=>{setBusy(true);setError('');try{await communityRequest(payload,endpoint);onDone?.();router.refresh();}catch(e){setError((e as Error).message);}finally{setBusy(false);}}}>{busy?'Saving…':children}</button>{error&&<small role="alert">{error}</small>}</span>;
 }
-export function PhotoUpload({ value, onChange, compact = false, onBusyChange }: { value: string[]; onChange: (ids: string[]) => void; compact?: boolean; onBusyChange?: (busy: boolean) => void }) {
+export function PhotoUpload({ value, onChange, compact = false, maxPhotos = 6, onBusyChange }: { value: string[]; onChange: (ids: string[]) => void; compact?: boolean; maxPhotos?: number; onBusyChange?: (busy: boolean) => void }) {
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
   return <div className={`photo-upload ${compact ? "photo-upload-compact" : ""}`}>
     <label className={compact ? "photo-add-control" : undefined}>{compact ? value.length ? "Add more photos" : "+ Add photos" : "Personal photos"}
-      <input className={compact ? "sr-only" : undefined} type="file" accept="image/jpeg,image/png,image/webp" multiple disabled={busy || value.length >= 6} onChange={async event => {
+      <input className={compact ? "sr-only" : undefined} type="file" accept="image/jpeg,image/png,image/webp" multiple={maxPhotos > 1} disabled={busy || value.length >= maxPhotos} onChange={async event => {
         const input = event.currentTarget;
-        const files = Array.from(input.files || []).slice(0, 6 - value.length);
+        const files = Array.from(input.files || []).slice(0, maxPhotos - value.length);
         if (!files.length) return;
         setBusy(true); onBusyChange?.(true); setError("");
         const uploaded = [...value];
@@ -45,7 +45,7 @@ export function PhotoUpload({ value, onChange, compact = false, onBusyChange }: 
         finally { setBusy(false); onBusyChange?.(false); input.value = ""; }
       }}/>
     </label>
-    <p className="muted" role={busy ? "status" : undefined}>{busy ? "Uploading photos…" : "Up to 6 photos · Location metadata removed."}</p>
+    <p className="muted" role={busy ? "status" : undefined}>{busy ? "Uploading photos…" : `${maxPhotos === 1 ? "1 photo per message" : `Up to ${maxPhotos} photos`} · Location metadata removed.`}</p>
     <div className="photo-thumbs">{value.map(id => <div key={id}><img src={photoUrl(id)} alt="Your uploaded model photo" width={100} height={80}/><button type="button" disabled={busy} onClick={() => onChange(value.filter(x => x !== id))} aria-label="Remove photo">Remove</button></div>)}</div>
     {error && <p role="alert">{error}</p>}
   </div>;

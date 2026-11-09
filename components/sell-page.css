@@ -26,10 +26,6 @@
 .sell-application-disclosure > summary > span { margin-left: 12px; font-size: 14px; font-weight: 400; color: var(--muted); }
 .sell-application { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: 32px; padding: 24px; margin-bottom: 24px; background: #f0eee8; border-radius: 8px; }
 .sell-application-intro > p:not(.eyebrow) { font-size: 15px; line-height: 1.6; color: var(--muted); margin: 12px 0 20px; }
-.sell-founding-offer { background: #e7e9db; border-left: 3px solid #7b8250; padding: 16px 18px 4px; margin-bottom: 12px; }
-.sell-founding-offer h3 { margin: 0 0 8px; font-size: 14px; }
-.sell-founding-offer > p { font-size: 18px; line-height: 1.5; }
-.sell-page .sell-founding-offer summary { font-size: 14px; }
 .sell-application-form { align-content: start; }
 .sell-application-form .sell-application-expectations { padding-bottom: 16px; border-bottom: 1px solid #cecac0; }
 .sell-application-expectations h3 { font-size: 17px; margin-bottom: 8px; }

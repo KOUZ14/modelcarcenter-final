@@ -4,7 +4,7 @@ import { one } from "./community";
 import { attachStripeSession,buildCartReservation,releaseReservation } from "./inventory";
 import { quoteCheckoutShipping,resolveCheckoutShipping } from "./checkout-shipping";
 import { assertSellerPaymentsReady,createCheckoutSession,expireCheckoutSession,retrieveCheckoutSession } from "./stripe";
-import { calculateServerTotals } from "./business";
+import { calculateSellerTotals } from "./fees";
 import { parseCheckoutShippingAddress } from "./shipping-rules";
 import { POLICY_VERSION } from "./legal";
 import { config } from "./config";
@@ -26,7 +26,7 @@ export async function payCollectionOffer(user:{id:string;email:string},id:string
   if(offer.payment_deadline!-Date.now()<31*60000)throw new ValidationError('The reservation window is closing. A new checkout cannot extend it.');
   await assertSellerPaymentsReady(loaded.seller.sellerStripeAccountId!,loaded.seller.sellerName);
   const shipping=await resolveCheckoutShipping(loaded,p.shippingSelection,user.id,p.destination);if(shipping.amountCents!==Number(p.shippingCents))throw new ValidationError('Shipping changed. Calculate and accept a fresh quote.');
-  const cart={...loaded,totals:calculateServerTotals(loaded.items,shipping.amountCents,loaded.fee.marketplaceFeeBps)},expires=new Date(Math.min(offer.payment_deadline!,Date.now()+config.checkoutExpirationMinutes*60000)),checkout=buildCartReservation(cart,user.id,POLICY_VERSION,shipping,null,expires,true),db=getD1();
+  const cart={...loaded,totals:calculateSellerTotals(loaded.items,shipping.amountCents,loaded.fee)},expires=new Date(Math.min(offer.payment_deadline!,Date.now()+config.checkoutExpirationMinutes*60000)),checkout=buildCartReservation(cart,user.id,POLICY_VERSION,shipping,null,expires,true),db=getD1();
   await db.batch([...checkout.statements,db.prepare("UPDATE collection_offers SET checkout_id=?,status=CASE WHEN status='reserved' AND payment_deadline>? AND (checkout_id IS NULL OR NOT EXISTS(SELECT 1 FROM checkout_reservations WHERE id=checkout_id AND status='pending')) THEN status ELSE NULL END WHERE id=?").bind(checkout.reservationId,Date.now(),id),db.prepare('INSERT INTO collection_offer_checkouts (checkout_id,offer_id) VALUES (?,?)').bind(checkout.reservationId,id)]);
   let sessionId:string|null=null;try{const returnToken=crypto.randomUUID(),session=await createCheckoutSession({reservationId:checkout.reservationId,sellerId:cart.seller.sellerId,sellerStripeAccountId:cart.seller.sellerStripeAccountId!,items:cart.items,shippingCents:shipping.amountCents,marketplaceFeeBps:cart.fee.marketplaceFeeBps,platformFeeCents:cart.totals.platformFeeCents,expiresAt:expires,buyerUserId:user.id,buyerEmail:user.email,policyVersion:POLICY_VERSION,deliveryAddress:parseCheckoutShippingAddress(JSON.parse(shipping.quotedAddress!)),returnToken});sessionId=session.id;if(!session.url)throw new Error('Payment checkout unavailable.');await attachStripeSession(checkout.reservationId,session.id);return{url:session.url,reservationId:checkout.reservationId,sessionId:session.id,returnToken};}catch(e){const closed=!sessionId||await expireCheckoutSession(sessionId).then(()=>true).catch(()=>false);if(closed)await releaseReservation(checkout.reservationId);throw e;}
 }

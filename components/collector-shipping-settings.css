@@ -1,0 +1,14 @@
+.collector-shipping-settings { padding: 20px; margin: 16px 0 24px; border: 1px solid var(--line); background: white; scroll-margin-top: 20px; }
+.collector-shipping-settings h3 { margin: 0 0 8px; font-size: 19px; font-weight: 600; }
+.collector-shipping-settings p { margin: 8px 0; font-size: 13px; line-height: 1.6; color: var(--muted); }
+.collector-shipping-settings form { margin: 16px 0; }
+.collector-shipping-settings label { display: block; margin-bottom: 8px; font-size: 14px; font-weight: 600; }
+.collector-handling-controls { display: flex; flex-wrap: wrap; gap: 10px; }
+.collector-handling-controls select { min-height: 46px; padding: 10px 12px; border: 1px solid var(--line); background: white; color: var(--ink); font-size: 16px; }
+.collector-shipping-settings a { text-decoration: underline; text-underline-offset: 3px; }
+.collector-shipping-settings .form-error { color: #a52323; }
+.collector-shipping-settings .collector-handling-saved { color: #245b38; }
+@media (max-width: 620px) {
+  .collector-shipping-settings { padding: 16px; }
+  .collector-handling-controls > * { width: 100%; }
+}

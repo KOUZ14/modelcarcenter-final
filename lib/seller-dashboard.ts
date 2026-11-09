@@ -6,9 +6,19 @@ export function sellerTimestamp(value: string | null | undefined) {
   return Date.parse(/(?:Z|[+-]\d{2}:?\d{2})$/i.test(iso) || iso.length === 10 ? iso : `${iso}Z`);
 }
 
-type QueueOrder = { paymentStatus: string; fulfillmentStatus: string; shipByAt: string | null; createdAt: string };
-export function needsShipment(order: QueueOrder) {
+export type ShippingDeadlineOrder = { paymentStatus: string; fulfillmentStatus: string; shipByAt: string | null };
+type QueueOrder = ShippingDeadlineOrder & { createdAt: string };
+export function needsShipment(order: Pick<ShippingDeadlineOrder, "paymentStatus" | "fulfillmentStatus">) {
   return ["paid", "partially_refunded"].includes(order.paymentStatus) && ["unfulfilled", "processing"].includes(order.fulfillmentStatus);
+}
+export function orderHandlingReminder(order: ShippingDeadlineOrder, now = Date.now()) {
+  const deadline = sellerTimestamp(order.shipByAt);
+  if (!needsShipment(order) || !Number.isFinite(deadline)) return { level: "none", label: "" };
+  const remaining = deadline - now;
+  if (remaining < 0) return { level: "overdue", label: "Shipping overdue" };
+  if (remaining <= 86_400_000) return { level: "due_today", label: "Ship within 24 hours" };
+  if (remaining <= 172_800_000) return { level: "due_soon", label: "Ship within 2 days" };
+  return { level: "on_track", label: "Ready to ship" };
 }
 export function prioritizeOrders<T extends QueueOrder>(orders: T[]) {
   return [...orders].sort((a, b) => Number(needsShipment(b)) - Number(needsShipment(a)) ||

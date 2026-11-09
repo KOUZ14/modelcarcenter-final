@@ -8,7 +8,8 @@ import { SellerInboxNavigation } from "./seller-inbox-navigation";
 
 export async function SellerMessages({ userId, conversation, thread, tab }: { userId: string; conversation?: string; thread?: string; tab?: string }) {
   const [data, threads, offers] = await Promise.all([getMessagingCenterData(userId, { conversationId: conversation, sellerOnly: true }), collectorInbox(userId), getCollectionOffers(userId)]);
-  const selectedTab = tab === "shipping" ? "shipping" : tab === "requests" ? "requests" : tab === "offers" ? "offers" : thread || tab === "messages" || !data.conversations.length ? "messages" : "orders";
+  const requestedThread = threads.find(item => item.id === thread);
+  const selectedTab = tab === "shipping" ? "shipping" : tab === "offers" ? "offers" : requestedThread ? requestedThread.status === "request" ? "requests" : "messages" : tab === "requests" ? "requests" : thread || tab === "messages" || !data.conversations.length ? "messages" : "orders";
   const selectedId = thread ?? threads.find(item => selectedTab === "requests" ? item.status === "request" : item.status === "accepted")?.id;
   const messages = ["messages", "requests"].includes(selectedTab) && selectedId ? await threadMessages(userId, selectedId) : [];
   const tabs = [...(data.conversations.length ? [["orders", "Listing enquiries"]] : []), ["messages", "Messages"], ["requests", "Requests"], ["offers", "Offers"], ["shipping", "Shipping requests"]];

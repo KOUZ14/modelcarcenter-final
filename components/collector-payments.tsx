@@ -7,6 +7,7 @@ import { collectorPaymentState, collectorPaymentSummary, type CollectorPayment }
 import { formatMoney, formatUtcDate } from "@/lib/format";
 import { POLICY_VERSION } from "@/lib/legal";
 import { SellerOrderAmounts } from "./seller-order-amounts";
+import { SellerPayoutNotice } from "./seller-payout-notice";
 
 type PaymentSeller = (Record<string, unknown> & { id: string }) | null;
 
@@ -87,7 +88,7 @@ export function CollectorPayments({ seller, orders, setup }: {
     </div>
     {summary.pendingCount > 0 && <p role="status">{summary.pendingCount} {summary.pendingCount === 1 ? "order is" : "orders are"} awaiting final proceeds and excluded from held totals.</p>}
     {summary.legacyCount > 0 && <p>{summary.legacyCount} legacy direct-payout {summary.legacyCount === 1 ? "order is" : "orders are"} excluded from these totals. Check Stripe for that payout history.</p>}
-    <p className="account-payment-note">MCC releases eligible proceeds after the order’s protection deadline, subject to cases, disputes, refunds and account readiness. Stripe then pays your bank on its payout schedule. An eligibility date is not a bank arrival date.</p>
+    <section className="account-payment-panel"><SellerPayoutNotice /></section>
     <section aria-labelledby="payment-history-title"><h3 id="payment-history-title">Payment history</h3>
       {!history.length ? <div className="account-payment-panel"><p>No payments yet{currencies.length > 1 ? ` in ${currency.toUpperCase()}` : ""}. Paid sales and their release history will appear here.</p><Link className="account-inline-link" href="/account?view=listings#account-content">View my listings</Link></div>
         : <div className="account-payment-history">{history.map(order => {

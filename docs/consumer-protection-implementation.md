@@ -1,5 +1,7 @@
 # Consumer protection changes — September 27, 2026
 
+The current acceptance policy is `2026-11-05-founding-store-offer-v6` (November 5, 2026): the standard marketplace fee is 7% on item subtotal, with an optional admin-granted 0% offer on the first 10 units sold after activation for professional stores. Stripe processing remains separate. Protection windows are unchanged. New sales require current seller acceptance; historical order fee snapshots and protection terms remain intact. The preceding seller fee source is preserved in `docs/policy-archive/2026-09-27-consumer-protection-v4/`.
+
 Scope: the eight primary findings in `legal-exposure-review-2026-09-27.md`, for a California business serving U.S. customers. These are local application changes, not a deployment or a finding that the business meets every legal requirement.
 
 ## Implemented controls
@@ -15,7 +17,7 @@ Scope: the eight primary findings in `legal-exposure-review-2026-09-27.md`, for 
 | INFORM workflow missing | Coverage evaluates discrete qualifying transactions and revenue in consecutive 12-month periods within the prior 24 months; disclosures use annual marketplace gross revenue. Tests and known used-only goods are excluded; unknown historical condition is conservatively included for review. Seller certification, independent admin verification, secure provider references, ten-day deadlines, annual recertification, reviewed public disclosures and restrictions are recorded. Covered sellers cannot take new purchases while the platform reporting phone is unconfigured. Existing fulfillment remains available. | `/store/compliance`; `/admin/compliance`; product and seller pages |
 | Copyright/reporting gaps | Public forms work without an account, validate declarations, persist notices, and queue review alerts. Admin tools record takedowns, notify affected sellers, forward reviewed counter-notices, track restoration windows and litigation notices, and show repeat removals for account review. Restoration is a reviewed moderation action, not an automatic response to an allegation. Agent details are published only when registration, contacts and an unexpired registration date are configured. | `/report`; `/copyright`; `/admin/compliance` |
 
-The current marketplace policy is `2026-09-27-consumer-protection-v4`. Sellers must accept it before new sales. Prior legal source is retained under `docs/policy-archive/`; its README explains limits of historical evidence. Standard reporting windows do not shorten longer seller promises or statutory remedies.
+The current marketplace policy is `2026-11-05-founding-store-offer-v6`. Sellers must accept it before new sales. Prior legal source is retained under `docs/policy-archive/`; its README explains limits of historical evidence. Standard reporting windows do not shorten longer seller promises or statutory remedies.
 
 ## Deployment and operational work
 
@@ -61,3 +63,12 @@ The current marketplace policy is `2026-09-27-consumer-protection-v4`. Sellers m
 - Legacy direct payouts and already released proceeds cannot fund new labels. Overlapping quotes are serialized. An ambiguous carrier response leaves the purchase blocked for support reconciliation; do not reset it or buy again until Shippo confirms the transaction outcome.
 - The automatic deduction covers the displayed label rate. Separately billed insurance, subscription fees, carrier adjustments, and carrier label refunds still require reconciliation; this change does not import Shippo invoices. See [Shippo billing](https://support.goshippo.com/hc/en-us/articles/360003859092-How-Billing-Works-in-Shippo).
 - Migration `0040_shipping_label_costs.sql` adds a constant-zero default without backfilling historical charges. Tests use mocked carrier, email, and payout providers; they do not purchase real labels or transfer funds.
+
+## Shipping timestamps — November 7, 2026
+
+- Tracking uses the earliest valid `TRANSIT` or `DELIVERED` scan across carrier history and current status. Label creation, receipt time, undated scans and future-dated scans do not establish shipment. A delivery scan is the fallback when no earlier transit scan is available.
+- Earlier history corrects an already-recorded ship date in both shipment and order records. The database update never moves that date forward, including competing or replayed updates. Delivery timestamps and existing reporting/payout windows are preserved.
+- The overdue-order refund check uses the same evidence and verifies the carrier/tracking identity. Ambiguous dispatch timestamps or a mismatched tracking response hold the refund for review. Label-only overdue orders retain the cancellation/refund workflow.
+- Seller on-time percentages still compare shipped orders against their current deadline, including buyer-approved extensions. Never-shipped orders remain in the overdue/cancellation workflow rather than the shipped-order percentage.
+- The scheduled Worker logs shipping completion separately so a later maintenance failure cannot hide that the shipping stage ran. An hourly cron declaration alone does not verify a production trigger; confirm a production completion event before relying on unattended reminders/refunds.
+- Regression coverage includes unordered/timezone-normalized scans, delayed delivery updates, earlier-history corrections, invalid timestamps, label webhooks and polling, seller on-time calculations, protected delivery windows, and cancellation/refund safeguards. Provider calls use isolated fixtures.

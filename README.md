@@ -99,10 +99,6 @@ Copy `.env.example` to `.env.local`. Never commit real values.
 | `STRIPE_WEBHOOK_SECRET` | Signing secret for `/api/stripe/webhook` |
 | `STRIPE_CONNECT_WEBHOOK_SECRET` | Separate signing secret for `/api/stripe/webhook-connect`; must match a connected-account endpoint in the same Stripe mode |
 | `STRIPE_API_VERSION` | Pinned Stripe API version; default `2026-02-25.clover` |
-| `COLLECTOR_MARKETPLACE_FEE_BPS` | Collector marketplace commission on item subtotal in basis points; default `850` (8.5%) |
-| `PROFESSIONAL_MARKETPLACE_FEE_BPS` | Standard professional-store commission on item subtotal; default `700` (7%) |
-| `FOUNDING_SELLER_MARKETPLACE_FEE_BPS` | Active founding professional-store commission; default `500` (5%) |
-| `FOUNDING_SELLER_PROMOTION_MONTHS` | Length of an admin-assigned founding promotion; default `6` months |
 | `CHECKOUT_EXPIRATION_MINUTES` | Reservation/Checkout lifetime, 30–1440 minutes |
 | `SHIPPING_COUNTRIES` | Comma-separated ISO two-letter countries, default `US` |
 | `STRIPE_AUTOMATIC_TAX` | Enables Stripe automatic tax when `true`; no custom tax calculation exists |
@@ -242,7 +238,7 @@ Signed-in buyers buying at least two models from one seller can request a combin
 
 Application refunds carry an order ID and an explicit remaining order amount, so refunding one seller never refunds sibling orders. Refunds created directly in Stripe without an order reference are allocated across remaining seller balances. A dispute on the shared charge holds every associated seller payout until resolved.
 
-The V1 marketplace rates are 8.5% for collector sellers and 7% for professional stores. An admin can explicitly designate a professional store for the 5% founding rate; the stored six-month start/end window is evaluated on every checkout, then expires automatically back to 7% without deleting the seller's founding history. Orders retain `marketplace_fee_bps` and `platform_fee_cents`, so later pricing changes never rewrite historical fees. There are no listing, monthly, subscription, or account-opening fees for V1.
+The standard marketplace fee is 7% of the item subtotal, excluding shipping and tax, with Stripe processing charged separately. In Admin → Sellers, **Grant 10 fee-free items** gives a professional store a one-time 0% marketplace fee on its first 10 units sold after activation. Earlier sales are unchanged. Quantities count individually; open checkouts reserve slots atomically, failed/expired unpaid checkouts release them, and payment consumes them. Refunds do not refill the allowance. Orders crossing the limit use remaining slots on their highest-priced units, then charge 7% on the other units. Repeated grants cannot reset the offer. Existing founding designations are not automatically enrolled. Admin and store dashboards show used/reserved/available counts. Historical checkout/order fee snapshots remain unchanged. Migration `0041_founding_store_fee_offer.sql` adds counters, immutable exemption snapshots, and transactional lifecycle triggers. Legacy seller-rate environment variables remain ignored. There are no listing, monthly, subscription, or account-opening fees.
 
 Marketplace commission and payment processing are separate. With the current separate-charges-and-transfers flow Stripe assesses processing fees to the Model Car Center platform, not the connected seller. Completed orders record the actual Stripe processing fee when Stripe returns the expanded balance transaction, the seller proceeds, and the transfer lifecycle; seller interfaces do not invent a processing amount when it is unavailable.
 

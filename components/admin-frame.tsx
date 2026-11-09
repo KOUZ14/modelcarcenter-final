@@ -7,7 +7,7 @@ import { BrandLogo } from "./brand-logo";
 import "./admin.css";
 
 export const adminSections = [
-  ["overview", "Overview"], ["orders", "Orders"], ["products", "Products"],
+  ["overview", "Overview"], ["analytics", "User analytics"], ["orders", "Orders"], ["products", "Products"],
   ["sellers", "Sellers"], ["import", "Import"], ["hunts", "Model Hunts"],
   ["community", "Subscribers"], ["tax", "Tax & compliance"],
   ["resolution", "Resolution"], ["production", "Production readiness"],

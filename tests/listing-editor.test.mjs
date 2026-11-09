@@ -81,7 +81,7 @@ test("editor renders one photo-label panel, five steps, live fees and a private-
   });
   await writeFile(file, output.outputFiles[0].contents);
   const ui = await import(pathToFileURL(file).href);
-  const html = renderToStaticMarkup(React.createElement(ui.CollectorListingForm, { initial: { product: { ...condition, id: "draft", catalogProductId: "catalog", title: "McLaren F1", priceCents: 12500 }, images: photos.slice(0,6) }, seller: null, shipFromAddresses: [], displayName: "Alex", prefill: {}, marketplaceFeeBps: 850 }));
+  const html = renderToStaticMarkup(React.createElement(ui.CollectorListingForm, { initial: { product: { ...condition, id: "draft", catalogProductId: "catalog", title: "McLaren F1", priceCents: 12500 }, images: photos.slice(0,6) }, seller: null, shipFromAddresses: [], displayName: "Alex", prefill: {}, marketplaceFeeBps: 700 }));
   const shared = renderToStaticMarkup(React.createElement(ui.CollectibleListingFields, { product: { ...condition, conditionNotes: "Existing notes" } }));
   assert.doesNotMatch(shared, /name="conditionNotes"/, "Store and admin editors already provide their own notes field");
   const legacy = renderToStaticMarkup(React.createElement(ui.CollectibleListingFields, { product: { ...condition, conditionNotes: "Existing notes" }, includeLegacyNotes: true }));
@@ -94,15 +94,15 @@ test("editor renders one photo-label panel, five steps, live fees and a private-
   assert.match(html, /Wrong linked model/);
   assert.match(html, /Start a new listing \(new tab\)/);
   assert.doesNotMatch(html, /Both sides|Top and base|Fill common|Connect payment method/);
-  const fee = renderToStaticMarkup(React.createElement(ui.SellerFeeDisclosure, { marketplaceFeeBps: 850, price: "125.00" }));
-  assert.match(fee, /\$10.63/); assert.match(fee, /\$114.37/); assert.doesNotMatch(fee, /\$200.00|2.9%/);
+  const fee = renderToStaticMarkup(React.createElement(ui.SellerFeeDisclosure, { marketplaceFeeBps: 700, price: "125.00" }));
+  assert.match(fee, /\$8.75/); assert.match(fee, /\$116.25/); assert.doesNotMatch(fee, /\$200.00|2.9%/);
   const draft = buildListingPreview({values:{...condition, packagingCondition:"sealed_poor", price:"125.00", quantity:"2", defects:"Paint chip on roof", sellerDisplayName:"Alex", sellerDescription:"Collector biography", sellerSpecialty:"Road cars", sellerPackingApproach:"Boxed inside protective padding", shippingOriginStreet1:"PRIVATE STREET", shippingOriginPostalCode:"PRIVATE ZIP", shippingOriginRegion:"CA", shippingOriginCountry:"US"},catalog:{title:"McLaren F1",modelManufacturer:"AUTOart",scale:"1:18"},seller:null,images:photos});
   const preview = renderToStaticMarkup(React.createElement(ui.ListingBuyerPreview, {product:draft,onClose:()=>{}}));
   assert.match(preview, /Poor · factory sealed/); assert.match(preview, /CA, US/); assert.doesNotMatch(preview, /PRIVATE STREET|PRIVATE ZIP/);
   assert.match(html, /Review &amp; publish/); assert.match(html, /Preview listing/); assert.doesNotMatch(html, /Buyer-facing listing preview/);
   const live = renderToStaticMarkup(React.createElement(ui.ProductListingView, {product:draft}));
   for (const rendered of [preview,live]) {
-    for (const text of ['View photo 7 of 7','Model condition:','Paint chip on roof','About the seller','Collector biography','How your model is packed','Boxed inside protective padding','Shipping &amp; dispatch','2 available']) assert.ok(rendered.includes(text),text);
+    for (const text of ['View photo 7 of 7','Model condition:','Paint chip on roof','Seller information','Collector biography','How your model is packed','Boxed inside protective padding','Shipping &amp; returns','2 available']) assert.ok(rendered.includes(text),text);
     assert.ok(rendered.indexOf('listing-condition-details') < rendered.indexOf('product-seller-details'));
   }
   assert.match(preview, /Preview — not published/);

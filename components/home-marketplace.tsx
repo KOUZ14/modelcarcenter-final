@@ -179,6 +179,7 @@ export function HomeMarketplace({ emailAlertsEnabled = false }: { emailAlertsEna
           <nav className="collector-hero-scales" aria-label="Shop model cars by scale"><span>Find your scale</span>{scales.map(scale => <Link key={scale} href={marketplaceHref({ scale })}>{scale}</Link>)}</nav>
           <Link className="collector-hero-hunt" href={modelHuntHref()}>Chasing something special? <span>Start a Model Hunt <Icon name="arrow" /></span></Link>
         </div>
+        <p className="collector-hero-credit">Photo by: Đào Hiếu</p>
       </div>
     </section>
 
@@ -251,7 +252,7 @@ export function HomeMarketplace({ emailAlertsEnabled = false }: { emailAlertsEna
         <div className="home-disclosure-content"><div className="wanted-copy home-desktop-only"><p className="eyebrow light">Model Hunt</p><h2>Find a specific model</h2><p>Describe the model you want. We&apos;ll first check current inventory, then keep your request active so our team can confirm a future match.</p></div><ModelHuntForm emailAlertsEnabled={emailAlertsEnabled} /></div>
       </details>
       <div className="home-seller-link">
-        <div className="seller-image home-desktop-only"><span>FOR SELLERS</span><b>Another shelf for your inventory.</b></div>
+        <div className="seller-image home-desktop-only"><span>FOR SELLERS</span><b>Another shelf for your inventory.</b><small className="seller-photo-credit">Photo by: Đào Hiếu</small></div>
         <div className="home-seller-copy">
           <div className="home-action-heading home-mobile-only"><span className="home-action-icon"><Icon name="bag" /></span><span className="home-action-label">For sellers</span></div>
           <p className="eyebrow home-desktop-only">Sell with Model Car Center</p>

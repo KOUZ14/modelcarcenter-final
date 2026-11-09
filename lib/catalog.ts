@@ -133,6 +133,7 @@ export function activeConditions(query: CatalogQuery): SQL[] {
         products.modelCondition,
         query.condition as
           | "not_specified"
+          | "new"
           | "mint"
           | "near_mint"
           | "excellent"

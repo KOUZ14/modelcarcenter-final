@@ -1,122 +1,68 @@
-import { calculatePlatformFee } from "./business.ts";
+import { calculatePlatformFee, calculateServerTotals } from "./business.ts";
 import { config } from "./config.ts";
 
-export type SellerFeeProfile = {
-  sellerType: "professional" | "collector" | string;
-  isFoundingSeller?: boolean | null;
-  foundingRateStartsAt?: string | null;
-  foundingRateEndsAt?: string | null;
-};
-
-export type MarketplaceFeeRates = {
-  collectorMarketplaceFeeBps: number;
-  professionalMarketplaceFeeBps: number;
-  foundingSellerMarketplaceFeeBps: number;
-};
-
-export type MarketplaceFeeDecision = {
-  marketplaceFeeBps: number;
-  standardMarketplaceFeeBps: number;
-  rateKind: "collector" | "professional" | "founding_professional";
-  foundingPromotionActive: boolean;
-};
-
-export function isEligibleForFoundingSellerRate(seller: SellerFeeProfile) {
-  return seller.sellerType === "professional";
+// Standard rate. An explicitly granted founding offer is allocated per unit below.
+export function determineMarketplaceFee() {
+  return { marketplaceFeeBps: config.marketplaceFeeBps };
 }
 
-function configuredRates(): MarketplaceFeeRates {
-  return {
-    collectorMarketplaceFeeBps: config.collectorMarketplaceFeeBps,
-    professionalMarketplaceFeeBps: config.professionalMarketplaceFeeBps,
-    foundingSellerMarketplaceFeeBps:
-      config.foundingSellerMarketplaceFeeBps,
-  };
-}
-
-export function determineMarketplaceFee(
-  seller: SellerFeeProfile,
-  now = new Date(),
-  rates: MarketplaceFeeRates = configuredRates(),
-): MarketplaceFeeDecision {
-  if (!isEligibleForFoundingSellerRate(seller)) {
-    return {
-      marketplaceFeeBps: rates.collectorMarketplaceFeeBps,
-      standardMarketplaceFeeBps: rates.collectorMarketplaceFeeBps,
-      rateKind: "collector",
-      foundingPromotionActive: false,
-    };
-  }
-
-  const startsAt = parseTimestamp(seller.foundingRateStartsAt);
-  const endsAt = parseTimestamp(seller.foundingRateEndsAt);
-  const foundingPromotionActive = Boolean(
-    seller.isFoundingSeller === true &&
-      startsAt &&
-      endsAt &&
-      startsAt.getTime() <= now.getTime() &&
-      now.getTime() < endsAt.getTime(),
-  );
-
-  return {
-    marketplaceFeeBps: foundingPromotionActive
-      ? rates.foundingSellerMarketplaceFeeBps
-      : rates.professionalMarketplaceFeeBps,
-    standardMarketplaceFeeBps: rates.professionalMarketplaceFeeBps,
-    rateKind: foundingPromotionActive
-      ? "founding_professional"
-      : "professional",
-    foundingPromotionActive,
-  };
-}
-
-export function calculateMarketplaceFeeForSeller(
-  subtotalCents: number,
-  seller: SellerFeeProfile,
-  now = new Date(),
-  rates: MarketplaceFeeRates = configuredRates(),
-) {
-  const decision = determineMarketplaceFee(seller, now, rates);
+export function calculateMarketplaceFee(subtotalCents: number) {
+  const decision = determineMarketplaceFee();
   return {
     ...decision,
-    platformFeeCents: calculatePlatformFee(
-      subtotalCents,
-      decision.marketplaceFeeBps,
-    ),
+    platformFeeCents: calculatePlatformFee(subtotalCents, decision.marketplaceFeeBps),
   };
-}
-
-export function foundingSellerRatePeriod(
-  startsAt: string | Date,
-  months = config.foundingSellerPromotionMonths,
-) {
-  const start =
-    startsAt instanceof Date ? new Date(startsAt.getTime()) : new Date(startsAt);
-  if (Number.isNaN(start.getTime())) {
-    throw new Error("Founding seller start date is invalid.");
-  }
-  const day = start.getUTCDate();
-  const targetMonth = start.getUTCMonth() + months;
-  const targetYear = start.getUTCFullYear() + Math.floor(targetMonth / 12);
-  const normalizedMonth = ((targetMonth % 12) + 12) % 12;
-  const daysInTargetMonth = new Date(
-    Date.UTC(targetYear, normalizedMonth + 1, 0),
-  ).getUTCDate();
-  const end = new Date(start.getTime());
-  end.setUTCFullYear(
-    targetYear,
-    normalizedMonth,
-    Math.min(day, daysInTargetMonth),
-  );
-  return { startsAt: start.toISOString(), endsAt: end.toISOString() };
 }
 
 export function formatFeePercent(basisPoints: number) {
   return `${basisPoints / 100}%`;
 }
 
-function parseTimestamp(value: string | null | undefined) {
-  if (!value) return null;
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
+export const FOUNDING_FEE_FREE_UNITS = 10;
+export type FoundingFeeProfile = {
+  sellerType?: string;
+  foundingFeeGrantedAt?: string | null;
+  foundingFeeUsedUnits?: number;
+  foundingFeeReservedUnits?: number;
+};
+
+export function foundingFeeOffer(seller: FoundingFeeProfile) {
+  const active = seller.sellerType === "professional" && Boolean(seller.foundingFeeGrantedAt);
+  const used = seller.foundingFeeUsedUnits ?? 0;
+  const reserved = seller.foundingFeeReservedUnits ?? 0;
+  return { active, used, reserved, remaining: active ? Math.max(0, FOUNDING_FEE_FREE_UNITS - used - reserved) : 0 };
+}
+
+export function calculateCartMarketplaceFee(
+  items: Array<{ priceCents: number; quantity: number }>,
+  seller: FoundingFeeProfile,
+) {
+  // Validate quantities/prices before allocating the offer. Within one checkout,
+  // apply available slots to the most expensive units first, regardless of cart order.
+  const { subtotalCents } = calculateServerTotals(items, 0, config.marketplaceFeeBps);
+  let remaining = foundingFeeOffer(seller).remaining;
+  let foundingFeeFreeUnits = 0;
+  let foundingFeeFreeSubtotalCents = 0;
+  for (const item of [...items].sort((a, b) => b.priceCents - a.priceCents)) {
+    const free = Math.min(remaining, item.quantity);
+    foundingFeeFreeUnits += free;
+    foundingFeeFreeSubtotalCents += free * item.priceCents;
+    remaining -= free;
+  }
+  return {
+    marketplaceFeeBps: foundingFeeFreeUnits > 0 && foundingFeeFreeSubtotalCents === subtotalCents ? 0 : config.marketplaceFeeBps,
+    foundingFeeFreeUnits,
+    foundingFeeFreeSubtotalCents,
+  };
+}
+
+export function calculateSellerTotals(
+  items: Array<{ priceCents: number; quantity: number }>,
+  shippingCents: number,
+  fee: { marketplaceFeeBps: number; foundingFeeFreeSubtotalCents?: number },
+) {
+  const totals = calculateServerTotals(items, shippingCents, fee.marketplaceFeeBps);
+  const exempt = fee.foundingFeeFreeSubtotalCents ?? 0;
+  if (!Number.isSafeInteger(exempt) || exempt < 0 || exempt > totals.subtotalCents) throw new Error("Invalid fee-free subtotal.");
+  return { ...totals, platformFeeCents: calculatePlatformFee(totals.subtotalCents - exempt, fee.marketplaceFeeBps) };
 }

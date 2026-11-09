@@ -1,3 +1,4 @@
+import { newConditionDefaults } from "@/lib/condition-defaults";
 import { assertExternalShippingAllowed } from "@/lib/shipping-compliance";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { getD1, getDb } from "@/db";
@@ -18,26 +19,26 @@ import {
   wantedRequests,
 } from "@/db/schema";
 import { requireAdminApi } from "@/lib/admin-auth";
+import { getAdminAnalytics } from "@/lib/admin-analytics";
 import { listingPayloadWithCatalog, persistCatalogListing, prepareListingCatalog } from "@/lib/catalog-products";
 import { catalogListingSnapshot } from "@/lib/catalog-product-rules";
 import {
   canApproveCollectorListing,
   isCollectorListingAwaitingReview,
 } from "@/lib/account-rules";
-import { commitInventoryCsv, previewInventoryCsv } from "@/lib/csv-import";
+import { commitInventoryCsv, previewStoreInventoryCsv } from "@/lib/csv-import";
 import { orderItemProblem } from "@/lib/admin-order-rules";
 import { config } from "@/lib/config";
 import { productionReadiness } from "@/lib/production-readiness";
+import { processSellerPayoutSchedules } from "@/lib/seller-payout-schedules";
+import { deliverLegalNotices } from "@/lib/legal-notifications";
 import {
   notifyRestockSubscribers,
   parseProductAvailability,
   syncPreorderReleaseSchedule,
 } from "@/lib/availability";
-import {
-  determineMarketplaceFee,
-  foundingSellerRatePeriod,
-  isEligibleForFoundingSellerRate,
-} from "@/lib/fees";
+import { determineMarketplaceFee, foundingFeeOffer } from "@/lib/fees";
+import { grantFoundingFeeOffer } from "@/lib/founding-fee-admin";
 import {
   escapeHtml,
   sendEmail,
@@ -120,6 +121,9 @@ export async function POST(request: Request) {
 }
 
 async function loadAdminSection(section: string) {
+  if (section === "analytics") {
+    return { section, analytics: await getAdminAnalytics(getD1(), config.marketplaceMode === "live") };
+  }
   if (section === "production") {
     const report = productionReadiness(config);
     const adminConfigured = Boolean(process.env.ADMIN_EMAILS?.split(",").some((email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) && !email.includes("example.com")));
@@ -234,7 +238,8 @@ async function loadAdminSection(section: string) {
       section,
       sellers: sellerRows.map((seller) => ({
         ...seller,
-        ...determineMarketplaceFee(seller),
+        ...determineMarketplaceFee(),
+        foundingFeeOffer: foundingFeeOffer(seller),
         unresolvedOrders: unresolved.find(row => row.sellerId === seller.id)?.count ?? 0,
         stripeRequirementsDue: (activity.results as Array<{ action: string; record_id: string; detail: string }>).filter(row => row.action === "refresh_stripe" && row.record_id === seller.id).slice(0, 1).map(row => (JSON.parse(row.detail).requirementsDue || []).map((value: string) => value.replaceAll("_", " ").replaceAll(".", " / ")).join(", "))[0],
         stripeVerifiedAt: (activity.results as Array<{ action: string; record_id: string; created_at: string }>).find(row => row.action === "refresh_stripe" && row.record_id === seller.id)?.created_at ?? null,
@@ -366,6 +371,8 @@ async function loadAdminSection(section: string) {
           shippingCents: orders.shippingCents,
           taxCents: orders.taxCents,
           marketplaceFeeBps: orders.marketplaceFeeBps,
+        foundingFeeFreeUnits: orders.foundingFeeFreeUnits,
+        foundingFeeFreeSubtotalCents: orders.foundingFeeFreeSubtotalCents,
           platformFeeCents: orders.platformFeeCents,
           processingFeePayer: orders.processingFeePayer,
           paymentProcessingFeeCents: orders.paymentProcessingFeeCents,
@@ -548,6 +555,14 @@ async function runAdminAction(
   actorEmail: string,
 ): Promise<Record<string, unknown>> {
   const db = getDb();
+  if (action === "sync_weekly_payouts") {
+    const result = await processSellerPayoutSchedules({ database: getD1(), limit: 5 });
+    await deliverLegalNotices("payout-schedule:");
+    await getD1().prepare("INSERT INTO admin_activity (id, action, actor, detail) VALUES (?, ?, ?, ?)")
+      .bind(crypto.randomUUID(), action, actorEmail, JSON.stringify(result)).run();
+    const notices = await getD1().prepare("SELECT COUNT(*) AS pending FROM legal_notifications WHERE id LIKE 'payout-schedule:%' AND sent_at IS NULL").first<{ pending: number }>();
+    return { ...result, pendingNotices: notices?.pending ?? 0 };
+  }
   if (action === "acknowledge_seller_alert") {
     const alertId = requiredString(payload.alertId, "alertId", 100);
     await db
@@ -661,42 +676,7 @@ async function runAdminAction(
       .where(eq(sellers.id, sellerId));
     return {};
   }
-  if (action === "assign_founding_seller") {
-    const sellerId = requiredString(payload.sellerId, "sellerId", 100);
-    const seller = await db
-      .select()
-      .from(sellers)
-      .where(eq(sellers.id, sellerId))
-      .limit(1);
-    if (!seller[0]) throw new ValidationError("Seller not found.");
-    if (!isEligibleForFoundingSellerRate(seller[0])) {
-      throw new ValidationError(
-        "Only professional stores can receive the founding seller rate.",
-      );
-    }
-    if (seller[0].isFoundingSeller) {
-      return {
-        foundingRateStartsAt: seller[0].foundingRateStartsAt,
-        foundingRateEndsAt: seller[0].foundingRateEndsAt,
-      };
-    }
-    const requestedStart = cleanText(payload.startsAt, 100);
-    const start = requestedStart ? new Date(requestedStart) : new Date();
-    if (Number.isNaN(start.getTime())) {
-      throw new ValidationError("Choose a valid founding rate start date.");
-    }
-    const period = foundingSellerRatePeriod(start);
-    await db
-      .update(sellers)
-      .set({
-        isFoundingSeller: true,
-        foundingRateStartsAt: period.startsAt,
-        foundingRateEndsAt: period.endsAt,
-        updatedAt: new Date().toISOString(),
-      })
-      .where(eq(sellers.id, sellerId));
-    return period;
-  }
+  if (action === "grant_founding_fee_offer") return grantFoundingFeeOffer(requiredString(payload.sellerId, "sellerId", 100), actorEmail);
   if (action === "stripe_onboarding")
     return startStripeOnboarding(
       requiredString(payload.sellerId, "sellerId", 100),
@@ -721,8 +701,8 @@ async function runAdminAction(
     return {};
   }
   if (action === "preview_import") {
-    requiredString(payload.sellerId, "sellerId", 100);
-    const result = previewInventoryCsv(String(payload.csv ?? ""));
+    const sellerId = requiredString(payload.sellerId, "sellerId", 100);
+    const result = await previewStoreInventoryCsv(sellerId, String(payload.csv ?? ""));
     return {
       preview: {
         valid: result.valid.slice(0, 100),
@@ -985,6 +965,9 @@ async function saveProduct(payload: Record<string, unknown>) {
     .select({
       catalogProductId: products.catalogProductId,
       primaryImageUrl: products.primaryImageUrl,
+      missingParts: products.missingParts,
+      defects: products.defects,
+      restorationCustomization: products.restorationCustomization,
       inventoryQuantity: products.inventoryQuantity,
       reservedQuantity: products.reservedQuantity,
       status: products.status,
@@ -1009,7 +992,7 @@ async function saveProduct(payload: Record<string, unknown>) {
   payload = listingPayloadWithCatalog(payload, catalog.model);
   const title = requiredString(payload.title, "title", 200);
   const sellerSku = requiredString(payload.sellerSku, "sellerSku", 100);
-  const collectible = parseCollectibleDetails(payload);
+  const collectible = parseCollectibleDetails(newConditionDefaults(payload, existing[0]));
   const availability = parseProductAvailability(payload);
   const inventoryQuantity = integer(
     payload.inventoryQuantity,

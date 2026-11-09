@@ -7,6 +7,7 @@ import { PostCard } from "./community-ui";
 export async function ModelCommunity({ catalogId, preview = false, limit = 20, before, beforeId }: { catalogId: string; preview?: boolean; limit?: number; before?: number; beforeId?: string }) {
   const collector = await getCurrentCollector();
   const posts = await feed(collector?.user.id ?? null, { catalogId, limit: preview ? 2 : limit, before, beforeId, order: "newest" });
+  if (preview && !posts.length) return null;
   const moreQuery = new URLSearchParams({ discussionLimit: String(limit < 100 ? limit + 20 : 20) });
   if (limit >= 100 && posts.length) {
     const lastPost = posts[posts.length - 1];

@@ -6,6 +6,7 @@ import { processSellerCompliance } from "../lib/seller-compliance";
 import { reconcileCounterNotices } from "../lib/compliance-admin";
 import { processResolutionNotifications } from "../lib/resolution-notifications";
 import { processEligibleSellerTransfers } from "../lib/seller-transfers";
+import { processSellerPayoutSchedules } from "../lib/seller-payout-schedules";
 import { config } from "../lib/config";
 import { protectRequest, requestSecurityFailure, securityPolicyPath } from "../lib/request-security";
 import { pruneSecurityRateLimits } from "../lib/security-rate-limit";
@@ -101,8 +102,15 @@ const worker = {
 
 async function runScheduledMaintenance(database: D1Database, storage: R2Bucket, now: Date) {
   try {
-    await processShippingDelays(now);
+    const shipping = await processShippingDelays(now);
+    console.info("Scheduled shipping maintenance completed.", JSON.stringify({ scheduledAt: now.toISOString(), shipping }));
     await processSellerCompliance(now);
+    try {
+      const payoutSchedules = await processSellerPayoutSchedules({ database, now });
+      console.info("Seller payout schedules checked.", JSON.stringify(payoutSchedules));
+    } catch {
+      logSecurityEvent("operation_failed", { scope: "seller-payout-schedule-maintenance" });
+    }
     await deliverLegalNotices();
     await reconcileCounterNotices();
     const [notifications, transfers, , , promotions] = await Promise.all([

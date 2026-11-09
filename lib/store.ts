@@ -1,4 +1,7 @@
 import { assertExternalShippingAllowed } from "@/lib/shipping-compliance";
+import { newConditionDefaults } from "./condition-defaults";
+import { storeListingIssues } from "./store-listing-readiness";
+import { getStoreInventoryWorkspace, type InventoryQuery } from "./store-inventory-data";
 import {
   and,
   asc,
@@ -35,7 +38,7 @@ import { canClaimProfessionalStore } from "./account-rules";
 import { buildStoreAnalytics } from "./store-rules";
 import { buildSellerHubMetrics } from "./seller-hub";
 import { getSellerHubDemand } from "./seller-hub-data";
-import { determineMarketplaceFee } from "./fees";
+import { determineMarketplaceFee, foundingFeeOffer } from "./fees";
 import {
   isCurrentPolicyVersion,
   POLICY_VERSION,
@@ -59,6 +62,7 @@ import {
   normalizeEmail,
   optionalHttpUrl,
   parseCollectibleDetails,
+  parseCollectibleDraft,
   requiredString,
   ValidationError,
 } from "./validation";
@@ -131,9 +135,10 @@ export async function getProfessionalStoreForUser(userId: string) {
   return rows[0] ?? null;
 }
 
-export async function getStoreDashboardData(userId: string) {
+export async function getStoreDashboardData(userId: string, inventoryQuery?: InventoryQuery) {
   const store = await getProfessionalStoreForUser(userId);
   if (!store) return null;
+  if (inventoryQuery) return getStoreInventoryWorkspace(store, inventoryQuery);
   const db = getDb();
   const [inventory, orderRows] = await Promise.all([
     db
@@ -158,6 +163,8 @@ export async function getStoreDashboardData(userId: string) {
         selectedShippingEstimatedDays: orders.selectedShippingEstimatedDays,
         taxCents: orders.taxCents,
         marketplaceFeeBps: orders.marketplaceFeeBps,
+        foundingFeeFreeUnits: orders.foundingFeeFreeUnits,
+        foundingFeeFreeSubtotalCents: orders.foundingFeeFreeSubtotalCents,
         platformFeeCents: orders.platformFeeCents,
         processingFeePayer: orders.processingFeePayer,
         paymentProcessingFeeCents: orders.paymentProcessingFeeCents,
@@ -229,7 +236,7 @@ export async function getStoreDashboardData(userId: string) {
   return {
     store,
     asOf: now.toISOString(),
-    fee: determineMarketplaceFee(store),
+    fee: { ...determineMarketplaceFee(), foundingFeeOffer: foundingFeeOffer(store) },
     setup: buildSellerSetup(store, inventory, Boolean(config.shippoApiKey)),
     inventory: inventory.map((item) => ({
       ...item,
@@ -274,6 +281,7 @@ export async function saveStoreProduct(
   if (requestedId && !existingRows[0])
     throw new ValidationError("Inventory item not found.");
   const existing = existingRows[0];
+  payload = newConditionDefaults(payload, existing);
   if (existing && existing.availabilityType !== (payload.availabilityType ?? "in_stock")) throw new ValidationError("Create a separate listing to change between in-stock and preorder sales.");
   const catalog = await prepareListingCatalog(payload, store.ownerUserId, existing?.catalogProductId);
   payload = listingPayloadWithCatalog(payload, catalog.model);
@@ -291,7 +299,7 @@ export async function saveStoreProduct(
     )
     .limit(1);
   if (duplicate[0])
-    throw new ValidationError("That SKU is already used by another item.");
+    throw new ValidationError("This SKU belongs to another item. Open that item or choose a different SKU.", { sellerSku: "This SKU is already in use. Choose a different SKU or edit the existing item." });
 
   const title = requiredString(payload.title, "title", 200);
   const inventoryQuantity = integer(
@@ -300,8 +308,9 @@ export async function saveStoreProduct(
     existing?.reservedQuantity ?? 0,
     1_000_000,
   );
-  const availability = parseProductAvailability(payload);
-  const collectible = parseCollectibleDetails(payload);
+  const draft = !existing || !["active", "sold_out"].includes(existing.status);
+  const availability = draft && payload.availabilityType === "preorder" && !cleanText(payload.releaseDate) ? { availabilityType: "preorder" as const, releaseDate: null } : parseProductAvailability(payload);
+  const collectible = draft ? parseCollectibleDraft(payload) : parseCollectibleDetails(payload);
   const hasPackageOverride = [
     payload.packageLength,
     payload.packageWidth,
@@ -333,9 +342,9 @@ export async function saveStoreProduct(
     vehicleModel: requiredString(payload.vehicleModel, "vehicleModel", 120),
     vehicleYear: cleanText(payload.vehicleYear, 20) || null,
     color: cleanText(payload.color, 80) || null,
-    condition: legacyConditionFromCollectibleDetails(collectible),
+    condition: collectible.modelCondition === "not_specified" || collectible.packagingCondition === "not_specified" ? "other" as const : legacyConditionFromCollectibleDetails({ modelCondition: collectible.modelCondition, packagingCondition: collectible.packagingCondition }),
     ...collectible,
-    priceCents: moneyToCents(payload.price, "price"),
+    priceCents: draft && !cleanText(payload.price) ? 0 : moneyToCents(payload.price, "price"),
     packageLength: packageOverride?.length ?? null,
     packageWidth: packageOverride?.width ?? null,
     packageHeight: packageOverride?.height ?? null,
@@ -346,7 +355,7 @@ export async function saveStoreProduct(
     keywords: cleanText(payload.keywords, 1_000),
   };
 
-  const preorderWrites = availability.availabilityType === "preorder" ? await listingPreorderWrites(store,payload,{id,...values},existing) : undefined;
+  const preorderWrites = availability.availabilityType === "preorder" && (!draft || (values.releaseDate && cleanText(payload.price) && inventoryQuantity > 0)) ? await listingPreorderWrites(store,payload,{id,...values},existing) : undefined;
 
   if (existing) {
     const wasSoldOut =
@@ -404,7 +413,7 @@ export async function setStoreProductStatus(
   if (!['active', 'inactive'].includes(requestedStatus))
     throw new ValidationError("Choose a valid inventory status.");
   if (requestedStatus === "active" && !buildSellerSetup(store, [product], Boolean(config.shippoApiKey)).readyToPublish)
-    throw new ValidationError("Finish your store introduction, bank connection, shipping options, store approval, and Seller Terms before publishing. Your draft is saved.");
+    throw new ValidationError("Complete the highlighted store setup tasks before listing for sale. Your saved item is still in inventory.", { storeSetup: "Complete store setup before listing for sale." });
   if (
     requestedStatus === "active" &&
     (store.status !== "active" ||
@@ -419,17 +428,21 @@ export async function setStoreProductStatus(
     requestedStatus === "active" &&
     product.availabilityType !== "preorder" && product.inventoryQuantity - product.reservedQuantity < 1
   )
-    throw new ValidationError("Add available inventory before publishing.");
+    throw new ValidationError("Add available stock before listing for sale.", { inventoryQuantity: "Total stock must be greater than the quantity reserved for buyers." });
   if (requestedStatus === "active" && product.availabilityType === "preorder") {
     const [batch] = await getDb().select().from(incomingBatches).where(eq(incomingBatches.listingId,productId)).limit(1);
     if (!batch || !batch.dispatchEnd || batch.dispatchEnd <= new Date().toISOString() || batch.capacity < 1 || batch.supplyState === "cancelled") throw new ValidationError("Add preorder quantity and a future expected ship date before publishing.");
     if (!product.primaryImageUrl) throw new ValidationError("Add a product photo or clearly identified preview before publishing.");
+    const fields = storeListingIssues({ ...product, preorderCapacity: batch.capacity }, []);
+    if (Object.keys(fields).length) throw new ValidationError("Finish the highlighted preorder details before listing for sale.", fields);
   }
   if (requestedStatus === "active" && product.availabilityType !== "preorder") {
     const evidenceImages = await getDb()
       .select({ alt: productImages.alt, url: productImages.url })
       .from(productImages)
       .where(eq(productImages.productId, productId));
+    const fields = storeListingIssues(product, evidenceImages);
+    if (Object.keys(fields).length) throw new ValidationError("Finish the highlighted listing details before listing for sale.", fields);
     assertCollectibleListingReady(product, evidenceImages);
   }
   await getDb()

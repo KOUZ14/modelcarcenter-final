@@ -5,7 +5,7 @@ import { buyerReservation, eventStatement, termsOf } from "./preorders";
 import { buildCartReservation, loadAuthoritativeCartItems, sellerCartFromRows, attachStripeSession, releaseReservation } from "./inventory";
 import { assertSellerPaymentsReady, createCheckoutSession, createOrderRefund, expireCheckoutSession, retrieveCheckoutSession, retrieveChargeRefunds, retrieveRefund, type StripeCheckoutSession } from "./stripe";
 import { resolveCheckoutShipping, quoteCheckoutShipping } from "./checkout-shipping";
-import { calculateServerTotals } from "./business";
+import { calculateSellerTotals } from "./fees";
 import { parseCheckoutShippingAddress } from "./shipping-rules";
 import { POLICY_VERSION } from "./legal";
 import { ValidationError } from "./validation";
@@ -62,7 +62,7 @@ export async function startPreorderPayment(user:{id:string;email:string}, id:str
   await assertSellerPaymentsReady(loaded.seller.sellerStripeAccountId!,loaded.seller.sellerName);
   const shipping = await resolveCheckoutShipping(loaded,input.shippingSelection,user.id,input.destination);
   if (Number(input.shippingCents) !== shipping.amountCents) throw new ValidationError("The shipping amount changed. Calculate and accept a fresh quote.");
-  const cart = {...loaded,totals:calculateServerTotals(loaded.items,shipping.amountCents,loaded.fee.marketplaceFeeBps)};
+  const cart = {...loaded,totals:calculateSellerTotals(loaded.items,shipping.amountCents,loaded.fee)};
   const expires = new Date(Math.min(Date.now()+config.checkoutExpirationMinutes*60000,Date.parse(r.paymentDeadline!)));
   const checkout = buildCartReservation(cart,user.id,POLICY_VERSION,shipping,null,expires,true);
   const db = getD1();

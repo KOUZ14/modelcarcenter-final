@@ -288,6 +288,27 @@
       "when": 1793901038899,
       "tag": "0040_shipping_label_costs",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "6",
+      "when": 1793919179597,
+      "tag": "0041_founding_store_fee_offer",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "6",
+      "when": 1793990931306,
+      "tag": "0042_user_traffic_analytics",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "6",
+      "when": 1794193116249,
+      "tag": "0043_weekly_seller_payouts",
+      "breakpoints": true
     }
   ]
 }

@@ -115,6 +115,40 @@ test("account views expose real activity, actionable counts and concise order su
     assert.match(unavailable, /Label purchasing is temporarily unavailable/);
     assert.match(unavailable, /Mark shipped manually/);
   });
+  await t.test("collector sales show saved ship-by deadlines before finances, with urgent sales first", () => {
+    const shipping = { configured: false, insuranceThresholdCents: 25000, signatureThresholdCents: 75000 };
+    const sale = { ...order, fulfillmentStatus: "unfulfilled", shipByAt: "2099-09-22 12:00:00" };
+    const html = render("sales", { sales: [sale], shipping });
+    assert.match(html, /Ship by <time dateTime="2099-09-22T12:00:00.000Z">Sep 22, 12:00 PM UTC/);
+    assert.ok(html.indexOf("Ship by <time") < html.indexOf("Item subtotal"));
+    assert.match(html, /Creating a label does not count as shipping/);
+    assert.match(html, /href="\/shipping\/requests"/);
+    const overdue = { ...sale, id: "overdue", orderNumber: "MCC-OVERDUE", shipByAt: "2020-09-21T23:59:59Z" };
+    const queued = render("sales", { sales: [sale, overdue], shipping });
+    assert.ok(queued.indexOf('id="sale-overdue"') < queued.indexOf('id="sale-order-1"'));
+    assert.match(queued, /Shipping overdue/);
+    assert.match(queued, /href="\/contact\?order=MCC-OVERDUE"/);
+    assert.match(render("sales", { sales: [{ ...sale, fulfillmentStatus: "processing" }], shipping }), /Ship by <time/);
+    for (const fulfillmentStatus of ["shipped", "delivered", "cancelled"]) {
+      assert.doesNotMatch(render("sales", { sales: [{ ...sale, fulfillmentStatus }], shipping }), /Shipping deadline|Ship by <time/);
+    }
+    for (const shipByAt of [null, "invalid"]) {
+      const missing = render("sales", { sales: [{ ...sale, shipByAt }], shipping });
+      assert.match(missing, /Ship-by date not recorded/);
+      assert.doesNotMatch(missing, /Invalid Date|Ship by <time/);
+    }
+  });
+  await t.test("collector shipping settings are available before the first sale and linked from listings", () => {
+    const seller = { id: "collector", sellerType: "collector", handlingTimeBusinessDays: 7, stripeChargesEnabled: true, stripePayoutsEnabled: true };
+    const empty = render("sales", { seller, sales: [] });
+    assert.match(empty, /id="collector-shipping-settings"/);
+    assert.match(empty, /value="7" selected=""/);
+    assert.match(empty, /No sales yet/);
+    assert.match(empty, /Existing checkouts and paid orders keep their agreed shipping terms/);
+    assert.match(render("listings", { seller }), /href="\/account\?view=sales#collector-shipping-settings"/);
+    assert.doesNotMatch(render("sales", { seller: null }), /id="collector-shipping-settings"/);
+    assert.doesNotMatch(render("sales", { seller: { ...seller, sellerType: "professional" } }), /id="collector-shipping-settings"/);
+  });
   await t.test("listing cards keep draft actions private and offer live controls only for published listings", () => {
     const listing = { id: "my-listing", slug: "mclaren-f1", title: "UT Models Mclaren F1 LM Orange 1:18", status: "draft", priceCents: 100, currency: "usd", inventoryQuantity: 1, reservedQuantity: 0, primaryImageUrl: "/car.png" };
     const draft = render("listings", { listings: [listing] });

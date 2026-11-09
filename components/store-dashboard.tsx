@@ -1,43 +1,33 @@
 "use client";
 
+import { StoreInventory, type InventoryPage } from "./store-inventory";
+import { storeRequest } from "@/lib/store-client";
 import { SellerFeeDisclosure } from "./seller-fee-disclosure";
 import { SellerPayments, SellerHelp, SellerThumbnail } from "./seller-setup";
-import { SellerInventoryUpload, SellerBulkStock } from "./seller-inventory-upload";
 import { StoreLogoUpload } from "./store-logo-upload";
 import { StoreCountrySelect } from "./store-country-select";
 import { trackEvent, sellerSetupElapsed } from "@/lib/analytics-client";
-import { useTaskMeasurement } from "./use-task-measurement";
-import { listingPhotoEvidence } from "@/lib/listing-evidence";
 import { activeProtectionPolicy } from "@/lib/protection";
 import type { buildSellerSetup } from "@/lib/seller-setup";
 import "./seller-workflows.css";
 import "./seller-dashboard.css";
 import { SellerNavigation } from "./seller-navigation";
-import { needsShipment, prioritizeOrders, sellerOrderPayout } from "@/lib/seller-dashboard";
+import { needsShipment, orderHandlingReminder, prioritizeOrders, sellerOrderPayout } from "@/lib/seller-dashboard";
 import { SellerShipmentPanel } from "./seller-shipment-panel";
 import { SellerOrderAmounts } from "./seller-order-amounts";
-import { PreorderSeller, SellerPreorderOrders } from "./preorder-seller";
+import { SellerShippingDeadline } from "./seller-shipping-deadline";
+import { SellerPreorderOrders } from "./preorder-seller";
 
 import Link from "next/link";
-import { CatalogModelPicker } from "./catalog-model-picker";
 import { useRouter } from "next/navigation";
 import { HubOverview, HubGrowth, HubAnalytics } from "./seller-hub-panels";
-import { hubViews, inventoryViews, orderViews, matchesInventoryView, matchesOrderView, type HubView, type HubNavigate, type SellerHubMetrics } from "@/lib/seller-hub";
+import { hubViews, orderViews, matchesOrderView, type HubView, type HubNavigate, type SellerHubMetrics } from "@/lib/seller-hub";
 import type { SellerHubDemand } from "@/lib/seller-hub-data";
-import { useDialogFocus } from "./use-dialog-focus";
-import { FormEvent, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { FormEvent, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { AddressFields, type AddressFieldsHandle } from "./address-fields";
 import { SHIP_FROM_FIELD_NAMES, shipFromAddressValues } from "@/lib/address";
 import { formatMoney, formatUtcDate, formatUtcDateTime } from "@/lib/format";
-import {
-  EditableProductImage,
-  ProductImageFields,
-} from "@/components/product-image-fields";
-import { uploadProductPhotoFiles } from "@/lib/upload-client";
-import {
-  CollectibleListingFields,
-  RequiredPhotoChecklist,
-} from "@/components/collectible-listing-fields";
+import type { EditableProductImage } from "@/components/product-image-fields";
 import {
   type ShipmentTimelineData,
 } from "@/components/shipment-timeline";
@@ -54,8 +44,6 @@ type Store = {
   description: string;
   specialty: string;
   packingApproach: string;
-  foundingRateStartsAt: string | null;
-  foundingRateEndsAt: string | null;
   status: string;
   stripeChargesEnabled: boolean;
   stripePayoutsEnabled: boolean;
@@ -79,7 +67,10 @@ type Store = {
   sellerTermsAcceptedAt: string | null;
 };
 
-type Product = {
+export type Product = {
+  slug?: string;
+  issues?: Record<string, string>;
+  detailsLoaded?: boolean;
   preorder?: { batchId: string; capacity: number; cutoff: string; buyerLimit: number } | null;
   catalogProductId?: string | null;
   conditionNotes?: string;
@@ -160,6 +151,8 @@ export type StoreOrder = {
   selectedShippingEstimatedDays: number | null;
   taxCents: number;
   marketplaceFeeBps: number;
+  foundingFeeFreeUnits?: number;
+  foundingFeeFreeSubtotalCents?: number;
   platformFeeCents: number;
   processingFeePayer: "platform" | "seller";
   paymentProcessingFeeCents: number | null;
@@ -215,14 +208,15 @@ type Analytics = {
 };
 
 export type StoreData = {
+  inventoryPage?: InventoryPage;
+  inventoryEditor?: Product | null;
+  inventoryPreorder?: Product | null;
   asOf: string;
   store: Store;
   setup: ReturnType<typeof buildSellerSetup>;
   fee: {
     marketplaceFeeBps: number;
-    standardMarketplaceFeeBps: number;
-    rateKind: "collector" | "professional" | "founding_professional";
-    foundingPromotionActive: boolean;
+    foundingFeeOffer?: { active: boolean; used: number; reserved: number; remaining: number };
   };
   inventory: Product[];
   orders: StoreOrder[];
@@ -239,14 +233,8 @@ export type StoreData = {
 const tabs = hubViews;
 type Tab = HubView;
 
-function subscribeHashChange(onChange: () => void) {
-  window.addEventListener("hashchange", onChange);
-  return () => window.removeEventListener("hashchange", onChange);
-}
-const pageHash = () => window.location.hash;
-const serverHash = () => "";
 function usePageHash() {
-  return useSyncExternalStore(subscribeHashChange, pageHash, serverHash);
+  return useSyncExternalStore(onChange => { window.addEventListener("hashchange", onChange); return () => window.removeEventListener("hashchange", onChange); }, () => window.location.hash, () => "");
 }
 
 export function StoreDashboard({
@@ -284,25 +272,15 @@ export function StoreDashboard({
   ) {
     setMessage("");
     setError("");
-    const response = await fetch("/api/store", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const body = (await response.json()) as Record<string, unknown> & {
-      error?: string;
-      fields?: Record<string, string>;
-    };
-    if (!response.ok) {
-      const nextError = body.error || "The store change could not be saved.";
-      setError(nextError);
-      throw Object.assign(new Error(nextError), { fields: body.fields });
-    }
+    let body: Record<string, unknown>;
+    try { body = await storeRequest("/api/store", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); }
+    catch (reason) { if (view !== "inventory") setError(reason instanceof Error ? reason.message : "The change could not be saved."); throw reason; }
     setMessage(options.message ?? "Saved.");
     if (payload.action === "save_store") trackEvent("seller_setup_step_completed", { step: payload.section === "introduction" ? "store" : "shipping" });
-    if (payload.action === "product_status" && payload.status === "active" && !data.inventory.some(product => ["active", "sold_out"].includes(product.status)) && data.orders.length === 0) trackEvent("first_listing_published", { durationMs: sellerSetupElapsed(data.store.id) }, { onceKey: `first-listing-${data.store.id}` });
+    const hasListedItems = data.inventoryPage ? data.inventoryPage.counts.listed > 0 : data.inventory.some(product => ["active", "sold_out"].includes(product.status));
+    if (payload.action === "product_status" && payload.status === "active" && !hasListedItems && data.analytics.paidOrders === 0) trackEvent("first_listing_published", { durationMs: sellerSetupElapsed(data.store.id) }, { onceKey: `first-listing-${data.store.id}` });
     trackEvent("seller_tool_used", { step: String(payload.action), result: "success" });
-    if (options.reload) window.location.reload();
+    if (options.reload) router.refresh();
     return body;
   }
 
@@ -336,6 +314,11 @@ export function StoreDashboard({
             {error}
           </p>
         )}
+        {data.fee.foundingFeeOffer?.active && <aside className="seller-founding-note" aria-label="Founding-store fee allowance">
+          <b>{data.fee.foundingFeeOffer.used === 10 ? "Founding-store offer complete — standard 7% fee applies." : "Founding-store offer: 0% marketplace fee on your first 10 units after activation."}</b>
+          <p>{data.fee.foundingFeeOffer.used}/10 sold · {data.fee.foundingFeeOffer.reserved} in checkout · {data.fee.foundingFeeOffer.remaining} available. Stripe processing remains separate.</p>
+          <button type="button" onClick={() => selectView("settings", "payments")}>View fee details</button>
+        </aside>}
         {view === "overview" && (
           <HubOverview data={data} navigate={selectView} />
         )}
@@ -344,19 +327,7 @@ export function StoreDashboard({
         {view === "growth" && <HubGrowth data={data} navigate={selectView} filter={growthFilter} />}
         {view === "messages" && messages}
         {view === "inventory" && (
-          <Inventory
-            key={`inventory-${initialFilter}-${initialProductId}-${initialPreorderId}`}
-            marketplaceFeeBps={data.fee.marketplaceFeeBps}
-            rows={data.inventory}
-            initialProductId={initialProductId}
-            initialPreorderId={initialPreorderId}
-            queue={inventoryViews.some(([value]) => value === initialFilter) ? initialFilter! : "all"}
-            slowIds={data.hub.slowIds}
-            initialTool={initialFilter}
-            navigate={selectView}
-            disabled={suspended}
-            action={action}
-          />
+          <StoreInventory key={JSON.stringify([data.inventoryPage?.page, data.inventoryPage?.search, data.inventoryPage?.filter, data.inventoryPage?.stock, initialProductId, initialPreorderId])} data={data} initialProductId={initialProductId} initialFilter={initialFilter} initialPreorderId={initialPreorderId} action={action} />
         )}
         {view === "orders" && (
           <Orders
@@ -384,450 +355,6 @@ export function StoreDashboard({
           />
         )}
       </main>
-    </div>
-  );
-}
-
-function Inventory({
-  marketplaceFeeBps,
-  rows,
-  initialProductId,
-  initialPreorderId,
-  queue,
-  slowIds,
-  initialTool,
-  navigate,
-  disabled,
-  action,
-}: {
-  marketplaceFeeBps: number;
-  rows: Product[];
-  initialProductId?: string;
-  initialPreorderId?: string;
-  queue: string;
-  slowIds: string[];
-  initialTool?: string;
-  navigate: HubNavigate;
-  disabled: boolean;
-  action(
-    payload: Record<string, unknown>,
-    options?: { reload?: boolean; message?: string },
-  ): Promise<Record<string, unknown>>;
-}) {
-  const initial = rows.find((row) => row.id === initialProductId) ?? null;
-  const [editing, setEditing] = useState<Product | "new" | null>(disabled ? null : initialProductId === "new" ? "new" : initial);
-  const [preorder, setPreorder] = useState(rows.find(row=>row.id===initialPreorderId&&row.availabilityType==="preorder") ?? null);
-  const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState("all");
-  const [chosenTool, setTool] = useState<string | null>(initialTool === "bulk" || initialTool === "import" ? initialTool : null);
-  const hash = usePageHash();
-  const tool = chosenTool ?? (hash === "#inventory-upload" ? "import" : "");
-  const visible = useMemo(
-    () =>
-      rows.filter((row) => {
-        const matchesSearch = `${row.title} ${row.sellerSku} ${row.vehicleMake} ${row.vehicleModel}`
-          .toLowerCase()
-          .includes(search.toLowerCase());
-        return matchesSearch && (filter === "all" || row.status === filter) && matchesInventoryView(row, queue, slowIds);
-      }),
-    [filter, rows, search, queue, slowIds],
-  );
-  async function setStatus(product: Product, status: "active" | "inactive") {
-    await action(
-      { action: "product_status", productId: product.id, status },
-      { reload: true, message: status === "active" ? "Item published." : "Item unpublished." },
-    );
-  }
-  async function archive(product: Product) {
-    if (!window.confirm(`Archive ${product.title}? It will no longer appear in the marketplace.`)) return;
-    await action(
-      { action: "archive_product", productId: product.id },
-      { reload: true, message: "Item archived." },
-    );
-  }
-  return (
-    <div className="store-stack">
-      <header className="store-page-heading">
-        <div>
-          <p className="eyebrow">Catalog operations</p>
-          <h2>Inventory</h2>
-          <p>Create, update, publish, and archive your store’s products.</p>
-        </div>
-        <button
-          className="button dark small"
-          disabled={disabled}
-          onClick={() => setEditing("new")}
-        >
-          Add model
-        </button>
-      </header>
-      <div className="seller-inventory-toolbar"><button className="button outline small" aria-expanded={tool === "bulk"} onClick={() => setTool(tool === "bulk" ? "" : "bulk")}>Update stock &amp; price</button><button className="button outline small" aria-expanded={tool === "import"} onClick={() => setTool(tool === "import" ? "" : "import")}>Import CSV</button></div>
-      {tool === "bulk" && <SellerBulkStock products={rows} disabled={disabled} action={action} expanded />}
-      {tool === "import" && <SellerInventoryUpload disabled={disabled} action={action} expanded />}
-      <nav className="hub-filters" aria-label="Inventory views">
-        {inventoryViews.map(([value, label]) => <button key={value} aria-pressed={queue === value} onClick={() => navigate("inventory", value)}>{label}<span>{rows.filter((row) => matchesInventoryView(row, value, slowIds)).length}</span></button>)}
-      </nav>
-      {queue === "slow" && <p className="hub-note">Active, in-stock listings at least 90 days old with no paid sale in the last 90 days.</p>}
-      {queue === "low" && <p className="hub-note">Active, in-stock listings with 1–2 available units, after reservations.</p>}
-      {queue === "attention" && <p className="hub-note">Drafts, unpublished or removed listings, and in-stock listings missing required photo evidence. Each listing counts once.</p>}
-      <div className="store-inventory-tools">
-        <input
-          aria-label="Search inventory"
-          placeholder="Search title, SKU, make, or model"
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-        />
-        <select
-          aria-label="Filter inventory status"
-          value={filter}
-          onChange={(event) => setFilter(event.target.value)}
-        >
-          <option value="all">All statuses</option>
-          <option value="active">Active</option>
-          <option value="draft">Draft</option>
-          <option value="inactive">Inactive</option>
-          <option value="sold_out">Sold out</option>
-        </select>
-      </div>
-      <section className="store-panel store-inventory-panel">
-        <div className="store-inventory-meta">
-          <b>{visible.length} products</b>
-          <span>
-            {visible.reduce(
-              (sum, row) =>
-                sum + Math.max(0, row.inventoryQuantity - row.reservedQuantity),
-              0,
-            )}{" "}
-            available units
-          </span>
-        </div>
-        <div className="admin-table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Product</th>
-                <th>SKU</th>
-                <th>Price</th>
-                <th>Inventory</th>
-                <th>Status</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visible.map((product) => (
-                <tr key={product.id} className="seller-inventory-item">
-                  <td className="seller-product-cell">
-                    <SellerThumbnail src={product.primaryImageUrl} title={product.title}/><div>
-                    <b>{product.title}</b>
-                    <small>
-                      {product.scale} · {product.modelManufacturer}
-                    </small>
-                    {product.availabilityType === "preorder" && product.releaseDate && (
-                      <small>Preorder · expected to ship {formatUtcDate(product.releaseDate)}</small>
-                    )}
-                    {product.availabilityType !== "preorder" && !listingPhotoEvidence(product, product.images).complete && <button className="seller-photo-status" disabled={disabled} onClick={() => setEditing(product)}>Photos incomplete · Review →</button>}
-                    </div>
-                  </td>
-                  <td data-label="SKU">{product.sellerSku}</td>
-                  <td data-label="Price" className="seller-money">{formatMoney(product.priceCents, product.currency)}</td>
-                  <td data-label="Stock">
-                    {product.availabilityType === "preorder" ? `${product.preorder?.capacity ?? 0} preorder units` : `${Math.max(0, product.inventoryQuantity - product.reservedQuantity)} available`}
-                    {product.reservedQuantity > 0 && (
-                      <small>{product.reservedQuantity} reserved</small>
-                    )}
-                  </td>
-                  <td data-label="Status">
-                    <span className={`status ${product.status}`}>
-                      {product.status.replace("_", " ")}
-                    </span>
-                  </td>
-                  <td className="seller-inventory-actions">
-                    <div className="row-actions">
-                      <button className="button dark small" disabled={disabled} onClick={() => setEditing(product)}>
-                        Edit
-                      </button>
-                      <details><summary>More actions</summary><div className="seller-item-more">
-                      {!disabled && product.status === "active" && product.availabilityType === "in_stock" && product.inventoryQuantity > product.reservedQuantity && <Link href={`/store?view=growth&filter=promoted&promotion_product=${encodeURIComponent(product.id)}`}>Promote</Link>}
-                      {product.availabilityType === "preorder" && <button onClick={()=>setPreorder(product)}>Manage preorder</button>}
-                      {product.status === "active" ? (
-                        <button disabled={disabled} onClick={() => void setStatus(product, "inactive")}>
-                          Unpublish
-                        </button>
-                      ) : (
-                        <button disabled={disabled} onClick={() => void setStatus(product, "active")}>
-                          Publish
-                        </button>
-                      )}
-                      <button disabled={disabled} onClick={() => void archive(product)}>
-                        Archive
-                      </button>
-                      </div></details>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {!visible.length && <p className="store-empty">No inventory matches those filters.</p>}
-      </section>
-      <details className="store-panel"><summary>Selling fees</summary><SellerFeeDisclosure marketplaceFeeBps={marketplaceFeeBps} /></details>
-      {preorder && <PreorderInventoryDialog listing={preorder} onClose={()=>setPreorder(null)}/>}
-      {editing && (
-        <ProductEditor
-          marketplaceFeeBps={marketplaceFeeBps}
-          key={editing === "new" ? "new" : editing.id}
-          product={editing === "new" ? null : editing}
-          action={action}
-          onClose={() => setEditing(null)}
-        />
-      )}
-    </div>
-  );
-}
-
-function PreorderInventoryDialog({listing,onClose}:{listing:Product;onClose:()=>void}) {
-  const dialog=useDialogFocus(onClose);
-  return <div className="store-editor-backdrop"><section ref={dialog} tabIndex={-1} className="store-editor" role="dialog" aria-modal="true" aria-labelledby="preorder-editor-title">
-    <div className="panel-heading"><div><p className="eyebrow">Inventory item</p><h2 id="preorder-editor-title">Manage preorder</h2></div><button type="button" className="dialog-close" aria-label="Close preorder details" onClick={onClose}>×</button></div>
-    <PreorderSeller listingId={listing.id}/>
-  </section></div>;
-}
-
-function ProductEditor({
-  marketplaceFeeBps,
-  product,
-  action,
-  onClose,
-}: {
-  product: Product | null;
-  marketplaceFeeBps: number;
-  action(
-    payload: Record<string, unknown>,
-    options?: { reload?: boolean; message?: string },
-  ): Promise<Record<string, unknown>>;
-  onClose(): void;
-}) {
-  const task = useTaskMeasurement("listing");
-  const router = useRouter();
-  const [catalogReady, setCatalogReady] = useState(Boolean(product?.catalogProductId));
-  const [busy, setBusy] = useState(false);
-  const dialog = useDialogFocus(() => { if (!busy) onClose(); });
-  const [productId, setProductId] = useState(product?.id ?? "");
-  const [files, setFiles] = useState<File[]>([]);
-  const [images, setImages] = useState(product?.images ?? []);
-  const [primaryImageUrl, setPrimaryImageUrl] = useState(
-    product?.primaryImageUrl ?? null,
-  );
-  const [primaryUploadFinished, setPrimaryUploadFinished] = useState(false);
-  const [imageError, setImageError] = useState("");
-  const [price, setPrice] = useState(product ? (product.priceCents / 100).toFixed(2) : "");
-  const [availabilityType, setAvailabilityType] = useState<
-    "in_stock" | "preorder"
-  >(product?.availabilityType ?? "in_stock");
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (busy) return;
-    if (!catalogReady) { setImageError("Choose a catalog model first."); return; }
-    setBusy(true);
-    setImageError("");
-    try {
-      const form = new FormData(event.currentTarget);
-      form.delete("images");
-      const result = await action(
-        {
-          action: "save_product",
-          id: productId || undefined,
-          ...Object.fromEntries(form),
-        },
-        { message: product ? "Inventory updated." : "Draft product created." },
-      );
-      const savedProductId = String(result.productId ?? "");
-      setProductId(savedProductId);
-      if (files.length && savedProductId) {
-        let nextImages = images;
-        await uploadProductPhotoFiles({
-          endpoint: "/api/listings/images",
-          productId: savedProductId,
-          files,
-          makePrimary: !primaryUploadFinished,
-          onUploaded(uploaded, processedCount) {
-            nextImages = [...nextImages, ...uploaded];
-            setImages(nextImages);
-            setFiles(files.slice(processedCount));
-            if (processedCount === 1) {
-              setPrimaryUploadFinished(true);
-              setPrimaryImageUrl(uploaded[0]?.url ?? null);
-            }
-          },
-        });
-      }
-      task.complete();
-      onClose();
-      router.replace("/store?view=inventory");
-      router.refresh();
-    } catch (reason) {
-      setImageError(
-        reason instanceof Error ? reason.message : "The product could not be saved.",
-      );
-    } finally {
-      setBusy(false);
-    }
-  }
-  async function removeImage(imageId: string) {
-    if (!productId) return;
-    setImageError("");
-    const response = await fetch("/api/listings/images", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ productId, imageId }),
-    });
-    const body = (await response.json()) as { error?: string };
-    if (!response.ok) {
-      const message = body.error || "The photo could not be removed.";
-      setImageError(message);
-      throw new Error(message);
-    }
-    setImages((current) => {
-      const removed = current.find((image) => image.id === imageId);
-      const next = current.filter((image) => image.id !== imageId);
-      setPrimaryImageUrl((primary) =>
-        removed?.url === primary ? next[0]?.url ?? null : primary,
-      );
-      return next;
-    });
-  }
-  async function removeLegacyImage() {
-    if (!productId) return;
-    setImageError("");
-    const response = await fetch("/api/listings/images", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ productId, removeLegacyPrimary: true }),
-    });
-    const body = (await response.json()) as { error?: string };
-    if (!response.ok) {
-      const message = body.error || "The photo could not be removed.";
-      setImageError(message);
-      throw new Error(message);
-    }
-    setPrimaryImageUrl(images[0]?.url ?? null);
-  }
-  async function reorderImages(imageIds: string[]) {
-    if (!productId) return;
-    setImageError("");
-    const response = await fetch("/api/listings/images", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ productId, imageIds }),
-    });
-    const body = (await response.json()) as { error?: string };
-    if (!response.ok) {
-      const message = body.error || "The photo order could not be saved.";
-      setImageError(message);
-      throw new Error(message);
-    }
-    setImages((current) => {
-      const byId = new Map(current.map((image) => [image.id, image]));
-      const next = imageIds.map((id, index) => ({
-        ...byId.get(id)!,
-        sortOrder: index,
-      }));
-      setPrimaryImageUrl(next[0]?.url ?? null);
-      return next;
-    });
-  }
-  return (
-    <div className="store-editor-backdrop seller-full-editor" role="presentation">
-      <section ref={dialog} tabIndex={-1} className="store-editor" role="dialog" aria-modal="true" aria-labelledby="product-editor-title">
-        <div className="panel-heading seller-editor-heading">
-          <div>
-            <p className="eyebrow">Inventory item</p>
-            <h2 id="product-editor-title">{product ? "Edit listing" : "Create listing"}</h2>
-          </div>
-          <button type="button" className="dialog-close" aria-label="Close listing editor" disabled={busy} onClick={onClose}>×</button>
-        </div>
-        <nav className="seller-editor-nav" aria-label="Listing sections"><a href="#listing-model">Model</a><a href="#listing-price">Price &amp; stock</a><a href="#listing-condition">Condition</a><a href="#listing-photos">Photos</a></nav>
-        <form className="admin-form" onSubmit={submit} onChange={task.start}>
-          <div className="seller-editor-scroll">
-          <section id="listing-model"><h3>Model</h3>
-          <CatalogModelPicker initial={product} listingSaved={Boolean(productId)} disabled={busy} onReady={setCatalogReady} />
-          </section>
-          <fieldset className="catalog-listing-fields" hidden={!catalogReady} disabled={!catalogReady}>
-          <div className="form-row">
-            <label>Seller SKU<input name="sellerSku" required maxLength={100} defaultValue={product?.sellerSku ?? ""} /></label>
-            <label>Listing title (optional)<input name="title" maxLength={200} defaultValue={product?.title ?? ""} /></label>
-          </div>
-          <label>Description<textarea name="description" rows={4} maxLength={4000} defaultValue={product?.description ?? ""} /></label>
-          <section id="listing-price"><h3>Price &amp; stock</h3>
-          <div className="form-row">
-            <label>Full item price (USD)<input name="price" inputMode="decimal" required value={price} onChange={e => setPrice(e.target.value)} /></label>
-            <label>{availabilityType === "preorder" ? "Quantity available to preorder" : "Inventory quantity"}<input name="inventoryQuantity" type="number" min={availabilityType === "preorder" ? 1 : product?.reservedQuantity ?? 0} max={100000} required defaultValue={product?.preorder?.capacity ?? product?.inventoryQuantity ?? 1} /></label>
-          </div>
-          <p className="form-note">You pay {feePercent(marketplaceFeeBps)} commission on the item subtotal, plus payment processing on the full customer payment (including shipping and tax). Both are deducted from your proceeds. <Link href="/seller-terms#fees">Fee and payout terms</Link></p>
-          <fieldset className="availability-fields">
-            <legend>Availability</legend>
-            <div className="form-row">
-              <label>
-                Listing type
-                <select
-                  name="availabilityType"
-                  value={availabilityType}
-                  onChange={(event) =>
-                    setAvailabilityType(
-                      event.target.value as "in_stock" | "preorder",
-                    )
-                  }
-                >
-                  <option value="in_stock">In stock · ships after purchase</option>
-                  <option value="preorder">Preorder · 10% deposit</option>
-                </select>
-              </label>
-              {availabilityType === "preorder" && <label>
-                Expected ship date
-                <input
-                  name="releaseDate"
-                  type="date"
-                  required={availabilityType === "preorder"}
-                  disabled={availabilityType !== "preorder"}
-                  defaultValue={product?.releaseDate ?? ""}
-                />
-              </label>}
-            </div>
-            {availabilityType === "preorder" && <>
-              <div className="form-row"><label>Close preorders on (optional)<input name="preorderCutoff" type="date" defaultValue={product?.preorder?.cutoff ?? ""}/></label><label>Maximum per buyer<input name="preorderBuyerLimit" type="number" min="1" max="10" defaultValue={product?.preorder?.buyerLimit ?? 10}/></label></div>
-              <div className="preorder-deposit-preview"><strong>10% deposit{Number(price) > 0 ? ` · ${formatMoney(Math.round(Number(price) * 10), "usd")} per item` : ""}</strong><p>Buyers pay the deposit now and the remaining balance when you mark stock ready. Shipping and applicable tax are shown before payment.</p><p>New deposits are refundable before shipment, including buyer cancellation or a missed balance deadline. Existing reservations keep their accepted terms and remain subject to applicable consumer rights.</p></div>
-            </>}
-          </fieldset>
-          <details><summary>Package override (optional)</summary><p className="form-note">Leave all four blank to use the store default package for calculated checkout rates.</p><div className="parcel-grid"><label>Length (in)<input name="packageLength" inputMode="decimal" defaultValue={product?.packageLength ?? ""} /></label><label>Width (in)<input name="packageWidth" inputMode="decimal" defaultValue={product?.packageWidth ?? ""} /></label><label>Height (in)<input name="packageHeight" inputMode="decimal" defaultValue={product?.packageHeight ?? ""} /></label><label>Weight (lb)<input name="packageWeight" inputMode="decimal" defaultValue={product?.packageWeight ?? ""} /></label></div></details>
-          </section><section id="listing-condition"><h3>Condition</h3>
-          <label>Condition notes<textarea name="conditionNotes" maxLength={2000} defaultValue={product?.conditionNotes ?? ""} /></label>
-          <CollectibleListingFields product={product} includeIdentity={false}/>
-          </section><section id="listing-photos"><h3>Photos</h3>
-          <ProductImageFields
-            productId={productId || undefined}
-            images={images}
-            primaryImageUrl={primaryImageUrl}
-            files={files}
-            disabled={busy}
-            onFilesChange={setFiles}
-            onRemove={productId ? removeImage : undefined}
-            onRemoveLegacy={productId ? removeLegacyImage : undefined}
-            onReorder={productId ? reorderImages : undefined}
-          />
-          {availabilityType !== "preorder" ? <RequiredPhotoChecklist product={product}/> : <p className="form-note">Upload a product image or preview. Describe any prototype images or expected production differences in the listing.</p>}
-          </section>
-          <label>Search keywords<input name="keywords" maxLength={1000} defaultValue={product?.keywords ?? ""} /></label>
-          {product && product.reservedQuantity > 0 && <p className="form-note">Inventory cannot be reduced below {product.reservedQuantity} reserved units.</p>}
-          <details className="seller-publish-checklist"><summary>Before publishing</summary><ul><li>Choose the correct catalog model.</li><li>Set price, available stock, and your SKU.</li><li>Confirm model and packaging condition; disclose missing parts and defects.</li><li>{availabilityType === "preorder" ? "Add preview imagery and an expected ship date." : "Add actual-item photos and label each required view."}</li><li>Complete store setup and accept current Seller Terms.</li></ul><p>Saving a new listing creates a draft. Publish from Inventory after completing these checks.</p></details>
-          </fieldset></div>
-          <footer className="seller-editor-footer">
-            {imageError && <p className="form-error" role="alert">{imageError}</p>}
-            <button className="button dark" disabled={busy || !catalogReady}>{busy ? "Saving…" : product ? "Save changes" : "Save draft"}</button>
-            <button type="button" className="button outline" disabled={busy} onClick={onClose}>Cancel</button>
-          </footer>
-      </form>
-      </section>
     </div>
   );
 }
@@ -885,10 +412,10 @@ function SellerOrderCard({ order, rows, store, shipping, disabled, action }: {
   const readyToShip = needsShipment(order);
   return <article className="store-order seller-queue-order" id={`order-${order.id}`}>
     <header className="store-order-header"><div><span>{date(order.createdAt)}{order.isTestOrder ? " · Test order" : ""}</span><h3>{order.orderNumber}</h3></div><b className="seller-money">{formatMoney(order.totalCents, order.currency)}</b></header>
-    <div className="seller-order-status"><HandlingBadge order={order}/><span className={`status ${order.paymentStatus}`}>{order.paymentStatus.replaceAll("_", " ")}</span><span className={`status ${order.fulfillmentStatus}`}>{order.fulfillmentStatus.replaceAll("_", " ")}</span></div>
+    <div className="seller-order-status"><span className={`status ${order.paymentStatus}`}>{order.paymentStatus.replaceAll("_", " ")}</span><span className={`status ${order.fulfillmentStatus}`}>{order.fulfillmentStatus.replaceAll("_", " ")}</span></div>
     <ul className="seller-packing-items">{order.items.map(item => <li key={item.id}><SellerThumbnail src={item.imageUrlSnapshot} title={item.productTitleSnapshot}/><div><strong>{item.productTitleSnapshot}</strong><p>{item.scaleSnapshot} · {item.manufacturerSnapshot}</p><p><b>Qty {item.quantity}</b> · SKU {item.sellerSkuSnapshot}</p>{item.availabilityTypeSnapshot === "preorder" && item.releaseDateSnapshot && <p>Preorder · expected {date(item.releaseDateSnapshot)}</p>}</div></li>)}</ul>
     {!order.items.length && <div className="seller-data-note"><strong>Item details are missing from this order.</strong><p>The model, SKU, and quantity were not recorded. Confirm the packing details with support before shipping.</p><Link href={`/contact?order=${encodeURIComponent(order.orderNumber)}`}>Resolve missing order items →</Link></div>}
-    {readyToShip && <p className="seller-dispatch-date">{order.shipByAt ? `Dispatch deadline: ${dateTime(order.shipByAt)}` : "Dispatch deadline not recorded - check with support."}</p>}
+    <SellerShippingDeadline order={order} />
     <details className="seller-fulfillment"><summary>{readyToShip && order.items.length && !order.shipment ? "Create shipment" : "Delivery & tracking details"}</summary><div className="seller-fulfillment-content"><h4>Ship to</h4><p><strong>{order.buyerName || "Customer"}</strong><br/>{formatAddress(order.shippingAddress)}</p><p><a href={`mailto:${order.buyerEmail}`}>{order.buyerEmail}</a></p>
       {order.shippingMode === "calculated" && <p><b>Buyer selected:</b> {order.selectedShippingCarrier} {order.selectedShippingService}{order.selectedShippingEstimatedDays == null ? "" : ` · about ${order.selectedShippingEstimatedDays} business days`}. Use this service or an equal/faster one.</p>}
       {["paid", "partially_refunded"].includes(order.paymentStatus) && (order.items.length || !readyToShip) ? <SellerShipmentPanel order={order} compatibleOrders={compatibleOrdersFor(order, rows).filter(candidate => candidate.items.length > 0)} store={store} shipping={shipping} disabled={disabled} action={action}/> : <p>{readyToShip ? "Shipment creation is unavailable until this order’s items are confirmed." : "Shipment creation requires a paid order."}</p>}
@@ -1023,31 +550,9 @@ function StoreSettings({
           </>
         )}
       </section>
-      <section hidden={selected !== "payments"} className="store-panel payout-status"><h3>{fee.rateKind === "founding_professional" ? "Founding Seller Rate" : "Professional Store Rate"} · {feePercent(fee.marketplaceFeeBps)} marketplace fee</h3>{fee.foundingPromotionActive && <p>Your promotional rate becomes the {feePercent(fee.standardMarketplaceFeeBps)} standard rate when the six-month period ends.</p>}<SellerFeeDisclosure marketplaceFeeBps={fee.marketplaceFeeBps} /><p>New-order proceeds become eligible {activeProtectionPolicy.deliveredDays} calendar days after confirmed delivery if no case is open and actual processing fees are available. See Payments for each order’s dates and holds.</p></section>
+      <section hidden={selected !== "payments"} className="store-panel payout-status"><h3>{feePercent(fee.marketplaceFeeBps)} standard marketplace fee</h3>{fee.foundingFeeOffer?.active && <div className="seller-founding-note"><h4>Founding-store offer: your first 10 units at 0%</h4><p>{fee.foundingFeeOffer.used} sold · {fee.foundingFeeOffer.reserved} in checkout · {fee.foundingFeeOffer.remaining} available</p><p>Starts when an admin grants the offer. Each unit counts, including quantities of the same model. Unpaid checkouts hold slots temporarily; paid sales consume them. Refunds do not refill the allowance. After 10 units, the standard 7% applies. Stripe processing remains separate.</p><p>If an order crosses the limit, remaining fee-free slots apply to its highest-priced units first; the other units incur 7%.</p></div>}<SellerFeeDisclosure marketplaceFeeBps={fee.marketplaceFeeBps} /><p>New-order proceeds become eligible {activeProtectionPolicy.deliveredDays} calendar days after confirmed delivery if no case is open and actual processing fees are available. See Payments for each order’s dates and holds.</p></section>
     </div>
   );
-}
-
-function HandlingBadge({ order }: { order: StoreOrder }) {
-  const reminder = orderHandlingReminder(order);
-  if (reminder.level === "none") return null;
-  return <span className={`handling-badge ${reminder.level}`}>{reminder.label}</span>;
-}
-
-function orderHandlingReminder(order: StoreOrder) {
-  if (
-    !["paid", "partially_refunded"].includes(order.paymentStatus) ||
-    ["shipped", "delivered", "cancelled"].includes(order.fulfillmentStatus) ||
-    !order.shipByAt
-  )
-    return { level: "none", label: "" };
-  const deadline = new Date(order.shipByAt);
-  if (Number.isNaN(deadline.getTime())) return { level: "none", label: "" };
-  const hours = Math.ceil((deadline.getTime() - Date.now()) / 3_600_000);
-  if (hours < 0) return { level: "overdue", label: "Handling overdue" };
-  if (hours <= 24) return { level: "due_today", label: "Ship today" };
-  if (hours <= 48) return { level: "due_soon", label: "Ship within 2 days" };
-  return { level: "on_track", label: `Ship by ${date(order.shipByAt)}` };
 }
 
 function compatibleOrdersFor(order: StoreOrder, rows: StoreOrder[]) {
@@ -1062,10 +567,6 @@ function compatibleOrdersFor(order: StoreOrder, rows: StoreOrder[]) {
       candidate.shippingAddress === order.shippingAddress &&
       candidate.currency.toLowerCase() === order.currency.toLowerCase(),
   );
-}
-
-function dateTime(value: string) {
-  return formatUtcDateTime(value);
 }
 
 function formatAddress(value: string) {

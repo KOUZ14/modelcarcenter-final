@@ -26,7 +26,7 @@ export async function startPreorderDeposit(user:{id:string;email:string},id:stri
     if (Date.parse(r.holdExpiresAt)-Date.now() < 31*60000) throw new ValidationError("This hold is too close to expiry. Start a new preorder from the listing.");
     const input:CheckoutSessionInput = {reservationId:id,sellerId:seller.id,sellerStripeAccountId:seller.stripeAccountId,
       items:[{title:`10% preorder deposit: ${terms.title}`,description:terms.policyText,imageUrl:terms.imageUrl,priceCents:terms.depositUnitCents!,currency:terms.currency,quantity:r.quantity}],
-      shippingCents:0,marketplaceFeeBps:determineMarketplaceFee(seller).marketplaceFeeBps,platformFeeCents:0,
+      shippingCents:0,marketplaceFeeBps:determineMarketplaceFee().marketplaceFeeBps,platformFeeCents:0,
       expiresAt:new Date(Math.min(Date.parse(r.holdExpiresAt),Date.now()+35*60000)),buyerUserId:user.id,buyerEmail:user.email,policyVersion:terms.policyVersion};
     const request:DepositRequest = {input:{...input,expiresAt:input.expiresAt.toISOString()},body:buildPreorderDepositBody(input).toString(),taxBehavior:config.stripeTaxBehavior};
     await getDb().insert(preorderDepositCheckouts).values({reservationId:id,request:JSON.stringify(request),createdAt:now()}).onConflictDoNothing();

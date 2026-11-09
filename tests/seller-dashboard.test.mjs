@@ -10,7 +10,7 @@ import { build } from "esbuild";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { sellerFixture, reviewDate } from "./fixtures/seller-dashboard.mjs";
-import { prioritizeOrders, sellerOrderPayout, sellerPaymentStatus, sellerSalesReport, sellerTimestamp } from "../lib/seller-dashboard.ts";
+import { orderHandlingReminder, prioritizeOrders, sellerOrderPayout, sellerPaymentStatus, sellerSalesReport, sellerTimestamp } from "../lib/seller-dashboard.ts";
 import { matchesInventoryView } from "../lib/seller-hub.ts";
 import { buildSellerSetup } from "../lib/seller-setup.ts";
 import { POLICY_VERSION } from "../lib/legal.ts";
@@ -21,6 +21,20 @@ test("dispatch queue puts earliest paid deadlines first without mutating history
   assert.deepEqual(prioritizeOrders(rows).map(row => row.id), ["overdue", "later", "missing", "shipped"]);
   assert.equal(rows[0].id, "missing");
   assert.equal(sellerTimestamp("2026-09-22 12:00:00"), reviewDate.getTime());
+});
+
+test("shipping reminders use the saved UTC deadline and stop after fulfillment", () => {
+  const order = { paymentStatus: "paid", fulfillmentStatus: "unfulfilled", shipByAt: "2026-09-22 12:00:00" };
+  const deadline = Date.parse("2026-09-22T12:00:00Z");
+  assert.equal(orderHandlingReminder(order, deadline + 1).level, "overdue", "Even a recently missed deadline is overdue");
+  assert.equal(orderHandlingReminder(order, deadline).level, "due_today");
+  assert.equal(orderHandlingReminder(order, deadline - 86_400_000).level, "due_today");
+  assert.equal(orderHandlingReminder(order, deadline - 86_400_001).level, "due_soon");
+  assert.equal(orderHandlingReminder(order, deadline - 172_800_001).level, "on_track");
+  assert.equal(orderHandlingReminder({ ...order, paymentStatus: "partially_refunded", fulfillmentStatus: "processing" }, deadline + 1).level, "overdue", "A purchased label still needs carrier handoff");
+  for (const fulfillmentStatus of ["shipped", "delivered", "cancelled"]) assert.equal(orderHandlingReminder({ ...order, fulfillmentStatus }, deadline + 1).level, "none");
+  for (const paymentStatus of ["pending", "refunded"]) assert.equal(orderHandlingReminder({ ...order, paymentStatus }, deadline + 1).level, "none");
+  for (const shipByAt of [null, "invalid"]) assert.equal(orderHandlingReminder({ ...order, shipByAt }, deadline + 1).level, "none");
 });
 
 test("store data keeps packing snapshots and messages within the seller account", async t => {
@@ -142,6 +156,14 @@ test("seller screens render useful queues, honest payments and available navigat
   const { StoreDashboard, MessageCenter, storeLogoUrl } = await import(pathToFileURL(bundle).href);
   t.after(async () => { await unlink(bundle); await rmdir(scratch); });
   const render = (initialView, props = {}) => renderToStaticMarkup(React.createElement(StoreDashboard, { initialView, data: sellerFixture(), email: "seller@example.test", ...props }));
+  await t.test("founding stores see remaining and reserved allowance across the dashboard", () => {
+    const data=sellerFixture();data.fee.foundingFeeOffer={active:true,used:6,reserved:2,remaining:2};
+    const html=render('overview',{data}).replace(/<[^>]*>/g,'');
+    assert.match(html,/0% marketplace fee on your first 10 units after activation/);
+    assert.match(html,/6\/10 sold · 2 in checkout · 2 available/);
+    data.fee.foundingFeeOffer={active:true,used:10,reserved:0,remaining:0};
+    assert.match(render('payments',{data}),/offer complete — standard 7% fee applies/);
+  });
   await t.test("storefront navigation only links to public stores and explains setup blockers", () => {
     const data = sellerFixture();
     for (const [status, version, acceptedAt, expected] of [
@@ -195,7 +217,8 @@ test("seller screens render useful queues, honest payments and available navigat
   await t.test("orders keep items, deadline and shipment action ahead of collapsed finances", () => {
     const html = render("orders", { initialFilter: "all" });
     assert.ok(html.indexOf("APEX-001") < html.indexOf("Payment &amp; fee details"));
-    assert.match(html, /Qty 1/); assert.match(html, /Dispatch deadline/);
+    assert.match(html, /Qty 1/); assert.match(html, /Ship by <time/);
+    assert.match(html, /Creating a label does not count as shipping/);
     assert.match(html, /class="seller-money">\$117\.07/);
     assert.match(html, /<details class="seller-fulfillment"><summary>Create shipment/);
     assert.match(html, /<details class="seller-order-finances"><summary>Payment &amp; fee details/);

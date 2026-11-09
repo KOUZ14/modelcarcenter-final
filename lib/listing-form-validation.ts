@@ -5,7 +5,7 @@ const labels: Record<string, string> = {
   originalBoxStatus: "Original box", coaStatus: "Certificate of authenticity (COA)",
   missingParts: "Missing parts", defects: "Defects and wear",
   restorationCustomization: "Restoration or customization", accessories: "Included accessories",
-  price: "Price (USD)", quantity: "Quantity", packageLength: "Length (in)",
+  price: "Price (USD)", quantity: "Quantity", inventoryQuantity: "Total stock", sellerSku: "Seller SKU", packageLength: "Length (in)",
   packageWidth: "Width (in)", packageHeight: "Height (in)", packageWeight: "Weight (lb)",
   sellerDisplayName: "Seller display name", sellerDescription: "Short seller description",
   sellerSpecialty: "Specialty", sellerPackingApproach: "How you pack models",
@@ -46,6 +46,7 @@ export function listingInputError(field: ListingInput) {
   if (field.name === "price" && !/^\$?\d+(\.\d{1,2})?$/.test(field.value.trim())) return "Enter a price with no more than two decimal places.";
   if (field.name === "price" && Number(field.value.trim().replace(/^\$/, "")) > 1_000_000) return "Enter a price no greater than $1,000,000.";
   if (["packageLength", "packageWidth", "packageHeight", "packageWeight"].includes(field.name)) {
+    if (!field.required && !field.value.trim()) return "";
     const max = field.name === "packageWeight" ? 150 : 108;
     if (!/^\d+(\.\d{1,2})?$/.test(field.value.trim()) || Number(field.value) <= 0 || Number(field.value) > max) {
       return `Enter a value greater than 0 and no more than ${max}, with up to two decimal places.`;

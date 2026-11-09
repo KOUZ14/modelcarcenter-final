@@ -1,4 +1,5 @@
 import { normalizeSearch } from "./business.ts";
+import { newConditionDefaults } from "./condition-defaults.ts";
 import { isFactorySealed, listingPhotoEvidence, type EvidenceImage } from "./listing-evidence.ts";
 import { isCurrentPolicyVersion } from "./legal.ts";
 import { addressErrors, normalizeState, SHIP_FROM_FIELD_NAMES, shipFromAddressValues, type AddressField } from "./address.ts";
@@ -137,6 +138,7 @@ export const collectorListingConditions = [
 ] as const;
 
 export const modelConditions = [
+  "new",
   "mint",
   "near_mint",
   "excellent",
@@ -203,6 +205,7 @@ export function legacyConditionFromCollectibleDetails(input: {
   modelCondition: (typeof modelConditions)[number];
   packagingCondition: (typeof packagingConditions)[number];
 }) {
+  if (input.modelCondition === "new") return isFactorySealed(input.packagingCondition) ? "new_sealed" as const : "new_opened" as const;
   if (isFactorySealed(input.packagingCondition) && input.modelCondition === "mint")
     return "new_sealed" as const;
   if (["mint", "near_mint"].includes(input.modelCondition))
@@ -212,7 +215,30 @@ export function legacyConditionFromCollectibleDetails(input: {
   return "used_fair" as const;
 }
 
+export function parseCollectibleDraft(payload: Record<string, unknown>) {
+  const values = newConditionDefaults(payload);
+  const fieldErrors: Record<string, string> = {};
+  function draftChoice<const T extends readonly string[]>(name: string, choices: T): T[number] | "not_specified" {
+    const value = cleanText(values[name], 40);
+    if (!value || value === "not_specified") return "not_specified";
+    if (!choices.includes(value)) fieldErrors[name] = `Choose ${listingFieldLabel(name).toLowerCase()}.`;
+    return value as T[number];
+  }
+  const result = {
+    modelCondition: draftChoice("modelCondition", modelConditions), packagingCondition: draftChoice("packagingCondition", packagingConditions),
+    originalBoxStatus: draftChoice("originalBoxStatus", originalBoxStatuses), coaStatus: draftChoice("coaStatus", coaStatuses),
+    missingParts: cleanText(values.missingParts, 2000), defects: cleanText(values.defects, 2000), restorationCustomization: cleanText(values.restorationCustomization, 2000),
+    material: cleanText(values.material, 120), productNumber: cleanText(values.productNumber, 150) || null, editionSerial: cleanText(values.editionSerial, 150) || null,
+    accessories: cleanText(values.accessories, 2000), provenance: cleanText(values.provenance, 2000),
+    photoFrontChecked: checked(values.photoFrontChecked), photoRearChecked: checked(values.photoRearChecked), photoSidesChecked: checked(values.photoSidesChecked),
+    photoBaseChecked: checked(values.photoBaseChecked), photoPackagingChecked: checked(values.photoPackagingChecked), photoIssuesChecked: checked(values.photoIssuesChecked),
+  };
+  if (Object.keys(fieldErrors).length) throw new ValidationError("Check the highlighted condition fields.", fieldErrors);
+  return result;
+}
+
 export function parseCollectibleDetails(payload: Record<string, unknown>) {
+  payload = newConditionDefaults(payload);
   const fields: Record<string, string> = {};
   for (const [name, options] of Object.entries({ modelCondition: modelConditions, packagingCondition: packagingConditions, originalBoxStatus: originalBoxStatuses, coaStatus: coaStatuses })) {
     if (!(options as readonly string[]).includes(cleanText(payload[name], 40))) fields[name] = `Choose ${listingFieldLabel(name).toLowerCase()}.`;
@@ -495,7 +521,10 @@ export function validateImportRows(rows: CsvRow[]) {
   const seen = new Set<string>();
   rows.forEach((row, index) => {
     const rowErrors: string[] = [];
-    for (const key of requiredCsv) if (!cleanText(row[key], 500)) rowErrors.push(`${key} is required`);
+    for (const key of requiredCsv) {
+      if (["material", "accessories"].includes(key) || (row.model_condition === "new" && ["missing_parts", "defects", "restoration_customization"].includes(key))) continue;
+      if (!cleanText(row[key], 500)) rowErrors.push(`${key} is required`);
+    }
     const sellerSku = cleanText(row.seller_sku, 100);
     if (sellerSku && seen.has(sellerSku.toLowerCase())) rowErrors.push("seller_sku is duplicated in this file");
     seen.add(sellerSku.toLowerCase());

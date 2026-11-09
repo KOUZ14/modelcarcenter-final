@@ -118,9 +118,13 @@ test("collector payment access uses the authenticated owner and preserves refund
     for (const [id, seller, status] of [["paid", "owner", "paid"], ["refunded", "owner", "refunded"], ["pending", "owner", "pending"], ["private", "other", "paid"]]) {
       sqlite.prepare("INSERT INTO orders (id,order_number,seller_id,stripe_checkout_session_id,buyer_email,currency,subtotal_cents,shipping_cents,platform_fee_cents,total_cents,payment_status) VALUES (?,?,?,?,'buyer@example.test','usd',10000,1000,1000,11000,?)").run(id, id, seller, `checkout-${id}`, status);
     }
+    sqlite.exec("UPDATE orders SET ship_by_at='2026-11-12T23:59:59Z' WHERE id='paid'");
     const garage = await getGarageData("owner");
     assert.deepEqual(garage.payments.map(row => row.id).sort(), ["paid", "refunded"]);
     assert.deepEqual(garage.sales.map(row => row.id), ["paid"]);
+    assert.equal(garage.sales[0].shipByAt, "2026-11-12T23:59:59Z");
+    sqlite.exec("UPDATE orders SET ship_by_at='2026-11-19T23:59:59Z' WHERE id='paid'");
+    assert.equal((await getGarageData("owner")).sales[0].shipByAt, "2026-11-19T23:59:59Z", "Show the current saved deadline after a buyer-approved extension");
     assert.equal(garage.payments[0].payoutHold, false);
     sqlite.exec("INSERT INTO disputes (id,order_id,stripe_charge_id,amount_cents,currency,status) VALUES ('dp_fixture','paid','ch_fixture',11000,'usd','needs_response')");
     assert.equal((await getGarageData("owner")).payments.find(row => row.id === "paid").payoutHold, true);

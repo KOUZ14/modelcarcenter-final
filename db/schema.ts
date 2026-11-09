@@ -284,6 +284,10 @@ export const sellers = sqliteTable(
       .default(false),
     foundingRateStartsAt: text("founding_rate_starts_at"),
     foundingRateEndsAt: text("founding_rate_ends_at"),
+    foundingFeeGrantedAt: text("founding_fee_granted_at"),
+    foundingFeeGrantedBy: text("founding_fee_granted_by"),
+    foundingFeeReservedUnits: integer("founding_fee_reserved_units").notNull().default(0),
+    foundingFeeUsedUnits: integer("founding_fee_used_units").notNull().default(0),
     ownerUserId: text("owner_user_id").references(() => authUser.id, {
       onDelete: "set null",
     }),
@@ -507,6 +511,7 @@ export const products = sqliteTable(
     modelCondition: text("model_condition", {
       enum: [
         "not_specified",
+        "new",
         "mint",
         "near_mint",
         "excellent",
@@ -1100,6 +1105,8 @@ export const orders = sqliteTable(
       .notNull()
       .default(1000),
     platformFeeCents: integer("platform_fee_cents").notNull(),
+    foundingFeeFreeUnits: integer("founding_fee_free_units").notNull().default(0),
+    foundingFeeFreeSubtotalCents: integer("founding_fee_free_subtotal_cents").notNull().default(0),
     paymentProcessingFeeCents: integer("payment_processing_fee_cents"),
     processingFeePayer: text("processing_fee_payer", { enum: ["platform", "seller"] }).notNull().default("platform"),
     sellerProceedsCents: integer("seller_proceeds_cents"),
@@ -1791,6 +1798,8 @@ export const checkoutReservations = sqliteTable(
       .notNull()
       .default(1000),
     platformFeeCents: integer("platform_fee_cents").notNull(),
+    foundingFeeFreeUnits: integer("founding_fee_free_units").notNull().default(0),
+    foundingFeeFreeSubtotalCents: integer("founding_fee_free_subtotal_cents").notNull().default(0),
     currency: text("currency").notNull(),
     policyVersion: text("policy_version"),
     protectionPolicyVersion: text("protection_policy_version").notNull().default("delivery-3-v1"),
@@ -1850,6 +1859,16 @@ export const checkoutReservationItems = sqliteTable(
     check("checkout_reservation_quantity_positive", sql`${table.quantity} > 0`),
   ],
 );
+
+// Verified bank payout schedules and independent rollout retries.
+export const sellerPayoutSchedules = sqliteTable("seller_payout_schedules", {
+  stripeAccountId: text("stripe_account_id").primaryKey(),
+  sellerId: text("seller_id").notNull().references(() => sellers.id),
+  policyVersion: text("policy_version").notNull(),
+  lastAttemptAt: text("last_attempt_at").notNull(),
+  verifiedAt: text("verified_at"),
+  lastError: text("last_error"),
+});
 
 // Founder decision and import history; uploaded CSV content is never retained here.
 export const adminActivity = sqliteTable("admin_activity", {

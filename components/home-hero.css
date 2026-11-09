@@ -117,7 +117,17 @@ main.home-marketplace .collector-hero .hero-search button {
 .collector-hero-actions a:last-child { color: #ddd; }
 .collector-hero-actions svg { width: 17px; height: 17px; }
 
-.collector-hero-footer { position: relative; border-top: 1px solid #ffffff30; background: #0b0b0ca6; }
+.collector-hero-footer { position: relative; padding-bottom: 32px; border-top: 1px solid #ffffff30; background: #0b0b0ca6; }
+.collector-hero-credit {
+  position: absolute;
+  right: max(16px, env(safe-area-inset-right));
+  bottom: 12px;
+  margin: 0;
+  color: rgba(255, 255, 255, .5);
+  font-size: 10px;
+  line-height: 1.5;
+  text-align: right;
+}
 .collector-hero-footer-inner { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px 28px; padding-block: 16px; }
 .collector-hero-scales { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .collector-hero-scales > span { margin-right: 20px; color: #ccc; font-size: 10px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }

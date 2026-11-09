@@ -52,7 +52,7 @@ export function SellerStart({ collectorFee, professionalFee, application }: {
       <Link href="/store">Seller Dashboard <span aria-hidden="true">↗</span></Link>
     </nav>
     <details className="sell-application-disclosure" ref={applicationDetails}>
-      <summary>Store application <span>Business details and founding-store offer</span></summary>
+      <summary>Store application <span>Business details and selling setup</span></summary>
       <div id="professional-application" tabIndex={-1} ref={applicationTarget}>{application}</div>
     </details>
   </div>;

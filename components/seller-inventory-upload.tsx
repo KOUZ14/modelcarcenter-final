@@ -12,7 +12,7 @@ type ImportRow = { rowNumber: number; sellerSku: string; title: string; priceCen
 type Preview = { valid: ImportRow[]; validCount: number; errors: Array<{ row: number; errors: string[] }> };
 type Action = (payload: Record<string, unknown>, options?: { reload?: boolean; message?: string }) => Promise<Record<string, unknown>>;
 
-export function SellerInventoryUpload({ disabled, action, expanded = false }: { disabled: boolean; action: Action; expanded?: boolean }) {
+export function SellerInventoryUpload({ disabled, action, expanded = false, onSaved }: { disabled: boolean; action: Action; expanded?: boolean; onSaved?(): void }) {
   const task = useTaskMeasurement("import");
   const [csv, setCsv] = useState("");
   const [fileName, setFileName] = useState("");
@@ -71,6 +71,7 @@ export function SellerInventoryUpload({ disabled, action, expanded = false }: { 
       const created = Number(result.created), updated = Number(result.updated);
       setSuccess([created ? `${created} new ${created === 1 ? "draft created" : "drafts created"}` : "", updated ? `${updated} existing ${updated === 1 ? "listing updated" : "listings updated"}` : ""].filter(Boolean).join(". ") + ".");
       setPreview(null); setCsv(""); setFileName("");
+      onSaved?.();
       trackEvent("inventory_import", { step: "saved", result: "success", count: Number(result.imported) });
     }
     catch (reason) { setError(reason instanceof Error ? reason.message : "Inventory could not be saved. Review the file and try again."); trackEvent("inventory_import", { step: "saved", result: "error" }); }
@@ -116,8 +117,8 @@ export function SellerInventoryUpload({ disabled, action, expanded = false }: { 
         <div><dt>packaging_condition</dt><dd>{packagingConditions.join(", ")}</dd></div>
         <div><dt>original_box</dt><dd>{originalBoxStatuses.join(", ")}</dd></div>
         <div><dt>coa</dt><dd>Certificate of authenticity: {coaStatuses.join(", ")}.</dd></div>
-        <div><dt>missing_parts, defects, restoration_customization</dt><dd>Describe each honestly, or use “None known” when appropriate.</dd></div>
-        <div><dt>material, accessories</dt><dd>For example: Die-cast metal and Display base. Use “None” if no accessories are included.</dd></div>
+        <div><dt>missing_parts, defects, restoration_customization</dt><dd>Describe each honestly, or use “None known” when appropriate. For New items, blank cells keep existing disclosures or default to “None known.”</dd></div>
+        <div><dt>material, accessories (optional)</dt><dd>For example: Die-cast metal and Display base. Use “None” if no accessories are included.</dd></div>
       </dl>
       <p><b>Optional:</b> description, vehicle_year, color, product_number, edition_serial, provenance, keywords. Keep availability_type as in_stock (or blank), and leave release_date blank. Use the listing form for preorders. Add photos after importing.</p>
     </details>
@@ -170,11 +171,18 @@ export function SellerInventoryUpload({ disabled, action, expanded = false }: { 
 export function SellerBulkStock({ products, disabled, action, expanded = false }: { products: Array<{ id: string; sellerSku: string; title: string; priceCents: number; inventoryQuantity: number; reservedQuantity: number; availabilityType: string }>; disabled: boolean; action: Action; expanded?: boolean }) {
   const [changes, setChanges] = useState<Record<string, { price: string; inventoryQuantity: string }>>({}); const [busy, setBusy] = useState(false); const [error, setError] = useState("");
   const rows = products.filter(product => product.availabilityType !== "preorder");
+  const changedRows = Object.entries(changes).filter(([id, value]) => {
+    const current = rows.find(row => row.id === id);
+    return current && (Number(value.price) * 100 !== current.priceCents || Number(value.inventoryQuantity) !== current.inventoryQuantity);
+  });
+  const saving = useRef(false);
+  const [success, setSuccess] = useState("");
   async function save() {
-    setBusy(true); setError("");
-    try { await action({ action: "update_stock", rows: Object.entries(changes).map(([id, values]) => ({ id, ...values })) }, { reload: true, message: "Stock and prices updated." }); }
+    if (saving.current || disabled || !changedRows.length) return;
+    saving.current = true; setBusy(true); setError(""); setSuccess("");
+    try { await action({ action: "update_stock", rows: changedRows.map(([id, values]) => ({ id, ...values })) }, { reload: true, message: "Stock and prices updated." }); setChanges({}); setSuccess("Stock and prices saved."); }
     catch (reason) { setError(reason instanceof Error ? reason.message : "Stock could not be saved. Try again."); }
-    finally { setBusy(false); }
+    finally { saving.current = false; setBusy(false); }
   }
-  return <details className="store-panel seller-bulk-stock" open={expanded || undefined}><summary>Update stock &amp; price</summary><p>Sold a model elsewhere? Reduce its stock here. There is no automatic stock synchronization. Total stock includes reserved units and cannot be lower than those reservations. New changes apply to future purchases.</p>{rows.length ? <><div className="admin-table-wrap"><table><thead><tr><th>Model / SKU</th><th>Price (USD)</th><th>Total stock</th><th>Reserved</th></tr></thead><tbody>{rows.map(product => { const value = changes[product.id] ?? { price: (product.priceCents / 100).toFixed(2), inventoryQuantity: String(product.inventoryQuantity) }; return <tr key={product.id}><td><b>{product.title}</b><small>{product.sellerSku}</small></td><td data-label="Price (USD)"><input aria-label={`Price for ${product.sellerSku}`} type="number" min="0" step="0.01" disabled={disabled || busy} value={value.price} onChange={event => setChanges(previous => ({ ...previous, [product.id]: { ...value, price: event.target.value } }))} /></td><td data-label="Total stock"><input aria-label={`Total stock for ${product.sellerSku}`} type="number" min={product.reservedQuantity} step="1" disabled={disabled || busy} value={value.inventoryQuantity} onChange={event => setChanges(previous => ({ ...previous, [product.id]: { ...value, inventoryQuantity: event.target.value } }))} /></td><td data-label="Reserved">{product.reservedQuantity}</td></tr>; })}</tbody></table></div><button className="button dark small" disabled={disabled || busy || !Object.keys(changes).length} onClick={() => void save()}>{busy ? "Saving…" : `Save ${Object.keys(changes).length} changed items`}</button>{!Object.keys(changes).length && <p>Change a price or stock quantity to enable saving.</p>}</> : <p>Add or upload in-stock models first. Preorder quantities are managed in Preorders.</p>}{error && <p className="form-error" role="alert">{error}</p>}</details>;
+  return <details className="store-panel seller-bulk-stock" open={expanded || undefined}><summary>Update stock &amp; price</summary><p>Sold a model elsewhere? Reduce its stock here. There is no automatic stock synchronization. Total stock includes reserved units and cannot be lower than those reservations. New changes apply to future purchases.</p>{rows.length ? <><div className="admin-table-wrap"><table><thead><tr><th>Model / SKU</th><th>Price (USD)</th><th>Total stock</th><th>Reserved</th></tr></thead><tbody>{rows.map(product => { const value = changes[product.id] ?? { price: (product.priceCents / 100).toFixed(2), inventoryQuantity: String(product.inventoryQuantity) }; return <tr key={product.id}><td><b>{product.title}</b><small>{product.sellerSku}</small></td><td data-label="Price (USD)"><input aria-label={`Price for ${product.sellerSku}`} type="number" min="0" step="0.01" disabled={disabled || busy} value={value.price} onChange={event => setChanges(previous => ({ ...previous, [product.id]: { ...value, price: event.target.value } }))} /></td><td data-label="Total stock"><input aria-label={`Total stock for ${product.sellerSku}`} type="number" min={product.reservedQuantity} step="1" disabled={disabled || busy} value={value.inventoryQuantity} onChange={event => setChanges(previous => ({ ...previous, [product.id]: { ...value, inventoryQuantity: event.target.value } }))} /></td><td data-label="Reserved">{product.reservedQuantity}</td></tr>; })}</tbody></table></div><button className="button dark small" disabled={disabled || busy || !changedRows.length} onClick={() => void save()}>{busy ? "Saving…" : `Save ${changedRows.length} changed items`}</button>{!changedRows.length && <p>Change a price or stock quantity to enable saving.</p>}</> : <p>Select in-stock items using the inventory checkboxes. Preorder quantities are managed in Preorders.</p>}{success && <p role="status">{success}</p>}{error && <p className="form-error" role="alert">{error}</p>}</details>;
 }

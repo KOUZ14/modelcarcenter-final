@@ -10,10 +10,15 @@ export function ProductSellerLine({ product, preview = false }: { product: Produ
   </div>;
 }
 
-export function ProductPurchaseInfo({ product }: { product: ProductDetail }) {
+export function ProductPurchaseInfo({ product, full = false }: { product: ProductDetail; full?: boolean }) {
+  if (!full) return <section className={styles.purchaseInfo} aria-label="Before you buy">
+    <div className={styles.essentials}>
+      <p><a href="#listing-shipping">Shipping{product.availabilityType === "preorder" ? ", returns & preorder terms" : " & returns"}</a></p>
+      <p>For returns or problems, open an <Link href="/resolution">MCC Customer Support</Link> request within <strong>{activeProtectionPolicy.deliveredDays} calendar days after carrier-confirmed delivery</strong>. <a href="#listing-returns">See policy</a>.</p>
+    </div>
+  </section>;
   return <section className={styles.purchaseInfo} aria-label="Before you buy">
     <div className={styles.essentials}>
-      <p><strong>Dispatch:</strong> Within {product.handlingTimeBusinessDays} business day{product.handlingTimeBusinessDays === 1 ? "" : "s"}{product.availabilityType === "preorder" ? " after release and balance payment" : " after payment"}. Carrier transit time is additional.</p>
       <p><strong>Returns &amp; problems:</strong> Open a return or refund request in <Link href="/resolution">MCC Customer Support</Link> within <strong>{activeProtectionPolicy.deliveredDays} calendar days after carrier-confirmed delivery</strong>. Messaging the seller alone does not open a platform request.</p>
     </div>
     <details className={styles.listingDetails} id="listing-returns">

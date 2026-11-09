@@ -471,6 +471,7 @@ export async function getGarageData(userId: string) {
           carrier: orders.carrier,
           trackingNumber: orders.trackingNumber,
           createdAt: orders.createdAt,
+          shipByAt: orders.shipByAt,
           deliveredAt: orders.deliveredAt,
           payoutEligibleAt: orders.payoutEligibleAt,
           sellerTransferredAt: orders.sellerTransferredAt,

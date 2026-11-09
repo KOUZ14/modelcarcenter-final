@@ -13,6 +13,8 @@ export function useDialogFocus(onClose: () => void) {
     const focusable = () => [...root.querySelectorAll<HTMLElement>('a[href], button, input, select, textarea, summary, [tabindex="0"]')].filter((element) => !element.matches(":disabled") && element.getClientRects().length > 0);
     focusable()[0]?.focus();
     function onKeyDown(event: KeyboardEvent) {
+      // Native photo and buyer-preview dialogs own focus while open above this editor.
+      if (event.target instanceof Element && event.target.closest("dialog[open]")) return;
       if (event.key === "Escape") { event.preventDefault(); close.current(); }
       if (event.key !== "Tab") return;
       const items = focusable();

@@ -24,9 +24,17 @@ Events contain only an opaque event ID, a fixed event name, UTC day, an allowed 
 
 ## Reporting and limits
 
+The admin dashboard exposes **User analytics** at `/admin?section=analytics`, with 7-, 30-, and 90-day views (UTC, including the partial current day). It shows account registrations, current account/verified-email/seller-profile totals, daily registration trends, the existing buyer/seller task counts, and optional website traffic. Account totals come from current account records and include staff/test accounts; deleted accounts and guests are excluded. Subscriber totals remain separate. The account and event aggregates are not joined to identify users. Test mode pauses new usage measurement and is indicated in the report.
+
+Apply migration `0042_user_traffic_analytics.sql` before deploying this version. Traffic measurement starts after deployment and fresh acceptance of the updated notice (`mcc-storage-notice-v2`); existing task-only consent does not enable it. Both `mcc_analytics=yes` and `mcc_traffic=yes` are required server-side, alongside the existing live-mode, staff/test, bot, GPC and DNT checks. No historical visitor data is backfilled.
+
+`traffic_measurements` stores random event/browser IDs, UTC day, a fixed page category and a fixed source category. Browser IDs expire after 90 days in local storage and are removed when consent is withdrawn; no account identity, IP, user agent, URL, search string or raw referrer is stored in this table. The browser classifies the referring website into direct/unknown, search, social or referral before sending it. Internal navigation retains the entry source within a tab; unavailable referrers count as direct/unknown. Admin and authentication routes are excluded. A page view is a pathname navigation (including reloads); query-only changes are not additional views. Traffic events and task events are separate and are never joined by identity.
+
+Visitors are distinct browser identifiers **within the selected period**, deduplicated across its days. They are not unique people or signed-in users; different devices, cleared storage and expired identifiers can overcount a person. Daily visitor counts are not additive. Source and page breakdowns count page views, not sessions. All collection is a consented sample, not total site traffic. The existing scheduled maintenance and write-time pruning remove both task and traffic records older than 90 days. Only aggregate traffic data is returned by the private admin report.
+
 An administrator can read `GET /api/measurement` through the normal admin sign-in. It returns daily event totals grouped by event, step and result, summed quantities, timed-event counts and average elapsed milliseconds. It does not return opaque IDs or user identities. Responses are private and not cached. There is no public report.
 
-Use these as aggregate task counts, not unique visitors, conversion rates per person, or proof of causality. There is deliberately no persistent cross-device identity. Setup completion markers and the setup timer are device-local; clearing storage, switching devices, an archived former listing or an already-established store can affect the observed first-publication metric. Time values are capped at 30 days. This is not an authoritative lifetime seller-onboarding ledger.
+Use task events as aggregate task counts, not unique visitors, conversion rates per person, or proof of causality. There is deliberately no persistent cross-device identity. Setup completion markers and the setup timer are device-local; clearing storage, switching devices, an archived former listing or an already-established store can affect the observed first-publication metric. Time values are capped at 30 days. This is not an authoritative lifetime seller-onboarding ledger.
 
 Successful-purchase measurement is a **consented confirmation-return sample**. A buyer who does not return to confirmation is not included. The order/payment records remain the source of truth for total sales, taxes, refunds and accounting. Purchase event deduplication applies to the checkout session, including multiple seller orders in one checkout, and survives retries within retention.
 
@@ -35,3 +43,7 @@ The cookie lasts up to one year. The local consent choice and setup completion m
 ## Turning observations into changes
 
 Review aggregate import failures and unfinished tasks alongside actual owner-study notes. Record the step, generic problem, frequency and proposed fix in the study log, without copying private field contents. Measure repeated successful tool actions as usage volume; do not label them repeat users. A true cross-device onboarding cohort or visitor conversion funnel would require a separate privacy-reviewed design and disclosure update.
+
+## Local verification (November 6, 2026)
+
+The analytics, measurement, admin workflow, usability, legal-policy and request-security checks passed (48 tests). Source TypeScript checks, lint on changed code, the production build and Worker artifact validation passed. The source typecheck excluded ignored `work/` and `.sites-runtime/` copies, which contain older versions of the application. A browser preview using fictional data verified the date selector, desktop layout and a 393px phone layout. No production migration or deployment was performed.

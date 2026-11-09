@@ -16,13 +16,13 @@ export const metadata: Metadata = {
 export default async function StorePage({
   searchParams,
 }: {
-  searchParams: Promise<{ view?: string; edit?: string; filter?: string; preorder?: string; conversation?: string; thread?: string; tab?: string }>;
+  searchParams: Promise<{ view?: string; edit?: string; filter?: string; preorder?: string; conversation?: string; thread?: string; tab?: string; q?: string; stock?: string; page?: string }>;
 }) {
   const query = await searchParams;
   const returnParams=new URLSearchParams();
-  for(const key of ["view","edit","filter","preorder","conversation","thread","tab"] as const)if(query[key])returnParams.set(key,query[key]);
+  for(const key of ["view","edit","filter","preorder","conversation","thread","tab","q","stock","page"] as const)if(query[key])returnParams.set(key,query[key]);
   const account = await requireCollector(returnParams.size ? `/store?${returnParams}` : "/store");
-  const data = await getStoreDashboardData(account.user.id);
+  const data = await getStoreDashboardData(account.user.id, (query.view === "inventory" || (!query.view && query.edit)) ? query : undefined);
   if (!data)
     return (
       <main>

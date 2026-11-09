@@ -1,124 +1,61 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, mkdtemp, writeFile, unlink, rmdir } from "node:fs/promises";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { join } from "node:path";
+import { execFileSync } from "node:child_process";
+import { build } from "esbuild";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import test from "node:test";
-import { parseFeeBasisPoints } from "../lib/config.ts";
-import {
-  calculateMarketplaceFeeForSeller,
-  determineMarketplaceFee,
-  foundingSellerRatePeriod,
-  isEligibleForFoundingSellerRate,
-} from "../lib/fees.ts";
-import {
-  buildCheckoutSessionBody,
-  stripeSettlementDetails,
-} from "../lib/stripe.ts";
+import { calculateMarketplaceFee, determineMarketplaceFee } from "../lib/fees.ts";
+import { POLICY_VERSION, sellerAcceptedCurrentTerms } from "../lib/legal.ts";
+import { buildCheckoutSessionBody, stripeSettlementDetails } from "../lib/stripe.ts";
 
-const rates = {
-  collectorMarketplaceFeeBps: 850,
-  professionalMarketplaceFeeBps: 700,
-  foundingSellerMarketplaceFeeBps: 500,
-};
-const duringPromotion = new Date("2026-04-01T00:00:00.000Z");
-
-test("collector sellers receive 8.5% and cannot receive the founding-store rate", () => {
-  const fee = determineMarketplaceFee(
-    {
-      sellerType: "collector",
-      isFoundingSeller: true,
-      foundingRateStartsAt: "2026-01-01T00:00:00.000Z",
-      foundingRateEndsAt: "2026-07-01T00:00:00.000Z",
-    },
-    duringPromotion,
-    rates,
-  );
-  assert.equal(fee.marketplaceFeeBps, 850);
-  assert.equal(fee.rateKind, "collector");
-  assert.equal(fee.foundingPromotionActive, false);
-  assert.equal(isEligibleForFoundingSellerRate({ sellerType: "collector" }), false);
+test("the standard marketplace rate is 7% with integer-cent rounding", () => {
+  assert.deepEqual(determineMarketplaceFee(), {marketplaceFeeBps:700});
+  for (const [subtotal, fee] of [[0,0],[1,0],[8,1],[12500,875],[19999,1400],[20000,1400]]) {
+    assert.deepEqual(calculateMarketplaceFee(subtotal), {marketplaceFeeBps:700,platformFeeCents:fee});
+  }
+  assert.throws(() => calculateMarketplaceFee(-1));
 });
 
-test("professional sellers receive the 7% standard rate", () => {
-  const fee = determineMarketplaceFee(
-    { sellerType: "professional", isFoundingSeller: false },
-    duringPromotion,
-    rates,
-  );
-  assert.equal(fee.marketplaceFeeBps, 700);
-  assert.equal(fee.rateKind, "professional");
+test("legacy fee environment overrides cannot change the universal rate", () => {
+  const script = "import { config } from './lib/config.ts'; console.log(config.marketplaceFeeBps);";
+  const output = execFileSync(process.execPath, ['--experimental-strip-types','--input-type=module','-e',script], {
+    cwd:fileURLToPath(new URL('../',import.meta.url)), encoding:'utf8',
+    env:{...process.env,COLLECTOR_MARKETPLACE_FEE_BPS:'850',PROFESSIONAL_MARKETPLACE_FEE_BPS:'1200',FOUNDING_SELLER_MARKETPLACE_FEE_BPS:'500',FOUNDING_SELLER_PROMOTION_MONTHS:'invalid'},
+  });
+  assert.equal(output.trim(),'700');
 });
 
-test("active founding professional sellers receive 5%", () => {
-  const fee = determineMarketplaceFee(
-    {
-      sellerType: "professional",
-      isFoundingSeller: true,
-      foundingRateStartsAt: "2026-01-01T00:00:00.000Z",
-      foundingRateEndsAt: "2026-07-01T00:00:00.000Z",
-    },
-    duringPromotion,
-    rates,
-  );
-  assert.equal(fee.marketplaceFeeBps, 500);
-  assert.equal(fee.foundingPromotionActive, true);
+test("sellers must accept the updated fee policy before new sales", () => {
+  assert.equal(POLICY_VERSION,'2026-11-05-founding-store-offer-v6');
+  assert.equal(sellerAcceptedCurrentTerms({sellerTermsVersion:'2026-09-27-consumer-protection-v4',sellerTermsAcceptedAt:'2026-10-01'}),false);
+  assert.equal(sellerAcceptedCurrentTerms({sellerTermsVersion:POLICY_VERSION,sellerTermsAcceptedAt:'2026-11-05'}),true);
 });
 
-test("expired founding professional sellers automatically return to 7%", () => {
-  const fee = determineMarketplaceFee(
-    {
-      sellerType: "professional",
-      isFoundingSeller: true,
-      foundingRateStartsAt: "2026-01-01T00:00:00.000Z",
-      foundingRateEndsAt: "2026-07-01T00:00:00.000Z",
-    },
-    new Date("2026-07-01T00:00:00.000Z"),
-    rates,
-  );
-  assert.equal(fee.marketplaceFeeBps, 700);
-  assert.equal(fee.foundingPromotionActive, false);
-});
-
-test("fee calculations round integer cents and use item subtotal only", () => {
-  assert.equal(
-    calculateMarketplaceFeeForSeller(
-      19_999,
-      { sellerType: "collector" },
-      duringPromotion,
-      rates,
-    ).platformFeeCents,
-    1_700,
-  );
-  assert.equal(
-    calculateMarketplaceFeeForSeller(
-      20_000,
-      {
-        sellerType: "professional",
-        isFoundingSeller: true,
-        foundingRateStartsAt: "2026-01-01T00:00:00.000Z",
-        foundingRateEndsAt: "2026-07-01T00:00:00.000Z",
-      },
-      duringPromotion,
-      rates,
-    ).platformFeeCents,
-    1_000,
-  );
-});
-
-test("founding rate periods use six calendar months", () => {
-  assert.deepEqual(
-    foundingSellerRatePeriod("2026-01-31T12:00:00.000Z", 6),
-    {
-      startsAt: "2026-01-31T12:00:00.000Z",
-      endsAt: "2026-07-31T12:00:00.000Z",
-    },
-  );
-});
-
-test("fee configuration parses safe values, defaults only when absent, and rejects invalid values", () => {
-  assert.equal(parseFeeBasisPoints(undefined, 850), 850);
-  assert.equal(parseFeeBasisPoints(" 700 ", 850), 700);
-  assert.throws(() => parseFeeBasisPoints("8.5", 850), /whole number/);
-  assert.throws(() => parseFeeBasisPoints("-1", 850), /whole number/);
-  assert.throws(() => parseFeeBasisPoints("10001", 850), /between 0 and 10000/);
+test("real seller carts and calculator use 7% regardless of founding history", async t => {
+  const root=fileURLToPath(new URL('../',import.meta.url)), scratch=await mkdtemp(join(root,'.fee-test-')), file=join(scratch,'fee.mjs');
+  t.after(async()=>{await unlink(file).catch(()=>{});await rmdir(scratch);});
+  const result=await build({absWorkingDir:root,bundle:true,platform:'node',format:'esm',packages:'external',write:false,jsx:'automatic',
+    stdin:{contents:'export {sellerCartFromRows} from "./lib/inventory"; export {SellerProceedsCalculator} from "./components/seller-proceeds-calculator";',resolveDir:root,loader:'tsx'},
+    plugins:[{name:'boundaries',setup(b){
+      b.onResolve({filter:/^@\/db$|\.css$/},({path})=>({path,namespace:'stub'}));
+      b.onLoad({filter:/.*/,namespace:'stub'},({path})=>({contents:path.endsWith('.css')?'':'export const getDb=()=>{throw Error("Unexpected DB call")};export const getD1=getDb;'}));
+    }}],
+  });
+  await writeFile(file,result.outputFiles[0].contents);
+  const {sellerCartFromRows,SellerProceedsCalculator}=await import(pathToFileURL(file).href);
+  for(const sellerType of ['collector','professional']) for(const isFoundingSeller of [false,true]) for(const foundingRateEndsAt of ['2026-01-01','2099-01-01']) {
+    const cart=sellerCartFromRows([{id:'model',sellerId:'seller',sellerType,isFoundingSeller,foundingRateStartsAt:'2025-01-01',foundingRateEndsAt,currency:'usd',priceCents:20000,quantity:1,shippingMode:'flat',shippingCents:1000}]);
+    assert.equal(cart.fee.marketplaceFeeBps,700);
+    assert.equal(cart.totals.platformFeeCents,1400);
+    assert.equal(cart.totals.shippingCents,sellerType==='collector'?0:1000);
+  }
+  const html=renderToStaticMarkup(createElement(SellerProceedsCalculator,{marketplaceFeeBps:700}));
+  assert.match(html,/7% standard marketplace fee/);
+  assert.match(html,/189.03/);
+  assert.doesNotMatch(html,/Seller type|8\.5%|<select/i);
 });
 
 test("Stripe Checkout keeps funds on-platform for a later seller transfer", () => {
@@ -137,13 +74,13 @@ test("Stripe Checkout keeps funds on-platform for a later seller transfer", () =
       },
     ],
     shippingCents: 1_000,
-    marketplaceFeeBps: 500,
-    platformFeeCents: 1_000,
+    marketplaceFeeBps: 700,
+    platformFeeCents: 1_400,
     expiresAt: new Date("2026-08-20T00:00:00.000Z"),
     policyVersion: "2026-08-19",
   });
   assert.equal(body.get("payment_intent_data[application_fee_amount]"), null);
-  assert.equal(body.get("metadata[marketplace_fee_bps]"), "500");
+  assert.equal(body.get("metadata[marketplace_fee_bps]"), "700");
   assert.equal(body.get("metadata[payment_flow]"), "separate");
   assert.equal(body.get("metadata[processing_fee_payer]"), "seller");
   assert.equal(body.get("payment_intent_data[transfer_data][destination]"), null);

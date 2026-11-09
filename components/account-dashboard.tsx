@@ -2,7 +2,10 @@
 
 import { SellerShipmentPanel, type SellerShipmentOrder, type SellerShippingSettings } from "./seller-shipment-panel";
 import { SellerOrderAmounts } from "./seller-order-amounts";
+import { SellerShippingDeadline } from "./seller-shipping-deadline";
+import { prioritizeOrders } from "@/lib/seller-dashboard";
 import { CollectorPayments } from "./collector-payments";
+import { CollectorShippingSettings } from "./collector-shipping-settings";
 import type { CollectorPayment } from "@/lib/collector-payments";
 import { OrderProtectionSummary } from "./order-protection-summary";
 import { PreorderDashboard, PreorderOrderHistory } from "./preorder-dashboard";
@@ -35,7 +38,7 @@ type GarageData = {
   shipping: SellerShippingSettings;
   payments?: CollectorPayment[];
   sales: Array<
-    SellerShipmentOrder & Record<string, unknown> & { items: Array<Record<string, unknown>> }
+    SellerShipmentOrder & Record<string, unknown> & { createdAt: string; shipByAt: string | null; items: Array<Record<string, unknown>> }
   >;
 };
 type Profile = {
@@ -543,6 +546,7 @@ function Listings({
           Sell a Model
         </Link>}
       </div>
+      {seller?.sellerType === "collector" && <Link className="account-inline-link" href="/account?view=sales#collector-shipping-settings">Manage shipping settings</Link>}
       {seller &&
         (!seller.stripeChargesEnabled || !seller.stripePayoutsEnabled) && (
           <div className="account-callout">
@@ -648,26 +652,21 @@ function Sales({
   shipping: SellerShippingSettings;
   action(payload: Record<string, unknown>): Promise<unknown>;
 }) {
-  if (!rows.length)
-    return (
-      <div className="garage-section">
-        <p className="eyebrow">My Sales</p>
-        <h2>No sales yet.</h2>
-        <p>Paid orders for your collector listings will appear here.</p>
-      </div>
-    );
   return (
     <div className="garage-section">
       <p className="eyebrow">My Sales</p>
-      <h2>Orders to fulfill</h2>
+      <h2>{rows.length ? "Orders to fulfill" : "My Sales"}</h2>
+      {seller?.sellerType === "collector" && <CollectorShippingSettings key={seller.id} handlingTimeBusinessDays={Number(seller.handlingTimeBusinessDays ?? 3)} />}
+      {!rows.length && <><h3>No sales yet.</h3><p>Paid orders for your collector listings will appear here.</p>{!seller && <Link className="account-inline-link" href="/sell/model">Start a collector listing to set up selling</Link>}</>}
       <Link className="account-inline-link" href="/account?view=payments#account-content">View payments &amp; payout history</Link>
       <div className="garage-list">
-        {rows.map((sale) => (
+        {prioritizeOrders(rows).map((sale) => (
           <article key={String(sale.id)} id={`sale-${sale.id}`}>
             <div>
               <b>{String(sale.orderNumber)}</b>
               <span>{date(String(sale.createdAt))}</span>
             </div>
+            <SellerShippingDeadline order={sale} />
             {sale.items.map((item) => (
               <p key={String(item.id)}>
                 {String(item.productTitleSnapshot)} × {String(item.quantity)}

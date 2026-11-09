@@ -42,6 +42,15 @@ export function SellerReputation({
   ];
 
   if (reputation.completedTransactions === 0 && reputation.feedbackCount === 0) {
+    if (compact) return <section className="seller-reputation-new" aria-label="Seller history">
+      <h3>New to Model Car Center</h3>
+      <p>No completed marketplace transactions or verified purchase reviews yet.</p>
+      <details><summary>Marketplace history &amp; verification</summary>
+        <p>Community likes and followers are separate from purchase feedback. A professional store&apos;s approval means its application was accepted. Collectors publish their own listings. Stripe handles payment-account checks. These checks do not guarantee a model&apos;s authenticity or condition. Use Report listing to flag a problem.</p>
+        <dl>{metrics.map(metric => <div key={metric.label}><dt>{metric.label}</dt><dd>{metric.value} · {metric.detail}</dd></div>)}</dl>
+        <Link href={`/sellers/${sellerSlug}`}>About this seller</Link>
+      </details>
+    </section>;
     return <section className="seller-reputation-new" id={compact ? undefined : "reputation"} aria-label="Seller history"><h2>New to Model Car Center</h2><p>This seller has no completed marketplace transactions or verified purchase feedback yet. Community likes and followers are separate from purchase feedback.</p><p>A professional store&apos;s approval means its application was accepted. Collectors publish their own listings. Use Report listing to flag a problem. Stripe handles payment-account checks. These checks do not guarantee a model&apos;s authenticity or condition.</p><details><summary>View marketplace history</summary><dl>{metrics.map(metric => <div key={metric.label}><dt>{metric.label}</dt><dd>{metric.value} · {metric.detail}</dd></div>)}</dl></details>{compact && <Link href={`/sellers/${sellerSlug}`}>About this seller</Link>}</section>;
   }
 

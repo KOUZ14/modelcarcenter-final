@@ -14,15 +14,12 @@ import "@/components/sell-page.css";
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
   title: "Sell with us",
-  description: "Sell models from your own collection or apply as a store. Compare fees and preview the seller tools.",
+  description: "Sell models from your own collection or apply as a store. Pay a standard 7% marketplace fee and preview the seller tools.",
   alternates: { canonical: "/sell" },
 };
 
 export default function SellPage() {
-  const professionalFee = formatFeePercent(config.professionalMarketplaceFeeBps);
-  const foundingFee = formatFeePercent(config.foundingSellerMarketplaceFeeBps);
-  const promotionDuration = config.foundingSellerPromotionMonths === 6
-    ? "six months" : `${config.foundingSellerPromotionMonths} months`;
+  const marketplaceFee = formatFeePercent(config.marketplaceFeeBps);
 
   return (
     <main>
@@ -31,26 +28,19 @@ export default function SellPage() {
         <section className="sell-intro" aria-labelledby="sell-title">
           <p className="eyebrow">For collectors and stores</p>
           <h1 id="sell-title">Find the next home for your models.</h1>
-          <p>Sell models from your collection or your store. Choose how to start.</p>
+          <p>Sell models from your collection or your store. A standard 7% marketplace fee, plus payment processing.</p>
         </section>
         <SellerStart
-          collectorFee={formatFeePercent(config.collectorMarketplaceFeeBps)}
-          professionalFee={professionalFee}
+          collectorFee={marketplaceFee}
+          professionalFee={marketplaceFee}
           application={
             <section className="sell-application" aria-labelledby="application-title">
               <div className="sell-application-intro">
                 <p className="eyebrow">For stores and businesses</p>
                 <h2 id="application-title">Apply as a store</h2>
                 <p>Tell us about your business and inventory. Keep your existing sales channels and add models individually or by spreadsheet.</p>
-                <div className="sell-founding-offer">
-                  <h3>Founding-store offer</h3>
-                  <p><strong>Eligible stores: {foundingFee} for {promotionDuration}, then {professionalFee}, plus processing.</strong></p>
-                  <details>
-                    <summary>Who qualifies, and when will I know?</summary>
-                    <p>Only professional stores assigned the offer by Model Car Center qualify. Eligibility is confirmed separately from store approval; applying alone does not activate the rate.</p>
-                    <p>You’ll know you qualify when Model Car Center confirms the offer and its start and end dates for your store. Your active rate appears in Seller Dashboard. Until eligibility is confirmed, plan on the standard {professionalFee} rate. <Link href="/contact#seller-setup-help">Contact us about eligibility</Link>.</p>
-                  </details>
-                </div>
+                <p><strong>{marketplaceFee} standard fee on the item subtotal, plus payment processing.</strong> No listing or monthly fees.</p>
+                <p>Selected founding stores can receive an admin-granted 0% marketplace fee on their first 10 units sold after activation, then 7%. Processing stays separate. <Link href="/seller-terms#fees">Offer terms</Link>.</p>
                 <details className="sell-requirements">
                   <summary>What you need before listings go live</summary>
                   <ul>
@@ -61,16 +51,12 @@ export default function SellPage() {
                   <p>There is no automatic stock sync with other websites. Update quantities here when a model sells elsewhere.</p>
                 </details>
               </div>
-              <SellerApplicationForm marketplaceFeeBps={config.professionalMarketplaceFeeBps} />
+              <SellerApplicationForm marketplaceFeeBps={config.marketplaceFeeBps} />
             </section>
           }
         />
         <SellerToolsPreview />
-        <SellerProceedsCalculator rates={{
-          collector: config.collectorMarketplaceFeeBps,
-          professional: config.professionalMarketplaceFeeBps,
-          founding: config.foundingSellerMarketplaceFeeBps,
-        }} />
+        <SellerProceedsCalculator marketplaceFeeBps={config.marketplaceFeeBps} />
         <section className="sell-support" aria-labelledby="seller-help-title">
           <h2 id="seller-help-title">A few things to know</h2>
           <details>

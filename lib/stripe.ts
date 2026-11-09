@@ -6,6 +6,7 @@ import { stripeShippingAddress } from "./checkout-address.ts";
 import type { NormalizedShippingAddress } from "./shipping-rules.ts";
 import type { CheckoutLine } from "./checkout-allocation.ts";
 import { ValidationError } from "./validation.ts";
+import { isWeeklySellerPayoutSchedule, weeklySellerPayoutParameters, type SellerPayoutSchedule } from "./payout-schedule.ts";
 export { sellerProceedsAfterRefund } from "./seller-proceeds.ts";
 
 type StripeError = { error?: { message?: string; type?: string; code?: string; param?: string } };
@@ -345,6 +346,9 @@ export type StripeAccount = {
   payouts_enabled: boolean;
   details_submitted?: boolean;
   requirements?: { currently_due?: string[]; disabled_reason?: string | null };
+  metadata?: Record<string, string>;
+  controller?: { losses?: { payments?: string }; stripe_dashboard?: { type?: string } };
+  settings?: { payouts?: { schedule?: SellerPayoutSchedule } };
 };
 
 export async function createConnectedAccount(input: { sellerId: string; email: string; storeName: string }) {
@@ -358,6 +362,7 @@ export async function createConnectedAccount(input: { sellerId: string; email: s
     "controller[stripe_dashboard][type]": "express",
     "capabilities[card_payments][requested]": "true",
     "capabilities[transfers][requested]": "true",
+    ...Object.fromEntries(weeklySellerPayoutParameters()),
   });
   return stripeRequest<StripeAccount>("/v1/accounts", {
     method: "POST",
@@ -386,6 +391,27 @@ export async function createAccountOnboardingLink(
 
 export async function retrieveStripeAccount(accountId: string) {
   return stripeRequest<StripeAccount>(`/v1/accounts/${encodeURIComponent(accountId)}`);
+}
+
+export async function configureSellerWeeklyPayouts(accountId: string, sellerId: string) {
+  if (!/^acct_[A-Za-z0-9]+$/.test(accountId)) throw new Error("Invalid connected account.");
+  const account = await retrieveStripeAccount(accountId);
+  // Never change the platform's own payout schedule or an unrelated account.
+  if (account.id !== accountId || account.metadata?.seller_id !== sellerId ||
+      account.controller?.losses?.payments !== "application" ||
+      account.controller?.stripe_dashboard?.type !== "express") {
+    throw new Error("Seller payout account requires an operations review.");
+  }
+  if (isWeeklySellerPayoutSchedule(account.settings?.payouts?.schedule)) return account;
+  await stripeRequest<StripeAccount>(`/v1/accounts/${encodeURIComponent(accountId)}`, {
+    method: "POST",
+    body: weeklySellerPayoutParameters(),
+  });
+  const verified = await retrieveStripeAccount(accountId);
+  if (!isWeeklySellerPayoutSchedule(verified.settings?.payouts?.schedule)) {
+    throw new Error("Stripe has not confirmed the weekly payout schedule.");
+  }
+  return verified;
 }
 
 export async function createExpressDashboardLink(accountId: string) {

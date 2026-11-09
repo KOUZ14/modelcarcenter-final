@@ -2,7 +2,7 @@ import { getD1 } from "@/db";
 import { loadAuthoritativeCheckout, buildCartReservation, releaseReservation, type RequestedCartItem } from "./inventory";
 import { resolveCheckoutShipping } from "./checkout-shipping";
 import { assertSellerPaymentsReady, createCheckoutSession, expireCheckoutSession, type CheckoutSessionInput } from "./stripe";
-import { calculateServerTotals } from "./business";
+import { calculateSellerTotals } from "./fees";
 import { validateCheckoutDestination } from "./checkout-address";
 import { config } from "./config";
 import { POLICY_VERSION } from "./legal";
@@ -28,7 +28,7 @@ export async function startConsolidatedCheckout(
     if (!selections.has(cart.seller.sellerId)) throw new ValidationError("Choose shipping for every selected seller.");
     await assertSellerPaymentsReady(cart.seller.sellerStripeAccountId!, cart.seller.sellerName);
     const shipping = await resolveCheckoutShipping(cart, selections.get(cart.seller.sellerId), buyer?.id ?? null, destination);
-    const totals = calculateServerTotals(cart.items, shipping.amountCents, cart.fee.marketplaceFeeBps);
+    const totals = calculateSellerTotals(cart.items, shipping.amountCents, cart.fee);
     const reservation = buildCartReservation({ ...cart, totals }, buyer?.id ?? null, POLICY_VERSION, shipping, groupId, expiresAt);
     resolved.push({ cart, shipping, totals, reservation });
   }

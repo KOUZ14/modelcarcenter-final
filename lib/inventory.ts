@@ -10,9 +10,8 @@ import {
   sellerAddresses,
   sellers,
 } from "@/db/schema";
-import { calculateServerTotals } from "./business";
 import { config } from "./config";
-import { determineMarketplaceFee } from "./fees";
+import { calculateCartMarketplaceFee, calculateSellerTotals } from "./fees";
 import { sellerAcceptedCurrentTerms } from "./legal";
 import {
   sellerOriginSnapshot,
@@ -64,9 +63,9 @@ export async function loadAuthoritativeCartItems(items: RequestedCartItem[], all
       contactName: sellers.contactName,
       sellerEmail: sellers.contactEmail,
       sellerType: sellers.sellerType,
-      isFoundingSeller: sellers.isFoundingSeller,
-      foundingRateStartsAt: sellers.foundingRateStartsAt,
-      foundingRateEndsAt: sellers.foundingRateEndsAt,
+      foundingFeeGrantedAt: sellers.foundingFeeGrantedAt,
+      foundingFeeUsedUnits: sellers.foundingFeeUsedUnits,
+      foundingFeeReservedUnits: sellers.foundingFeeReservedUnits,
       sellerStripeAccountId: sellers.stripeAccountId,
       stripeChargesEnabled: sellers.stripeChargesEnabled,
       stripePayoutsEnabled: sellers.stripePayoutsEnabled,
@@ -131,14 +130,14 @@ export function sellerCartFromRows(rows: Awaited<ReturnType<typeof loadAuthorita
   const seller = rows[0];
   if (new Set(rows.map((row) => row.currency)).size !== 1) throw new Error("All products in a checkout must use the same currency.");
   const authoritativeItems = rows;
-  const fee = determineMarketplaceFee(seller);
+  const fee = calculateCartMarketplaceFee(authoritativeItems, seller);
   const shippingMode = seller.sellerType === "collector" ? "calculated" : seller.shippingMode;
   const defaultShippingCents =
     shippingMode === "free" ? 0 : shippingMode === "flat" ? seller.shippingCents : 0;
-  const totals = calculateServerTotals(
+  const totals = calculateSellerTotals(
     authoritativeItems,
     defaultShippingCents,
-    fee.marketplaceFeeBps,
+    fee,
   );
   return {
     items: authoritativeItems,
@@ -190,13 +189,18 @@ export function buildCartReservation(
   const d1 = getD1();
   const reservationId = crypto.randomUUID();
   const statements = [
+    // Reject a stale allowance snapshot before inventory or Stripe can change.
+    d1.prepare(`UPDATE sellers SET founding_fee_reserved_units = CASE
+      WHEN founding_fee_granted_at IS ? AND founding_fee_used_units = ? AND founding_fee_reserved_units = ?
+      THEN founding_fee_reserved_units ELSE -1 END WHERE id = ?`)
+      .bind(input.seller.foundingFeeGrantedAt ?? null, input.seller.foundingFeeUsedUnits ?? 0, input.seller.foundingFeeReservedUnits ?? 0, input.seller.sellerId),
     d1.prepare(`INSERT INTO checkout_reservations
       (id, seller_id, buyer_user_id, status, subtotal_cents, shipping_cents, shipping_mode,
        checkout_shipping_quote_id, selected_shipping_rate_id, selected_shipping_carrier,
        selected_shipping_service, selected_shipping_service_token, selected_shipping_estimated_days,
        quoted_shipping_address, ship_from_address, marketplace_fee_bps, platform_fee_cents, currency,
-       policy_version, policy_accepted_at, expires_at, checkout_group_id, combined_shipping_request_id, protection_policy_version, existing_commitment)
-      VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?)`)
+       policy_version, policy_accepted_at, expires_at, checkout_group_id, combined_shipping_request_id, protection_policy_version, existing_commitment, founding_fee_free_units, founding_fee_free_subtotal_cents)
+      VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?)`)
       .bind(
         reservationId,
         input.seller.sellerId,
@@ -221,6 +225,8 @@ export function buildCartReservation(
         shipping?.combinedShippingRequestId ?? null,
         ACTIVE_PROTECTION_POLICY_VERSION,
         allocatedPreorder ? 1 : 0,
+        input.fee.foundingFeeFreeUnits ?? 0,
+        input.fee.foundingFeeFreeSubtotalCents ?? 0,
       ),
     d1.prepare(`UPDATE sellers SET
       default_shipping_cents = CASE WHEN (status = 'active' OR (? = 1 AND status = 'suspended'))

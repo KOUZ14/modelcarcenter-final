@@ -8,8 +8,9 @@ import { formatMoney } from "@/lib/format";
 import { useMarketplace } from "./marketplace-provider";
 import { Icon } from "./icons";
 import { PreorderOffer } from "./preorder-offer";
+import type { PublicPreorderOffers } from "./preorder-offer";
 
-export function ProductPurchase({ product, preview = false }: { product: ProductSummary; preview?: boolean }) {
+export function ProductPurchase({ product, preview = false, preorderOffers }: { product: ProductSummary; preview?: boolean; preorderOffers?: PublicPreorderOffers }) {
   const { addToCart, toggleWishlist, wishlistHas, collector, cart, authReady } = useMarketplace();
   const [added, setAdded] = useState(false);
   const [showSticky, setShowSticky] = useState(false);
@@ -77,7 +78,7 @@ export function ProductPurchase({ product, preview = false }: { product: Product
       setAlertState("error");
     }
   }
-  if (product.availabilityType === "preorder") return preview ? <button className="button dark" disabled>Preorder</button> : <PreorderOffer product={product}/>;
+  if (product.availabilityType === "preorder") return preview ? <button className="button dark" disabled>Preorder</button> : <PreorderOffer product={product} initialOffers={preorderOffers}/>;
   if (product.availableQuantity < 1) {
     return <div className="restock-panel">
       <h2>Get a restock alert</h2>

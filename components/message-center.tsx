@@ -18,9 +18,13 @@ import { formatUtcDate, formatUtcDateTime } from "@/lib/format";
 export function MessageCenter({
   initialData,
   sellerContext = false,
+  embedded = false,
+  onDataChange,
 }: {
   initialData: MessagingCenterData;
   sellerContext?: boolean;
+  embedded?: boolean;
+  onDataChange?: (data: MessagingCenterData) => void;
 }) {
   const router=useRouter();
   const [data, setData] = useState(initialData);
@@ -29,14 +33,21 @@ export function MessageCenter({
   const [loadingConversation, setLoadingConversation] = useState("");
   const [error, setError] = useState("");
   const threadEnd = useRef<HTMLDivElement>(null);
+  const messageHistory = useRef<HTMLDivElement>(null);
   const active = data.activeConversation;
-  const conversationUrl = (id: string) => `${sellerContext ? "/store?view=messages&" : "/messages?"}conversation=${encodeURIComponent(id)}`;
+  const conversationUrl = (id: string) => `${sellerContext ? "/store?view=messages&" : "/messages?tab=messages&"}conversation=${encodeURIComponent(id)}`;
   const firstScroll = useRef(true);
 
   useEffect(() => {
+    if (embedded) {
+      if (messageHistory.current) messageHistory.current.scrollTop = messageHistory.current.scrollHeight;
+      return;
+    }
     if (sellerContext && firstScroll.current) { firstScroll.current = false; return; }
     threadEnd.current?.scrollIntoView({ block: "end" });
-  }, [active?.id, active?.messages.length, sellerContext]);
+  }, [active?.id, active?.messages.length, sellerContext, embedded]);
+
+  useEffect(() => { onDataChange?.(data); }, [data, onDataChange]);
 
   useEffect(() => {
     if (!active?.unreadCount) return;
@@ -135,8 +146,8 @@ export function MessageCenter({
   }
 
   return (
-    <div className="message-workspace">
-      <aside className="conversation-panel">
+    <div className={`message-workspace${embedded ? " message-workspace-embedded" : ""}`}>
+      {!embedded && <aside className="conversation-panel">
         <div className="conversation-panel-heading">
           <div>
             <p className="eyebrow">Inbox</p>
@@ -187,7 +198,7 @@ export function MessageCenter({
             </div>
           )}
         </div>
-      </aside>
+      </aside>}
 
       <section className="message-thread" aria-live="polite">
         {data.newConversation ? (
@@ -199,7 +210,7 @@ export function MessageCenter({
         )}
 
         {active && !data.newConversation && (
-          <div className="message-history">
+          <div className="message-history" ref={messageHistory} role="log" aria-label="Messages" tabIndex={0}>
             <p className="message-private-note">
               Private to you and {active.otherPartyName}
             </p>

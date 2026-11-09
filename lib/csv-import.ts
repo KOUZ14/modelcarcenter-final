@@ -38,17 +38,23 @@ export const inventoryCsvHeaders = [
   "keywords",
 ];
 
-export function previewInventoryCsv(csv: string) {
+type ExistingDisclosures = { sellerSku: string; missingParts?: string; defects?: string; restorationCustomization?: string };
+export function previewInventoryCsv(csv: string, existing: ExistingDisclosures[] = []) {
   if (csv.length > 5_000_000) throw new Error("CSV is larger than the 5 MB V1 import limit.");
   const rows = parseCsv(csv);
   if (!rows.length) throw new Error("CSV must contain a header and at least one product row.");
   if (rows.length > 5_000) throw new Error("CSV contains more than the 5,000-row V1 import limit.");
-  return validateImportRows(rows);
+  const bySku = new Map(existing.map(item => [item.sellerSku.toLowerCase(), item]));
+  return validateImportRows(rows.map(row => {
+    if (row.model_condition !== "new") return row;
+    const previous = bySku.get(row.seller_sku?.toLowerCase());
+    return { ...row, missing_parts: row.missing_parts || previous?.missingParts || "None known", defects: row.defects || previous?.defects || "None known", restoration_customization: row.restoration_customization || previous?.restorationCustomization || "None known" };
+  }));
 }
 
 export async function previewStoreInventoryCsv(sellerId: string, csv: string) {
-  const preview = previewInventoryCsv(csv);
-  const existing = await getDb().select({ id: products.id, sellerSku: products.sellerSku, slug: products.slug, availabilityType: products.availabilityType, reservedQuantity: products.reservedQuantity }).from(products).where(eq(products.sellerId, sellerId));
+  const existing = await getDb().select({ id: products.id, sellerSku: products.sellerSku, slug: products.slug, availabilityType: products.availabilityType, reservedQuantity: products.reservedQuantity, missingParts: products.missingParts, defects: products.defects, restorationCustomization: products.restorationCustomization }).from(products).where(eq(products.sellerId, sellerId));
+  const preview = previewInventoryCsv(csv, existing);
   const planned = planImportUpserts(existing, preview.valid);
   const errors = [...preview.errors];
   const valid = planned.filter(row => {
@@ -64,13 +70,17 @@ export async function previewStoreInventoryCsv(sellerId: string, csv: string) {
 
 export async function updateStoreStock(sellerId: string, rows: unknown) {
   if (!Array.isArray(rows) || rows.length < 1 || rows.length > 5000) throw new ValidationError("Change between 1 and 5,000 inventory items.");
-  const updates = rows.map(row => {
-    if (!row || typeof row !== "object") throw new ValidationError("Choose valid inventory rows.");
-    return { id: requiredString(row.id, "listing ID", 100), priceCents: moneyToCents(row.price, "price"), inventoryQuantity: integer(row.inventoryQuantity, "total stock", 0, 1000000) };
-  });
-  if (new Set(updates.map(row => row.id)).size !== updates.length) throw new ValidationError("Each listing can appear only once in a stock update.");
   const db = getDb();
   const existing = await db.select().from(products).where(eq(products.sellerId, sellerId));
+  const updates = rows.map(row => {
+    if (!row || typeof row !== "object") throw new ValidationError("Choose valid inventory rows.");
+    const id = requiredString(row.id, "listing ID", 100);
+    const product = existing.find(item => item.id === id);
+    if (!product) throw new ValidationError("A selected item does not belong to this store or is no longer available. Refresh inventory and retry.");
+    try { return { id, priceCents: moneyToCents(row.price, "price"), inventoryQuantity: integer(row.inventoryQuantity, "total stock", 0, 1000000) }; }
+    catch (error) { throw new ValidationError(`${product.sellerSku}: ${error instanceof Error ? error.message : "Check price and stock."}`); }
+  });
+  if (new Set(updates.map(row => row.id)).size !== updates.length) throw new ValidationError("Each listing can appear only once in a stock update.");
   for (const row of updates) {
     const product = existing.find(item => item.id === row.id);
     if (!product) throw new ValidationError("A selected listing does not belong to this store. Refresh inventory and try again.");
@@ -98,12 +108,11 @@ export async function commitInventoryCsv(sellerId: string, csv: string, retry = 
     .where(eq(sellers.id, sellerId))
     .limit(1);
   if (!seller[0]) throw new Error("Select a valid seller before importing.");
-  const preview = previewInventoryCsv(csv);
-  if (preview.errors.length) throw new Error("Fix every row error before committing this import.");
   const existing = await db
     .select({
       id: products.id,
       catalogProductId: products.catalogProductId,
+      missingParts: products.missingParts, defects: products.defects, restorationCustomization: products.restorationCustomization,
       sellerSku: products.sellerSku,
       slug: products.slug,
       inventoryQuantity: products.inventoryQuantity,
@@ -114,6 +123,8 @@ export async function commitInventoryCsv(sellerId: string, csv: string, retry = 
     })
     .from(products)
     .where(eq(products.sellerId, sellerId));
+  const preview = previewInventoryCsv(csv, existing);
+  if (preview.errors.length) throw new ValidationError("Fix every row error before saving this import.");
   const planned = planImportUpserts(existing, preview.valid);
   const d1 = getD1();
   const statements: D1PreparedStatement[] = [];

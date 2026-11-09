@@ -30,23 +30,6 @@ function enumEnv<const T extends string>(
   return value as T;
 }
 
-export function parseFeeBasisPoints(
-  value: string | undefined,
-  fallback: number,
-  name = "marketplace fee",
-) {
-  if (value == null || value.trim() === "") return fallback;
-  const normalized = value.trim();
-  if (!/^\d+$/.test(normalized)) {
-    throw new Error(`${name} must be a whole number of basis points.`);
-  }
-  const parsed = Number(normalized);
-  if (!Number.isSafeInteger(parsed) || parsed < 0 || parsed > 10_000) {
-    throw new Error(`${name} must be between 0 and 10000 basis points.`);
-  }
-  return parsed;
-}
-
 export const config = {
   marketplaceMode: enumEnv("MARKETPLACE_MODE", "test", ["test", "live"]),
   siteUrl: textEnv("SITE_URL", "http://localhost:5173").replace(/\/$/, ""),
@@ -105,27 +88,8 @@ export const config = {
     100,
     1_000_000,
   ),
-  collectorMarketplaceFeeBps: parseFeeBasisPoints(
-    process.env.COLLECTOR_MARKETPLACE_FEE_BPS,
-    850,
-    "COLLECTOR_MARKETPLACE_FEE_BPS",
-  ),
-  professionalMarketplaceFeeBps: parseFeeBasisPoints(
-    process.env.PROFESSIONAL_MARKETPLACE_FEE_BPS,
-    700,
-    "PROFESSIONAL_MARKETPLACE_FEE_BPS",
-  ),
-  foundingSellerMarketplaceFeeBps: parseFeeBasisPoints(
-    process.env.FOUNDING_SELLER_MARKETPLACE_FEE_BPS,
-    500,
-    "FOUNDING_SELLER_MARKETPLACE_FEE_BPS",
-  ),
-  foundingSellerPromotionMonths: integerEnv(
-    "FOUNDING_SELLER_PROMOTION_MONTHS",
-    6,
-    1,
-    24,
-  ),
+  // Standard rate; the admin-granted founding offer is tracked separately in D1.
+  marketplaceFeeBps: 700,
   checkoutExpirationMinutes: integerEnv("CHECKOUT_EXPIRATION_MINUTES", 30, 30, 1_440),
   shippingCountries: textEnv("SHIPPING_COUNTRIES", "US")
     .split(",")

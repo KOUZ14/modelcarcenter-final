@@ -6,6 +6,7 @@ import { requiredString, ValidationError } from "./validation";
 import { createFullRefund } from "./preorder-order-refunds";
 import { retrieveChargeRefunds } from "./stripe";
 import { legalNotice } from "./legal-notifications";
+import { trackingEvidence } from "./tracking-evidence";
 export { legalNotice, deliverLegalNotices } from "./legal-notifications";
 export { assertExternalShippingAllowed } from "./shipping-compliance";
 
@@ -78,15 +79,15 @@ export async function processShippingDelays(now=new Date()) {
       if (o.trackingNumber && o.carrier && !o.shippedAt && o.paymentStatus!=="refunded") {
         const {retrieveShippoTracking}=await import("./shippo");
         const tracking=await retrieveShippoTracking(o.carrier,o.trackingNumber);
-        const scans=[...(tracking.tracking_history??[]),...(tracking.tracking_status?[tracking.tracking_status]:[])].filter(scan=>["TRANSIT","DELIVERED"].includes(String(scan.status)));
-        const scan=scans.sort((a,b)=>Date.parse(a.status_date??'')-Date.parse(b.status_date??''))[0];
-        if (scan) {
-          if (!scan.status_date || !Number.isFinite(Date.parse(scan.status_date))) throw new Error("Carrier acceptance date needs review");
-          if (Date.parse(scan.status_date)<=Date.parse(task.created_at)) {
+        if (tracking.carrier?.toLowerCase()!==o.carrier.toLowerCase() || tracking.tracking_number!==o.trackingNumber) throw new Error("Carrier tracking identity needs review");
+        const evidence=trackingEvidence(tracking,now);
+        if (evidence.shippedAt) {
+          if (Date.parse(evidence.shippedAt)<=Date.parse(task.created_at)) {
             await db.prepare("UPDATE order_shipping_delays SET status='fulfilled',error='Carrier acceptance predates cancellation; review notice timing' WHERE id=?").bind(task.id).run();
             const {recordOrderTrackingUpdate}=await import("./shipping");await recordOrderTrackingUpdate([o.id],tracking);continue;
           }
         }
+        if (evidence.hasUndatedDispatch) throw new Error("Carrier acceptance date needs review");
       }
       if (o.shippedAt && o.paymentStatus!=="refunded") {
         await db.prepare("UPDATE order_shipping_delays SET status='fulfilled',error='Shipment occurred before cancellation; support review required' WHERE id=?").bind(task.id).run(); continue;

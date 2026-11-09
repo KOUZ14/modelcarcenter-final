@@ -35,7 +35,7 @@ export async function POST(request: Request) {
       q: `${payload.vehicleMake} ${payload.vehicleModel}`,
       scale: payload.preferredScale,
       manufacturer: payload.modelManufacturer ?? "",
-      condition: ["mint", "near_mint", "excellent", "good", "fair", "poor"].includes(payload.conditionPreference ?? "") ? payload.conditionPreference! : "",
+      condition: ["new", "mint", "near_mint", "excellent", "good", "fair", "poor"].includes(payload.conditionPreference ?? "") ? payload.conditionPreference! : "",
       pageSize: 4,
     });
     if (existing.products.length && input.continueHunt !== true) {

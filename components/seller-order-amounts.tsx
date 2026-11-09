@@ -3,6 +3,7 @@ import { sellerProcessingDeduction, sellerProceedsAfterRefund, type SellerFeeAmo
 export function SellerOrderAmounts({ order }: { order: SellerFeeAmounts & {
   currency: string; subtotalCents: number; shippingCents: number;
   marketplaceFeeBps: number; sellerProceedsCents: number | null;
+  foundingFeeFreeUnits?: number; foundingFeeFreeSubtotalCents?: number;
   refundedAmountCents: number; paymentStatus: string;
   shippingLabelCostCents?: number;
 } }) {
@@ -21,7 +22,8 @@ export function SellerOrderAmounts({ order }: { order: SellerFeeAmounts & {
     <div><dt>Sales tax collected</dt><dd>{money(order.taxCents)}</dd></div>
     <div><dt>Customer paid</dt><dd>{money(order.totalCents)}</dd></div>
     <div><dt>Sales tax withheld</dt><dd>−{money(order.taxCents)}</dd></div>
-    <div><dt>Marketplace commission ({order.marketplaceFeeBps / 100}%)</dt><dd>−{money(order.platformFeeCents)}</dd></div>
+    {!!order.foundingFeeFreeUnits && <div><dt>Founding offer ({order.foundingFeeFreeUnits} fee-free units)</dt><dd>{money(order.foundingFeeFreeSubtotalCents ?? 0)} exempt</dd></div>}
+    <div><dt>Marketplace commission ({order.marketplaceFeeBps / 100}%{order.foundingFeeFreeUnits && order.marketplaceFeeBps ? " on remaining items" : ""})</dt><dd>−{money(order.platformFeeCents)}</dd></div>
     <div><dt>Payment processing {sellerPays ? "(your deduction)" : "(paid by Model Car Center)"}</dt><dd>{sellerPays
       ? deduction == null ? "Awaiting actual Stripe fee" : `−${money(deduction)}`
       : `${money(0)} deducted from you`}</dd></div>

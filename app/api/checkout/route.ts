@@ -9,7 +9,7 @@ import { ValidationError } from "@/lib/validation";
 import { getCurrentCollector } from "@/lib/collector-auth";
 import { isCurrentPolicyVersion, POLICY_VERSION } from "@/lib/legal";
 import { resolveCheckoutShipping } from "@/lib/checkout-shipping";
-import { calculateServerTotals } from "@/lib/business";
+import { calculateSellerTotals } from "@/lib/fees";
 import { config } from "@/lib/config";
 import { assertLiveCheckoutConfigured, LiveCheckoutUnavailable } from "@/lib/production-readiness";
 import { startConsolidatedCheckout } from "@/lib/consolidated-checkout";
@@ -53,10 +53,10 @@ export async function POST(request: Request) {
     );
     const cart = {
       ...loadedCart,
-      totals: calculateServerTotals(
+      totals: calculateSellerTotals(
         loadedCart.items,
         shipping.amountCents,
-        loadedCart.fee.marketplaceFeeBps,
+        loadedCart.fee,
       ),
     };
     const reservation = await reserveCart(

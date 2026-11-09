@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { isFactorySealed, listingPhotoEvidence, photoViews, requiredPhotoViews, type EvidenceImage } from "@/lib/listing-evidence";
 import { listingFieldProps, type ListingFieldErrors } from "@/lib/listing-form-validation";
 import { ListingFieldError } from "./listing-field-error";
+import { conditionDisclosureFields, isNoKnownIssue } from "@/lib/condition-defaults";
+import "./collectible-listing-fields.css";
 import {
   coaStatuses,
   modelConditions,
@@ -33,6 +35,7 @@ type CollectibleProduct = Partial<{
 }>;
 
 const labels: Record<string, string> = {
+  new: "New",
   mint: "Mint",
   near_mint: "Near mint",
   excellent: "Excellent",
@@ -63,11 +66,16 @@ export function CollectibleListingFields({
   errors?: ListingFieldErrors;
 }) {
   const root = useRef<HTMLFieldSetElement>(null);
+  const [modelCondition, setModelCondition] = useState(initialSelectValue(product?.modelCondition, modelConditions));
+  const [answers, setAnswers] = useState<Record<string, string>>(() => Object.fromEntries(conditionDisclosureFields.map(name => [name, String(product?.[name] ?? "")])));
+  const [showExceptions, setShowExceptions] = useState(false);
+  const hasException = conditionDisclosureFields.some(name => answers[name] && !isNoKnownIssue(answers[name]));
+  const simplified = modelCondition === "new" && !showExceptions && !hasException && !conditionDisclosureFields.some(name => errors[name]);
   const initialPackaging = String(product?.packagingCondition ?? "");
   const [sealed, setSealed] = useState(isFactorySealed(initialPackaging));
   const [packagingGrade, setPackagingGrade] = useState(initialPackaging === "sealed" ? "" : initialPackaging.replace(/^sealed_/, ""));
   const packagingValue = sealed ? (packagingGrade ? `sealed_${packagingGrade}` : "sealed") : packagingGrade;
-  useEffect(() => { root.current?.dispatchEvent(new Event("listing-details-change", { bubbles: true })); }, [packagingValue]);
+  useEffect(() => { root.current?.dispatchEvent(new Event("listing-details-change", { bubbles: true })); }, [packagingValue, modelCondition, simplified, answers]);
   return (
     <fieldset className="collectible-fields" ref={root}>
       <legend>Condition of your copy</legend>
@@ -80,10 +88,8 @@ export function CollectibleListingFields({
           <select
             name="modelCondition" {...listingFieldProps(errors, "modelCondition")}
             required
-            defaultValue={initialSelectValue(
-              product?.modelCondition,
-              modelConditions,
-            )}
+            value={modelCondition}
+            onChange={event => { setModelCondition(event.target.value); setShowExceptions(false); }}
           >
             <option value="" disabled>
               Select model condition
@@ -172,6 +178,9 @@ export function CollectibleListingFields({
           />
         </label>
       </div>}
+      {modelCondition === "new" && <div className="new-condition-summary" role="status"><strong>New item</strong><p>Unused and never displayed. May have been opened for inspection or photos.</p>{simplified && <><p>No known missing parts, defects, or modifications.{sealed ? " Sealed contents have not been inspected." : ""}</p><button type="button" className="text-action" onClick={() => setShowExceptions(true)}>Add an issue or uncertainty</button></>}</div>}
+      {simplified ? conditionDisclosureFields.map(name => <input key={name} type="hidden" name={name} value={answers[name] || "None known"} />) : conditionDisclosureFields.map((name, index) => <DisclosureField key={`${modelCondition}-${name}`} name={name} label={["Missing parts", "Defects and wear", "Restoration or customization"][index]} initial={modelCondition === "new" ? answers[name] || "None known" : answers[name]} errors={errors} onChange={value => setAnswers(current => ({ ...current, [name]: value }))} />)}
+      <details className="listing-additional-details"><summary>Additional details (optional)</summary>
       <label>
         Edition or serial number
         <input
@@ -181,9 +190,6 @@ export function CollectibleListingFields({
           defaultValue={String(product?.editionSerial ?? "")}
         />
       </label>
-      <DisclosureField name="missingParts" label="Missing parts" initial={product?.missingParts} errors={errors} />
-      <DisclosureField name="defects" label="Defects and wear" initial={product?.defects} errors={errors} />
-      <DisclosureField name="restorationCustomization" label="Restoration or customization" initial={product?.restorationCustomization} errors={errors} />
       <label>
         Included accessories (optional)
         <textarea
@@ -205,21 +211,22 @@ export function CollectibleListingFields({
           defaultValue={String(product?.provenance ?? "")}
         />
       </label>
+      </details>
       {includeLegacyNotes && Boolean(product?.conditionNotes) && <label>Additional condition notes from this draft<textarea name="conditionNotes" maxLength={2000} rows={3} defaultValue={String(product?.conditionNotes)} /><span className="field-note">Your earlier notes are preserved. Keep defect, missing-part, and repair details in the answers above.</span></label>}
     </fieldset>
   );
 }
 
-function DisclosureField({ name, label, initial, errors }: { name: string; label: string; initial: unknown; errors: ListingFieldErrors }) {
+function DisclosureField({ name, label, initial, errors, onChange }: { name: string; label: string; initial: unknown; errors: ListingFieldErrors; onChange(value: string): void }) {
   const value = String(initial ?? "");
   const initialMode = !value ? "" : /^(none(?: known)?|no(?:ne)? (?:known )?(?:defects|issues|damage|missing parts|repairs)|n\/a|not applicable)[.!]?$/i.test(value) ? "None known" : value === "Not sure" ? "Not sure" : "describe";
   const [mode, setMode] = useState(initialMode);
   const [description, setDescription] = useState(initialMode === "describe" ? value : "");
   return <div className="disclosure-field" data-listing-field={name} tabIndex={-1}>
-    <label>{label}<select name={mode === "describe" ? undefined : name} required value={mode} {...listingFieldProps(errors, name)} onChange={event => setMode(event.target.value)}>
+    <label>{label}<select name={mode === "describe" ? undefined : name} required value={mode} {...listingFieldProps(errors, name)} onChange={event => { setMode(event.target.value); onChange(event.target.value === "describe" ? description : event.target.value); }}>
       <option value="" disabled>Choose an answer</option><option>None known</option><option value="describe">Yes, describe</option><option>Not sure</option>
     </select></label>
-    {mode === "describe" && <label>Describe {label.toLowerCase()}<textarea name={name} required maxLength={2000} rows={3} value={description} {...listingFieldProps(errors, name)} onChange={event => setDescription(event.target.value)} /></label>}
+    {mode === "describe" && <label>Describe {label.toLowerCase()}<textarea name={name} required maxLength={2000} rows={3} value={description} {...listingFieldProps(errors, name)} onChange={event => { setDescription(event.target.value); onChange(event.target.value); }} /></label>}
     {mode === "Not sure" && <p className="field-note">Buyers will see “Not sure” for this disclosure.</p>}
     <ListingFieldError errors={errors} name={name} />
   </div>;
