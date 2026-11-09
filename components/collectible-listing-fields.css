@@ -1,0 +1,4 @@
+.new-condition-summary { border:1px solid #bdd7ca; border-radius:10px; padding:16px; background:#f2f8f4; color:#1a3b2e; }
+.new-condition-summary p { margin:6px 0; }
+.listing-additional-details { margin:14px 0; }
+.listing-additional-details[open] { display:grid; gap:14px; }

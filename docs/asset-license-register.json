@@ -1,0 +1,203 @@
+{
+  "scope": "Bundled public image assets. Seller uploads, remote image references, fonts and future additions need separate review. File presence does not establish a license.",
+  "assets": [
+    {
+      "path": "public/apple-touch-icon.png",
+      "sha256": "388ad5d294de1d4f3b5e2326f5eb512e7274f7146fef562be6bf8ef08a9cb236",
+      "status": "owner_verification_pending",
+      "creator": null,
+      "source_url": null,
+      "license_or_permission": null,
+      "proof_reference": null,
+      "reviewed_by": null,
+      "reviewed_at": null
+    },
+    {
+      "path": "public/favicon.ico",
+      "sha256": "607f7288dcfffef02ce5db1d1845992b7d320832930c17a78267136da88065e2",
+      "status": "owner_verification_pending",
+      "creator": null,
+      "source_url": null,
+      "license_or_permission": null,
+      "proof_reference": null,
+      "reviewed_by": null,
+      "reviewed_at": null
+    },
+    {
+      "path": "public/favicon.svg",
+      "sha256": "e7bc908e245d3be8fcc72d4561d4412a47614b77c53bcd27ccf1ca822cea9d13",
+      "status": "owner_verification_pending",
+      "creator": null,
+      "source_url": null,
+      "license_or_permission": null,
+      "proof_reference": null,
+      "reviewed_by": null,
+      "reviewed_at": null
+    },
+    {
+      "path": "public/file.svg",
+      "sha256": "1e0ae4d1a1ddfa36752988647b731e4abf150c414d069ec83c96fb0aaeff0307",
+      "status": "owner_verification_pending",
+      "creator": null,
+      "source_url": null,
+      "license_or_permission": null,
+      "proof_reference": null,
+      "reviewed_by": null,
+      "reviewed_at": null
+    },
+    {
+      "path": "public/globe.svg",
+      "sha256": "d051a8c47936990a9085693d307bb7cea1bc1b6d7ed956bcbaacf674f4ec96b9",
+      "status": "owner_verification_pending",
+      "creator": null,
+      "source_url": null,
+      "license_or_permission": null,
+      "proof_reference": null,
+      "reviewed_by": null,
+      "reviewed_at": null
+    },
+    {
+      "path": "public/icon-192.png",
+      "sha256": "8f60e3a66baaa63fe547e2d8a254d64d91bb41b999bb072f3b6d06979b1d8180",
+      "status": "owner_verification_pending",
+      "creator": null,
+      "source_url": null,
+      "license_or_permission": null,
+      "proof_reference": null,
+      "reviewed_by": null,
+      "reviewed_at": null
+    },
+    {
+      "path": "public/icon-32.png",
+      "sha256": "1c21c477d167d581e500393967bb41b4e0321f00f0d4019e405867cf65d54fdd",
+      "status": "owner_verification_pending",
+      "creator": null,
+      "source_url": null,
+      "license_or_permission": null,
+      "proof_reference": null,
+      "reviewed_by": null,
+      "reviewed_at": null
+    },
+    {
+      "path": "public/icon-512.png",
+      "sha256": "a09495233e76f31fca29655a6148930a38476c854d920cea64e052c655cac714",
+      "status": "owner_verification_pending",
+      "creator": null,
+      "source_url": null,
+      "license_or_permission": null,
+      "proof_reference": null,
+      "reviewed_by": null,
+      "reviewed_at": null
+    },
+    {
+      "path": "public/images/model-car-center-icon.png",
+      "sha256": "9952a7b61388c531d32d98f18cfe129644544d1a9c9c6bbb0226763f6d61d010",
+      "status": "owner_verification_pending",
+      "creator": null,
+      "source_url": null,
+      "license_or_permission": null,
+      "proof_reference": null,
+      "reviewed_by": null,
+      "reviewed_at": null
+    },
+    {
+      "path": "public/images/model-car-center-logo-dark.svg",
+      "sha256": "128c9978de187d26bfdfc8f0a53e319152f143ad7d97081ef85190f6a92c3f81",
+      "status": "owner_verification_pending",
+      "creator": null,
+      "source_url": null,
+      "license_or_permission": null,
+      "proof_reference": null,
+      "reviewed_by": null,
+      "reviewed_at": null
+    },
+    {
+      "path": "public/images/model-car-center-logo.png",
+      "sha256": "ef275d6e55b9ff3206d7e7cb10e3d0f3984581b4bc03c3b834e07e026bf3276c",
+      "status": "owner_verification_pending",
+      "creator": null,
+      "source_url": null,
+      "license_or_permission": null,
+      "proof_reference": null,
+      "reviewed_by": null,
+      "reviewed_at": null
+    },
+    {
+      "path": "public/images/model-car-hero.png",
+      "sha256": "95362953110f1727262a6be3e3abfe1a14c2728832897001b813fef1d8ca17be",
+      "status": "owner_verification_pending",
+      "creator": null,
+      "source_url": null,
+      "license_or_permission": null,
+      "proof_reference": null,
+      "reviewed_by": null,
+      "reviewed_at": null
+    },
+    {
+      "path": "public/images/product-black-sedan.png",
+      "sha256": "bcda0fdcd1477d26c01b69fa1df757e11765d88b8b644dc41e9d937f6469190e",
+      "status": "owner_verification_pending",
+      "creator": null,
+      "source_url": null,
+      "license_or_permission": null,
+      "proof_reference": null,
+      "reviewed_by": null,
+      "reviewed_at": null
+    },
+    {
+      "path": "public/images/product-blue-supercar.png",
+      "sha256": "c3cfcb1002487f442a9fac2973fb4c07b113939e5bef10c0be0c3f6fd0c57f7c",
+      "status": "owner_verification_pending",
+      "creator": null,
+      "source_url": null,
+      "license_or_permission": null,
+      "proof_reference": null,
+      "reviewed_by": null,
+      "reviewed_at": null
+    },
+    {
+      "path": "public/images/product-red-coupe.png",
+      "sha256": "7fa38b73f1126c3c3d6fb1f5eeb7bbc89c44f340a0a6a1adbc282c7eb537b41e",
+      "status": "owner_verification_pending",
+      "creator": null,
+      "source_url": null,
+      "license_or_permission": null,
+      "proof_reference": null,
+      "reviewed_by": null,
+      "reviewed_at": null
+    },
+    {
+      "path": "public/images/product-silver-racer.png",
+      "sha256": "b1241431c8ce5cd5f7d5d11a58e1a435520afe91df4893ae4951c15a3ebf09de",
+      "status": "owner_verification_pending",
+      "creator": null,
+      "source_url": null,
+      "license_or_permission": null,
+      "proof_reference": null,
+      "reviewed_by": null,
+      "reviewed_at": null
+    },
+    {
+      "path": "public/og.png",
+      "sha256": "8f9a9cf542500a469cb6892d24b2e0d20128beeddf6c96f7c83960dcaf96babc",
+      "status": "owner_verification_pending",
+      "creator": null,
+      "source_url": null,
+      "license_or_permission": null,
+      "proof_reference": null,
+      "reviewed_by": null,
+      "reviewed_at": null
+    },
+    {
+      "path": "public/window.svg",
+      "sha256": "decf1cf7bb22b5c99c4857cfcd5718ce5465c4454166317589c83fc73df74b66",
+      "status": "owner_verification_pending",
+      "creator": null,
+      "source_url": null,
+      "license_or_permission": null,
+      "proof_reference": null,
+      "reviewed_by": null,
+      "reviewed_at": null
+    }
+  ]
+}

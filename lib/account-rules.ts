@@ -24,22 +24,13 @@ export function canFulfillSellerOrder(
   );
 }
 
-export function cartMergeDecision(saved: CartItem[], guest: CartItem[]) {
-  const savedSellerId = saved[0]?.sellerId;
-  const guestSellerId = guest[0]?.sellerId;
-  if (savedSellerId && guestSellerId && savedSellerId !== guestSellerId)
-    return "conflict" as const;
-  return "merge" as const;
-}
-
 export function mergeCartItems(saved: CartItem[], guest: CartItem[]) {
-  if (cartMergeDecision(saved, guest) === "conflict") return null;
   const combined = new Map(saved.map((item) => [item.productId, { ...item }]));
   for (const item of guest) {
     const current = combined.get(item.productId);
     combined.set(item.productId, {
       ...item,
-      quantity: Math.min((current?.quantity ?? 0) + item.quantity, 10),
+      quantity: Math.min((current?.quantity ?? 0) + item.quantity, item.availableQuantity, 10),
     });
   }
   return [...combined.values()];
@@ -92,5 +83,21 @@ export function canClaimGuestRecord(input: {
     !input.currentOwnerUserId &&
     input.authenticatedEmail.trim().toLowerCase() ===
       input.recordEmail.trim().toLowerCase()
+  );
+}
+
+export function canClaimProfessionalStore(input: {
+  authenticatedEmail: string;
+  emailVerified: boolean;
+  storeEmail: string;
+  storeType: string;
+  currentOwnerUserId?: string | null;
+}) {
+  return (
+    input.emailVerified &&
+    input.storeType === "professional" &&
+    !input.currentOwnerUserId &&
+    input.authenticatedEmail.trim().toLowerCase() ===
+      input.storeEmail.trim().toLowerCase()
   );
 }

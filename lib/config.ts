@@ -1,4 +1,15 @@
+// The local beta launcher defines this marker at compile time. Cloudflare's
+// development bindings can independently load .env.local, so clearing the
+// parent process alone is not enough to suppress external integrations.
+const localBeta = process.env.NODE_ENV !== "production" && process.env.MCC_BETA_DEMO === "true";
+const betaOverrides: Record<string, string> = {
+  SITE_URL: "http://127.0.0.1:5173", MARKETPLACE_MODE: "test", ADMIN_DEV_BYPASS: "false",
+  STRIPE_SECRET_KEY: "", STRIPE_WEBHOOK_SECRET: "", STRIPE_CONNECT_WEBHOOK_SECRET: "",
+  SHIPPO_API_KEY: "", SHIPPO_WEBHOOK_SECRET: "", SHIPPO_HMAC_SECRET: "", RESEND_API_KEY: "", GOOGLE_PLACES_API_KEY: "",
+};
+
 function textEnv(name: string, fallback = "") {
+  if (localBeta && Object.hasOwn(betaOverrides, name)) return betaOverrides[name];
   return process.env[name]?.trim() || fallback;
 }
 
@@ -7,16 +18,78 @@ function integerEnv(name: string, fallback: number, min: number, max: number) {
   return Number.isInteger(parsed) && parsed >= min && parsed <= max ? parsed : fallback;
 }
 
+function enumEnv<const T extends string>(
+  name: string,
+  fallback: T,
+  allowed: readonly T[],
+) {
+  const value = textEnv(name, fallback);
+  if (!allowed.includes(value as T)) {
+    throw new Error(`${name} must be one of: ${allowed.join(", ")}.`);
+  }
+  return value as T;
+}
+
 export const config = {
+  marketplaceMode: enumEnv("MARKETPLACE_MODE", "test", ["test", "live"]),
   siteUrl: textEnv("SITE_URL", "http://localhost:5173").replace(/\/$/, ""),
-  supportEmail: textEnv("SUPPORT_EMAIL", "help@modelcarcenter.com"),
-  emailFrom: textEnv("EMAIL_FROM", "Model Car Center <orders@modelcarcenter.com>"),
+  reportingPhone: textEnv("REPORTING_PHONE"),
+  dmcaRegistered: textEnv("DMCA_AGENT_REGISTERED") === "true",
+  dmcaRegistrationExpiresAt: textEnv("DMCA_AGENT_REGISTRATION_EXPIRES_AT"),
+  dmcaAgentName: textEnv("DMCA_AGENT_NAME"),
+  dmcaAgentEmail: textEnv("DMCA_AGENT_EMAIL"),
+  dmcaAgentAddress: textEnv("DMCA_AGENT_ADDRESS"),
+  dmcaAgentPhone: textEnv("DMCA_AGENT_PHONE"),
+  supportEmail: textEnv("SUPPORT_EMAIL", "support@modelcarcenter.com"),
+  businessLegalName: textEnv("BUSINESS_LEGAL_NAME", "KM Venture Group"),
+  businessMailingAddress: textEnv("BUSINESS_MAILING_ADDRESS"),
+  businessJurisdiction: textEnv("BUSINESS_JURISDICTION"),
+  emailFrom: textEnv("EMAIL_FROM", "Model Car Center <support@modelcarcenter.com>"),
   resendApiKey: textEnv("RESEND_API_KEY"),
   betterAuthSecret: textEnv("BETTER_AUTH_SECRET"),
   stripeSecretKey: textEnv("STRIPE_SECRET_KEY"),
   stripeWebhookSecret: textEnv("STRIPE_WEBHOOK_SECRET"),
+  stripeConnectWebhookSecret: textEnv("STRIPE_CONNECT_WEBHOOK_SECRET"),
   stripeApiVersion: textEnv("STRIPE_API_VERSION", "2026-02-25.clover"),
-  marketplaceFeeBps: integerEnv("MARKETPLACE_FEE_BPS", 1000, 0, 10_000),
+  stripeShippingTaxCode: textEnv(
+    "STRIPE_SHIPPING_TAX_CODE",
+    "txcd_92010001",
+  ),
+  stripeTaxBehavior: enumEnv(
+    "STRIPE_TAX_BEHAVIOR",
+    "exclusive",
+    ["exclusive", "inclusive"] as const,
+  ),
+  shippoApiKey: textEnv("SHIPPO_API_KEY"),
+  shippoWebhookSecret: textEnv("SHIPPO_WEBHOOK_SECRET"),
+  shippoHmacSecret: textEnv("SHIPPO_HMAC_SECRET"),
+  shippoApiVersion: textEnv("SHIPPO_API_VERSION", "2018-02-08"),
+  shippoInsuranceThresholdCents: integerEnv(
+    "SHIPPO_INSURANCE_THRESHOLD_CENTS",
+    25_000,
+    0,
+    10_000_000,
+  ),
+  shippoSignatureThresholdCents: integerEnv(
+    "SHIPPO_SIGNATURE_THRESHOLD_CENTS",
+    75_000,
+    0,
+    10_000_000,
+  ),
+  shippoQuoteExpirationMinutes: integerEnv(
+    "SHIPPO_QUOTE_EXPIRATION_MINUTES",
+    20,
+    5,
+    1_440,
+  ),
+  shippoMaxLabelCostCents: integerEnv(
+    "SHIPPO_MAX_LABEL_COST_CENTS",
+    10_000,
+    100,
+    1_000_000,
+  ),
+  // Standard rate; the admin-granted founding offer is tracked separately in D1.
+  marketplaceFeeBps: 700,
   checkoutExpirationMinutes: integerEnv("CHECKOUT_EXPIRATION_MINUTES", 30, 30, 1_440),
   shippingCountries: textEnv("SHIPPING_COUNTRIES", "US")
     .split(",")

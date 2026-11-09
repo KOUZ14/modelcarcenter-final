@@ -1,0 +1,5 @@
+.seller-shipping-deadline { padding: 14px 16px; border: 1px solid var(--line); border-left: 3px solid var(--accent); background: #faf9f5; }
+.seller-shipping-deadline .handling-badge { margin: 0 0 8px; font-size: 12px; letter-spacing: 0; text-transform: none; }
+.seller-shipping-deadline p { margin: 0 0 6px; font-size: 13px; line-height: 1.5; }
+.seller-shipping-deadline p strong { color: var(--ink); font-size: 15px; }
+.seller-shipping-deadline a { display: inline-flex; align-items: center; min-height: 44px; font-size: 13px; text-decoration: underline; text-underline-offset: 3px; }

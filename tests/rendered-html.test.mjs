@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile, readdir } from "node:fs/promises";
+import { access, readFile, readdir } from "node:fs/promises";
 import { extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
@@ -14,11 +14,55 @@ async function collectJavaScript(directory) {
   return files;
 }
 
+test("RSC preload manifests only reference emitted client assets", async () => {
+  for (const relative of ["server/__vite_rsc_assets_manifest.js", "server/ssr/__vite_rsc_assets_manifest.js"]) {
+    const { default: manifest } = await import(new URL(`../dist/${relative}`, import.meta.url));
+    const urls = new Set();
+    function visit(value) {
+      if (typeof value === "string" && value.startsWith("/_next/")) urls.add(value);
+      else if (value && typeof value === "object") Object.values(value).forEach(visit);
+    }
+    visit(manifest);
+    assert.ok(urls.size > 0, `${relative}: asset URLs are present`);
+    for (const url of urls) {
+      const asset = new URL(`../dist/client${url}`, import.meta.url);
+      await assert.doesNotReject(access(asset), `${relative}: missing client asset ${url}`);
+    }
+  }
+});
+
 test("the built artifact contains the real marketplace and no starter preview marker", async () => {
   const dist = fileURLToPath(new URL("../dist/", import.meta.url));
   const files = await collectJavaScript(dist);
   const source = (await Promise.all(files.map((file) => readFile(file, "utf8")))).join("\n");
-  assert.match(source, /Every seller\./i);
+  assert.match(source, /Shop model cars from stores and collectors\./i);
   assert.match(source, /Find model cars from independent sellers in one place/i);
+  assert.match(source, /Browse every live model car listing from independent sellers and collectors\./i);
+  assert.match(source, /\/marketplace/i);
+  assert.match(source, /Verified marketplace record/i);
+  assert.match(source, /Completed transactions/i);
+  assert.match(source, /On-time shipment/i);
+  assert.match(source, /Seller reviews/i);
   assert.doesNotMatch(source, /codex-preview/i);
+});
+
+test("the worker applies baseline browser security headers and logs scheduled maintenance", async () => {
+  const worker = await readFile(
+    new URL("../worker/index.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(worker, /Content-Security-Policy/);
+  assert.match(worker, /Strict-Transport-Security/);
+  assert.match(worker, /X-Content-Type-Options/);
+  assert.match(worker, /Scheduled marketplace maintenance completed/);
+});
+
+test("the production catalog correction is conditional and matches the verified listing", async () => {
+  const migration = await readFile(
+    new URL("../drizzle/0013_production_catalog_correction.sql", import.meta.url),
+    "utf8",
+  );
+  assert.match(migration, /ut-models-mclaren-f1-lm-orange-124341-ede41d/);
+  assert.match(migration, /WHERE `id` = 'ede41d23-6367-4444-96e3-8577d6422fcb'/);
+  assert.match(migration, /AND `title` = 'UT Models Mclaren F1 LM - Orange'/);
 });

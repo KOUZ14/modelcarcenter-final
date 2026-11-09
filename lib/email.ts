@@ -1,5 +1,12 @@
 import { config } from "./config";
+import { escapeHtml, renderEmailHtml } from "./email-template";
 import type { ShippingAddress } from "./types";
+import { unsubscribeUrl } from "./email-preferences";
+import { getDb } from "@/db";
+import { communitySubscribers, wantedRequests } from "@/db/schema";
+import { and, eq, ne } from "drizzle-orm";
+
+export { escapeHtml, renderEmailHtml } from "./email-template";
 
 type SendEmailInput = {
   to: string;
@@ -7,16 +14,8 @@ type SendEmailInput = {
   html: string;
   text: string;
   idempotencyKey?: string;
+  unsubscribeUrl?: string;
 };
-
-function escapeHtml(value: unknown) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
 
 function money(cents: number, currency = "usd") {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: currency.toUpperCase() }).format(cents / 100);
@@ -34,11 +33,15 @@ function addressText(shipping: ShippingAddress) {
 }
 
 export async function sendEmail(input: SendEmailInput) {
+  if (input.unsubscribeUrl && (!config.businessLegalName || !config.businessMailingAddress)) {
+    return { sent: false as const, reason: "business_details_not_configured" as const };
+  }
   if (!config.resendApiKey) {
-    console.info(`[email skipped: RESEND_API_KEY unavailable] ${input.subject} -> ${input.to}`);
+    console.info("Email delivery skipped: RESEND_API_KEY unavailable.");
     return { sent: false as const, reason: "not_configured" as const };
   }
   const response = await fetch("https://api.resend.com/emails", {
+    signal: AbortSignal.timeout(20_000),
     method: "POST",
     headers: {
       Authorization: `Bearer ${config.resendApiKey}`,
@@ -51,8 +54,18 @@ export async function sendEmail(input: SendEmailInput) {
       to: [input.to],
       reply_to: config.supportEmail,
       subject: input.subject,
-      html: input.html,
-      text: input.text,
+      html: renderEmailHtml(
+        input.subject,
+        input.html,
+        config.siteUrl,
+        config.supportEmail,
+        { unsubscribeUrl: input.unsubscribeUrl, businessName: config.businessLegalName, mailingAddress: config.businessMailingAddress },
+      ),
+      text: [input.text, input.unsubscribeUrl ? `Unsubscribe from optional emails: ${input.unsubscribeUrl}` : "", config.businessLegalName, config.businessMailingAddress].filter(Boolean).join("\n\n"),
+      ...(input.unsubscribeUrl ? { headers: {
+        "List-Unsubscribe": `<${input.unsubscribeUrl.replace("/unsubscribe?", "/api/unsubscribe?")}>`,
+        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+      } } : {}),
     }),
   });
   if (!response.ok) {
@@ -104,32 +117,50 @@ export type EmailOrder = {
   currency: string;
   totalCents: number;
   shippingAddress: ShippingAddress;
-  items: Array<{ title: string; quantity: number; unitPriceCents: number }>;
+  items: Array<{
+    title: string;
+    quantity: number;
+    unitPriceCents: number;
+    availabilityType?: "in_stock" | "preorder";
+    releaseDate?: string | null;
+  }>;
 };
 
 function orderItemsHtml(order: EmailOrder) {
-  return order.items.map((item) => `<li>${escapeHtml(item.title)} × ${item.quantity} — ${escapeHtml(money(item.unitPriceCents * item.quantity, order.currency))}</li>`).join("");
+  return order.items.map((item) => `<li>${escapeHtml(item.title)} × ${item.quantity} - ${escapeHtml(money(item.unitPriceCents * item.quantity, order.currency))}${item.availabilityType === "preorder" && item.releaseDate ? `<br><strong>Preorder · Expected release ${escapeHtml(formatReleaseDate(item.releaseDate))}</strong>` : ""}</li>`).join("");
 }
 
 function orderItemsText(order: EmailOrder) {
-  return order.items.map((item) => `${item.title} x ${item.quantity} — ${money(item.unitPriceCents * item.quantity, order.currency)}`).join("\n");
+  return order.items.map((item) => `${item.title} x ${item.quantity} - ${money(item.unitPriceCents * item.quantity, order.currency)}${item.availabilityType === "preorder" && item.releaseDate ? `\nPreorder · Expected release ${formatReleaseDate(item.releaseDate)}` : ""}`).join("\n");
+}
+
+function formatReleaseDate(value: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(`${value}T12:00:00.000Z`));
 }
 
 export async function sendPaidOrderEmails(order: EmailOrder) {
   const address = addressText(order.shippingAddress);
+  const hasPreorder = order.items.some(
+    (item) => item.availabilityType === "preorder",
+  );
   await Promise.allSettled([
     sendEmail({
       to: order.sellerEmail,
       subject: `New paid order ${order.orderNumber}`,
-      html: `<h1>New paid order</h1><p>Order <strong>${escapeHtml(order.orderNumber)}</strong> is ready to fulfill.</p><ul>${orderItemsHtml(order)}</ul><h2>Ship to</h2><pre>${escapeHtml(address)}</pre><p>Total paid: ${escapeHtml(money(order.totalCents, order.currency))}</p><p>Please fulfill the order and send tracking to ${escapeHtml(config.supportEmail)}.</p>`,
-      text: `New paid order ${order.orderNumber}\n\n${orderItemsText(order)}\n\nShip to:\n${address}\n\nTotal paid: ${money(order.totalCents, order.currency)}\n\nSend tracking to ${config.supportEmail}.`,
+      html: `<h1>New paid order</h1><p>Order <strong>${escapeHtml(order.orderNumber)}</strong> is paid${hasPreorder ? " and includes a preorder. Hold that item until its release date." : " and ready to fulfill."}</p><ul>${orderItemsHtml(order)}</ul><h2>Ship to</h2><pre>${escapeHtml(address)}</pre><p>Total paid: ${escapeHtml(money(order.totalCents, order.currency))}</p><p>Please fulfill on schedule and send tracking to ${escapeHtml(config.supportEmail)}.</p>`,
+      text: `New paid order ${order.orderNumber}${hasPreorder ? " includes a preorder. Hold that item until its release date." : " is ready to fulfill."}\n\n${orderItemsText(order)}\n\nShip to:\n${address}\n\nTotal paid: ${money(order.totalCents, order.currency)}\n\nSend tracking to ${config.supportEmail}.`,
       idempotencyKey: `seller-paid-${order.orderNumber}`,
     }),
     sendEmail({
       to: order.buyerEmail,
       subject: `Order confirmation ${order.orderNumber}`,
-      html: `<h1>Thanks for your order</h1><p>Your order <strong>${escapeHtml(order.orderNumber)}</strong> from ${escapeHtml(order.sellerName)} is paid.</p><ul>${orderItemsHtml(order)}</ul><h2>Shipping address</h2><pre>${escapeHtml(address)}</pre><p>Total: ${escapeHtml(money(order.totalCents, order.currency))}</p><p>Questions? Contact ${escapeHtml(config.supportEmail)}.</p>`,
-      text: `Order ${order.orderNumber} from ${order.sellerName} is paid.\n\n${orderItemsText(order)}\n\nShipping address:\n${address}\n\nTotal: ${money(order.totalCents, order.currency)}\nQuestions: ${config.supportEmail}`,
+      html: `<h1>Thanks for your order</h1><p>Your order <strong>${escapeHtml(order.orderNumber)}</strong> from ${escapeHtml(order.sellerName)} is paid.${hasPreorder ? " Preorder items will ship after the expected release date shown below; release dates may change." : ""}</p><ul>${orderItemsHtml(order)}</ul><h2>Shipping address</h2><pre>${escapeHtml(address)}</pre><p>Total: ${escapeHtml(money(order.totalCents, order.currency))}</p><h2>Tracking and support</h2><p>Keep this email and your order number. We will email carrier tracking to this address when it is available. Use those tracking details to follow your delivery; no account or sign-in is needed.</p><p>For help, reply to this email or contact ${escapeHtml(config.supportEmail)} from your checkout email and include order ${escapeHtml(order.orderNumber)}. Guest orders receive support without an account.</p>`,
+      text: `Order ${order.orderNumber} from ${order.sellerName} is paid.${hasPreorder ? " Preorder items will ship after the expected release date; release dates may change." : ""}\n\n${orderItemsText(order)}\n\nShipping address:\n${address}\n\nTotal: ${money(order.totalCents, order.currency)}\n\nTracking and support: Keep this email and your order number. We will email carrier tracking to this address when it is available. Use those tracking details to follow your delivery; no account or sign-in is needed.\nFor help, reply to this email or contact ${config.supportEmail} from your checkout email and include order ${order.orderNumber}. Guest orders receive support without an account.`,
       idempotencyKey: `buyer-paid-${order.orderNumber}`,
     }),
   ]);
@@ -146,15 +177,42 @@ export async function sendShipmentEmail(input: { buyerEmail: string; orderNumber
   });
 }
 
+export async function sendLabelCreatedEmail(input: {
+  buyerEmail: string;
+  orderNumber: string;
+  carrier: string;
+  trackingNumber: string;
+  trackingUrl?: string | null;
+}) {
+  const trackingUrl = input.trackingUrl || trackingLink(input.carrier, input.trackingNumber);
+  return sendEmail({
+    to: input.buyerEmail,
+    subject: `Shipping label created for ${input.orderNumber}`,
+    html: `<h1>Your order is being prepared</h1><p>${escapeHtml(input.carrier)} tracking has been created: <a href="${escapeHtml(trackingUrl)}">${escapeHtml(input.trackingNumber)}</a>.</p><p>The carrier may show “label created” until it receives the package. Questions? Contact ${escapeHtml(config.supportEmail)}.</p>`,
+    text: `A ${input.carrier} shipping label was created for order ${input.orderNumber}. Tracking: ${input.trackingNumber}\n${trackingUrl}\nThe carrier may show “label created” until it receives the package. Questions: ${config.supportEmail}`,
+    idempotencyKey: `label-${input.orderNumber}-${input.trackingNumber}`,
+  });
+}
+
 export async function sendModelHuntMatchEmail(input: { email: string; referenceCode: string; requestedModel: string; productTitle: string; sellerName: string; priceCents: number; currency: string; productSlug: string }) {
+  const active = await getDb().select({ id: wantedRequests.id }).from(wantedRequests).where(and(eq(wantedRequests.referenceCode, input.referenceCode), eq(wantedRequests.collectorEmail, input.email), ne(wantedRequests.status, "closed"))).limit(1);
+  if (!active.length) return { sent: false as const, reason: "unsubscribed" as const };
   const url = `${config.siteUrl}/products/${encodeURIComponent(input.productSlug)}`;
   return sendEmail({
     to: input.email,
+    unsubscribeUrl: await unsubscribeUrl("hunt", input.referenceCode),
     subject: `Possible match for ${input.referenceCode}`,
     html: `<h1>We found a possible match</h1><p>You asked us to hunt for ${escapeHtml(input.requestedModel)}.</p><p><strong>${escapeHtml(input.productTitle)}</strong><br>${escapeHtml(input.sellerName)}<br>${escapeHtml(money(input.priceCents, input.currency))}</p><p><a href="${escapeHtml(url)}">View this model</a></p>`,
     text: `We found a possible match for ${input.requestedModel}: ${input.productTitle} from ${input.sellerName}, ${money(input.priceCents, input.currency)}. ${url}`,
     idempotencyKey: `hunt-${input.referenceCode}-${input.productSlug}`,
   });
+}
+
+/** Use this entry point for community mail; it checks the current subscription before each send. */
+export async function sendCommunityUpdateEmail(input: { subscriberId: string; subject: string; html: string; text: string; campaignId: string }) {
+  const subscriber = (await getDb().select().from(communitySubscribers).where(eq(communitySubscribers.id, input.subscriberId)).limit(1))[0];
+  if (!subscriber) return { sent: false as const, reason: "unsubscribed" as const };
+  return sendEmail({ to: subscriber.email, subject: input.subject, html: input.html, text: input.text, unsubscribeUrl: await unsubscribeUrl("community", subscriber.id), idempotencyKey: `community-${input.campaignId}-${subscriber.id}` });
 }
 
 function trackingLink(carrier: string, trackingNumber: string) {

@@ -1,0 +1,46 @@
+name: Security and regression checks
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "17 10 * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      WRANGLER_WRITE_LOGS: "false"
+      WRANGLER_LOG_PATH: .wrangler/logs
+      MINIFLARE_REGISTRY_PATH: .wrangler/registry
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: "22"
+          package-manager-cache: false
+      - name: Scan full Git history for secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location --output "$RUNNER_TEMP/gitleaks.tar.gz" https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  $RUNNER_TEMP/gitleaks.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/gitleaks.tar.gz" -C "$RUNNER_TEMP" gitleaks
+          "$RUNNER_TEMP/gitleaks" git . --redact --no-banner --log-opts="--all"
+      - run: npm ci --ignore-scripts --offline=false --prefer-offline=false
+      - run: node scripts/audit-dependencies.mjs
+      - run: npx --no-install tsc --noEmit
+      - run: node node_modules/drizzle-kit/bin.cjs check
+      - run: npx --no-install eslint . --ignore-pattern dist --ignore-pattern .next
+      - run: npx --no-install vinext build
+      - run: node --experimental-loader ./scripts/cloudflare-validation-loader.mjs scripts/validate-artifact.mjs dist/server/index.js dist/.openai/hosting.json
+      - run: node --experimental-strip-types --test --experimental-test-isolation=none tests/*.test.mjs
+      - run: node scripts/verify-security-runtime.mjs

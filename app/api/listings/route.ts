@@ -5,9 +5,10 @@ import {
   refreshCollectorStripe,
   saveCollectorListing,
   startCollectorStripeOnboarding,
-  submitCollectorListing,
+  publishCollectorListing,
 } from "@/lib/listings";
-import { requiredString, ValidationError } from "@/lib/validation";
+import { cleanText, requiredString, ValidationError } from "@/lib/validation";
+import { isCurrentPolicyVersion } from "@/lib/legal";
 
 export const dynamic = "force-dynamic";
 
@@ -25,10 +26,14 @@ export async function POST(request: Request) {
         productId: typeof payload.productId === "string" && payload.productId ? payload.productId : null,
       }) });
     }
-    if (action === "submit") {
-      return Response.json({ ok: true, ...await submitCollectorListing(
+    if (action === "publish" || action === "submit") {
+      if (!isCurrentPolicyVersion(payload.sellerTermsVersion)) {
+        throw new ValidationError("Accept the current Seller Terms before publishing.");
+      }
+      return Response.json({ ok: true, ...await publishCollectorListing(
         collector.user.id,
         requiredString(payload.productId, "productId", 100),
+        requiredString(payload.sellerTermsVersion, "sellerTermsVersion", 40),
       ) });
     }
     if (action === "deactivate") {
@@ -36,7 +41,20 @@ export async function POST(request: Request) {
       return Response.json({ ok: true });
     }
     if (action === "stripe_onboarding") {
-      return Response.json({ ok: true, ...await startCollectorStripeOnboarding(collector.user, collector.profile) });
+      if (!isCurrentPolicyVersion(payload.sellerTermsVersion)) {
+        throw new ValidationError("Accept the current Seller Terms before connecting your payment method.");
+      }
+      return Response.json({ ok: true, ...await startCollectorStripeOnboarding(
+        collector.user,
+        collector.profile,
+        requiredString(payload.sellerTermsVersion, "sellerTermsVersion", 40),
+        payload.productId ? {
+          productId: requiredString(payload.productId, "productId", 100),
+          collectionItem: cleanText(payload.collectionItem, 100),
+          selling: cleanText(payload.selling, 40),
+          minimum: cleanText(payload.minimum, 40),
+        } : undefined,
+      ) });
     }
     if (action === "refresh_stripe") {
       return Response.json({ ok: true, ...await refreshCollectorStripe(collector.user.id) });

@@ -1,0 +1,23 @@
+title = "Model Car Center secret scanning"
+[extend]
+useDefault = true
+
+# Reviewed deterministic fixtures only. Do not ignore test files as a category.
+[[allowlists]]
+description = "Nonfunctional credentials in specific payment/auth test fixtures"
+condition = "AND"
+paths = ['''(^|/)tests/(promotions|privacy-controls|production-readiness)\.test\.mjs$''']
+regexTarget = "secret"
+regexes = [
+  '''^sk_test_promotions$''',
+  '''^privacy-test-secret-32-characters-long$''',
+  '''^shippo_(live|test)_fixture_1234567890$''',
+  '''^re_fixture_12345678901234567890$''',
+]
+
+[[allowlists]]
+description = "Tax calendar identifiers are not credentials"
+condition = "AND"
+paths = ['''(^|/)tests/tax-admin(-api)?\.test\.mjs$''']
+regexTarget = "secret"
+regexes = ['''^(2022|2026)-(federal|ca)-estimate-q[1-4]$''']

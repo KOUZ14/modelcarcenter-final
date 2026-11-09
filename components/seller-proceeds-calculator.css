@@ -1,0 +1,29 @@
+.seller-proceeds-calculator { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-areas: "heading heading" "inputs result" "assumptions result"; gap: 20px 32px; align-items: start; margin: 32px 0; padding: 24px; border: 1px solid #d9d6ce; border-radius: 8px; background: #f2f1eb; }
+.seller-calculator-heading { grid-area: heading; }
+.seller-calculator-heading h2 { margin-bottom: 12px; font-size: clamp(24px, 3vw, 32px); }
+.seller-calculator-heading > p:not(.eyebrow) { color: var(--muted); font-size: 15px; line-height: 1.5; }
+.seller-calculator-primary { grid-area: inputs; }
+.seller-proceeds-calculator label { display: grid; align-content: start; gap: 8px; font-size: 14px; font-weight: 600; min-width: 0; }
+.seller-proceeds-calculator :is(input, select) { width: 100%; min-width: 0; min-height: 48px; padding: 10px; font-size: 16px; border: 1px solid #aaa69c; border-radius: 4px; background: white; }
+.seller-proceeds-calculator .seller-calculator-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: end; gap: 12px; margin-top: 16px; }
+.seller-calculator-result { grid-area: result; padding: 20px; background: white; border: 1px solid #d9d6ce; border-radius: 6px; min-width: 0; }
+.seller-proceeds-calculator .seller-proceeds-result { display: grid; gap: 6px; border: 0; padding: 0; margin: 0 0 12px; font-size: 14px; }
+.seller-proceeds-calculator .seller-proceeds-result strong { font-size: clamp(32px, 4vw, 40px); line-height: 1.2; font-variant-numeric: tabular-nums; }
+.seller-calculator-note, .seller-calculator-assumption-note { font-size: 13px; line-height: 1.55; color: var(--muted); }
+.seller-calculator-primary > .seller-calculator-note { margin-top: 8px; }
+.seller-calculator-assumption-note { margin-top: 12px; }
+.seller-proceeds-calculator summary { cursor: pointer; min-height: 44px; padding-block: 12px; font-size: 14px; font-weight: 600; line-height: 1.5; }
+.seller-calculator-breakdown { margin-top: 12px; border-top: 1px solid #dedbd3; }
+.seller-calculator-breakdown dl { display: grid; gap: 10px; font-size: 14px; line-height: 1.5; }
+.seller-calculator-breakdown dl > div { display: grid; grid-template-columns: minmax(0, 1fr) max-content; gap: 12px; align-items: baseline; }
+.seller-calculator-breakdown dt { min-width: 0; color: var(--muted); }
+.seller-calculator-breakdown dd { margin: 0; text-align: right; white-space: nowrap; overflow-wrap: normal; font-variant-numeric: tabular-nums; }
+.seller-calculator-breakdown dl > div:nth-child(3) { border-bottom: 1px solid #dedbd3; padding-bottom: 10px; }
+.seller-calculator-assumptions { grid-area: assumptions; border-top: 1px solid #d9d6ce; min-width: 0; }
+.seller-calculator-assumption-fields { display: grid; gap: 16px; padding-top: 4px; }
+.seller-proceeds-calculator .seller-calculator-assumptions > p { font-size: 13px; line-height: 1.6; color: var(--muted); margin: 16px 0 0; }
+
+@media (max-width: 700px) {
+  .seller-proceeds-calculator { grid-template-columns: minmax(0, 1fr); grid-template-areas: "heading" "inputs" "result" "assumptions"; padding: 18px 16px; gap: 16px; margin-block: 24px; }
+  .seller-calculator-result { padding: 16px; }
+}

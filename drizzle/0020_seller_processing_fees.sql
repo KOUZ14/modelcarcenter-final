@@ -1,0 +1,1 @@
+ALTER TABLE `orders` ADD `processing_fee_payer` text DEFAULT 'platform' NOT NULL;

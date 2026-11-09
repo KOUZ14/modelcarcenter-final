@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX `checkout_reservations_shipping_quote_unique` ON `checkout_reservations` (`checkout_shipping_quote_id`);

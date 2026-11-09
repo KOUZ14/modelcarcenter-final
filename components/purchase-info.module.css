@@ -1,0 +1,30 @@
+.summary { margin: var(--space-4) 0; border: 1px solid #ddd8d0; border-radius: 8px; padding: var(--space-4); background: #faf9f6; }
+.summary dl { margin: 0; display: grid; gap: var(--space-3); }
+.summary dl > div { display: grid; grid-template-columns: 105px minmax(0, 1fr); gap: var(--space-3); }
+.summary dt { color: #5b5752; }
+.summary dd { margin: 0; }
+.summary p { font-size: .9rem; line-height: 1.55; margin: var(--space-3) 0 0; }
+.summary a { text-decoration: underline; text-underline-offset: 3px; }
+.summary small { display: block; margin-top: var(--space-1); }
+.summary.compactSummary { margin: 0; padding: 12px; border-radius: 0; }
+.compactSummary > strong { font-size: 13px; line-height: 1.5; }
+.compactSummary p { font-size: 13px; }
+.policyDetails > summary { display: list-item; min-height: 44px; padding: 12px 0 0; font-size: 13px; font-weight: 600; line-height: 1.5; cursor: pointer; }
+.summary blockquote { margin: 8px 0; padding-left: 12px; border-left: 2px solid var(--line); font-size: .9rem; line-height: 1.55; white-space: pre-line; }
+.sellerLine { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); font-size: .85rem; }
+.sellerLine p { flex: 1; min-width: 0; margin: 0; color: var(--muted); overflow-wrap: anywhere; }
+.sellerLine a, .essentials a { text-decoration: underline; text-underline-offset: 3px; }
+.messageSeller { display: inline-flex; align-items: center; min-height: 44px; white-space: nowrap; }
+.purchaseInfo { margin-top: var(--space-5); }
+.essentials { display: grid; gap: var(--space-3); font-size: .85rem; }
+.essentials p { margin: 0; line-height: 1.55; }
+.listingDetails { margin-top: var(--space-4); border-top: 1px solid var(--line); }
+.listingDetails > summary { padding: var(--space-3) 0; font-size: .85rem; font-weight: 600; cursor: pointer; min-height: 44px; line-height: 1.5; }
+.listingDetails > .summary { margin: 0 0 var(--space-2); }
+.evidence { padding: 1rem; border-left: 3px solid #9b7628; background: #fbf8f0; }
+.evidence ul { padding-left: 1.2rem; }
+.photoLabels { padding: .7rem; margin: .5rem; border: 1px solid #d9d3c9; min-width: 0; }
+.photoLabels legend { font-size: .85rem; font-weight: 600; }
+.photoLabels label { display: flex; align-items: center; gap: .5rem; min-height: 36px; font-size: .8rem; line-height: 1.3; }
+.photoLabels input { width: 17px !important; height: 17px; flex: 0 0 17px; }
+@media (max-width: 480px) { .summary { padding: var(--space-4); margin: var(--space-4) 0; } .summary dl > div { grid-template-columns: 95px minmax(0, 1fr); gap: var(--space-3); } }

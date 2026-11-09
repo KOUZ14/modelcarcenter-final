@@ -1,0 +1,52 @@
+.inventory-workspace { max-width: 1500px; }
+.inventory-search { display:flex; flex-wrap:wrap; gap:12px; align-items:end; }
+.inventory-search label { display:grid; gap:6px; font-size:.85rem; font-weight:600; }
+.inventory-search label:first-child { flex:1; min-width:240px; }
+.inventory-search input,.inventory-search select { min-height:42px; border:1px solid #cbd5e1; border-radius:8px; padding:9px 12px; background:white; color:#17202a; }
+.store-setup-notice,.new-condition-summary { border:1px solid #bdd7ca; border-radius:10px; padding:16px; background:#f2f8f4; color:#1a3b2e; }
+.store-setup-notice ul { display:flex; flex-wrap:wrap; gap:8px 24px; margin:12px 0; padding-left:20px; }
+.store-setup-notice p,.new-condition-summary p { margin:6px 0; }
+.inventory-workspace td small { display:block; margin-top:5px; }
+.seller-workspace .inventory-workspace .store-inventory-panel th:first-child,.seller-workspace .inventory-workspace .store-inventory-panel td:first-child { width:38px; min-width:38px; }
+.inventory-workspace input[type=checkbox] { width:18px; height:18px; accent-color:#223b31; }
+.inventory-selection,.inventory-pagination { display:flex; align-items:center; flex-wrap:wrap; gap:16px; padding:12px 0; }
+.inventory-pagination { justify-content:center; }
+.inventory-pagination button { padding:8px 16px; border:1px solid #cbd5e1; border-radius:6px; }
+.inventory-workspace .seller-item-more { min-width:180px; }
+.inventory-workspace .seller-photo-status { border:0; background:transparent; padding:0; text-align:left; text-decoration:underline; cursor:pointer; }
+.seller-publish-checklist ul { padding-left:20px; }
+.seller-publish-checklist li { margin:8px 0; }
+.seller-publish-checklist .text-action { text-align:left; }
+.seller-editor-footer .form-error { max-height:170px; overflow:auto; width:100%; }
+.seller-editor-footer .form-error button { text-align:left; text-decoration:underline; }
+.seller-editor-footer .admin-message { width:100%; margin:0; }
+.seller-full-editor .seller-editor-footer { display:flex; flex-wrap:wrap; color:var(--ink); box-shadow:0 -4px 16px #00000005; }
+.seller-full-editor .seller-editor-actions { display:flex; align-items:center; gap:10px; width:100%; min-width:0; }
+.seller-full-editor .seller-editor-actions > .button { width:auto; min-width:0; min-height:44px; flex:0 0 auto; padding-inline:20px; white-space:nowrap; border-radius:6px; }
+.seller-full-editor .seller-editor-actions > .seller-editor-preview { margin-right:auto; padding-inline:12px; background:transparent; border-color:transparent; color:var(--ink); font-weight:600; }
+.seller-full-editor .seller-editor-preview:hover:not(:disabled) { background:#f4f3ef; }
+.unsaved-listing { width:100%; padding:12px; background:#fff7e8; border:1px solid #e8c788; border-radius:6px; }
+.unsaved-listing button { margin-right:16px; text-decoration:underline; }
+.listing-additional-details { margin:14px 0; }
+.listing-additional-details[open] { display:grid; gap:14px; }
+.listing-field-error { display:block; color:#9f2525; font-size:.85rem; margin-top:5px; }
+.admin-form [aria-invalid=true] { border-color:#b33a3a; outline-color:#b33a3a; }
+.inventory-workspace .form-error { white-space:normal; max-width:340px; }
+@media(max-width:800px) {
+  .inventory-search label,.inventory-search label:first-child { width:100%; min-width:0; }
+  .inventory-workspace .store-page-heading { align-items:start; }
+  .inventory-workspace .store-inventory-meta { flex-wrap:wrap; gap:6px; }
+  .seller-workspace .inventory-workspace .store-inventory-panel table,.seller-workspace .inventory-workspace .store-inventory-panel tbody { display:block; }
+  .seller-workspace .inventory-workspace .store-inventory-panel thead { display:none; }
+  .seller-workspace .inventory-workspace .store-inventory-panel tr { display:grid; grid-template-columns:32px 1fr; gap:12px; padding:16px 0; border-bottom:1px solid #dfe5e2; }
+  .seller-workspace .inventory-workspace .store-inventory-panel td { display:block; border:0; padding:0 8px; width:auto; }
+  .seller-workspace .inventory-workspace .store-inventory-panel td:not(:first-child) { grid-column:2; }
+  .seller-workspace .inventory-workspace .store-inventory-panel td:first-child { grid-row:1; }
+  .seller-workspace .inventory-workspace .store-inventory-panel .seller-product-cell { display:flex; }
+  .seller-workspace .inventory-workspace .store-inventory-panel td[data-label]::before { content:attr(data-label) ": "; font-size:.8rem; color:#5b6861; }
+}
+@media(max-width:540px) {
+  .seller-full-editor .seller-editor-actions { gap:8px; }
+  .seller-full-editor .seller-editor-actions > .button { padding-inline:12px; font-size:12px; }
+  .seller-full-editor .seller-editor-actions > .seller-editor-preview { padding-inline:6px; }
+}
